@@ -114,13 +114,18 @@ bundled engine (shipped in `Contents/Resources/stoker`) into
   (`DS.textPrimary`/`textSecondary`/`textMuted`/`hairline`, which wrap `NSColor` label colors) for
   all text/surfaces. Never hardcode `Color.white…` or raw `.secondary`/`.tertiary` — they don't
   adapt across appearances.
-- **Version bumps touch 5 sites** (keep in sync): `scripts/package-release.sh:5` (`VERSION` default,
-  overridable via `VERSION=` env), `app/StokerMenuBar/build-app.sh:75` (`CFBundleShortVersionString`
-  in the inline Info.plist — `CFBundleVersion` "2" at :77 is a separate build number),
-  `app/StokerMenuBar/Sources/StokerMenuBar/MainView.swift:276` (UI fallback string),
-  `bin/activate-ai-window.sh:480` (MCP `clientInfo` version sent to the model), and the new
-  `CHANGELOG.md` release header. `package-release.sh --check` validates file presence only — it does
-  **not** catch a mismatched version across these sites.
+- **Version bumps touch 7 sites** (keep in sync). `package-release.sh --check` only checks file
+  presence — it does **not** catch a version mismatch, so after editing always `grep -rn` the old
+  version to confirm none remain. Line numbers below drift; treat them as hints and anchor on the
+  identifier:
+  1. `scripts/package-release.sh:5` — `VERSION` default (overridable via `VERSION=` env).
+  2. `app/StokerMenuBar/build-app.sh` (~:123) — `CFBundleShortVersionString` in the inline Info.plist
+     (the `CFBundleVersion` build number just below, ~:125, is a *separate* integer — bump it too).
+  3. `app/StokerMenuBar/Sources/StokerMenuBar/MainView.swift` (~:302) — the `?? "…"` UI version fallback.
+  4. `bin/activate-ai-window.sh` (~:484) — the MCP `clientInfo` `version:` sent to the model.
+  5. `README.md:17` — the `version-…` shields.io badge.
+  6. `README_CN.md:17` — the same version badge.
+  7. `CHANGELOG.md` — add the new release header.
 - **Rename migration:** `install-launchd.sh` defaults `LEGACY_LABELS=com.activation-timer.ai-window`
   and boots out/removes those agents at install/uninstall. A stale
   `launchd/com.activation-timer.ai-window.plist` remains in the repo but is referenced by nothing.
