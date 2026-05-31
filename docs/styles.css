@@ -411,43 +411,41 @@ html[lang="en"] [data-lang-en], html[lang="zh"] [data-lang-zh] { color: var(--em
 /* ---------- Footer ---------- */
 .footer {
   border-top: 1px solid var(--hairline);
-  padding-block: clamp(52px, 7vw, 78px) 34px;
-  background: color-mix(in srgb, var(--bg) 88%, var(--bg-2));
+  padding-block: clamp(56px, 7vw, 84px) 32px;
+  background: var(--bg);
 }
 .footer__top {
   display: grid;
-  justify-items: center;
-  gap: clamp(28px, 4vw, 38px);
-  text-align: center;
+  grid-template-columns: minmax(240px, 1fr) minmax(520px, 1.65fr);
+  align-items: start;
+  gap: clamp(48px, 8vw, 104px);
 }
 .footer__brand {
   display: grid;
-  justify-items: center;
-  max-width: 420px;
+  justify-items: start;
+  max-width: 320px;
 }
-.footer__brand .brand { justify-content: center; }
+.footer__brand .brand { justify-content: flex-start; }
 .footer__brand .brand__name { font-size: 18px; }
 .footer__tagline {
   margin-top: 14px;
-  max-width: 36ch;
+  max-width: 30ch;
   color: var(--text-2);
   font-size: 14.5px;
   line-height: 1.7;
 }
 .footer__cols {
-  width: min(100%, 760px);
+  width: 100%;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: clamp(18px, 4vw, 38px);
-  padding-block: 26px;
-  border-block: 1px solid var(--hairline);
+  gap: clamp(28px, 4.5vw, 60px);
 }
 .footer__col {
   min-width: 0;
   display: grid;
-  justify-items: center;
+  justify-items: start;
   align-content: start;
-  gap: 9px;
+  gap: 10px;
 }
 .footer__col h4 {
   margin: 0 0 2px;
@@ -461,23 +459,47 @@ html[lang="en"] [data-lang-en], html[lang="zh"] [data-lang-zh] { color: var(--em
   color: var(--text-2);
   font-size: 14.5px;
   line-height: 1.35;
-  text-align: center;
+  text-align: left;
   transition: color var(--dur-fast);
 }
 .footer__col a:hover { color: var(--ember-ink); }
 .footer__bottom {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 16px;
+  justify-content: space-between;
+  gap: 20px;
   flex-wrap: wrap;
-  margin-top: 24px;
+  margin-top: clamp(42px, 6vw, 64px);
+  padding-top: 24px;
+  border-top: 1px solid var(--hairline);
 }
 .footer__legal {
   color: var(--text-3);
   font-size: 13px;
   line-height: 1.6;
-  text-align: center;
+  text-align: left;
+}
+.footer__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.footer__social {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  color: var(--text-3);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 999px;
+  transition: color var(--dur-fast), border-color var(--dur-fast), background var(--dur-fast);
+}
+.footer__social:hover {
+  color: var(--text-1);
+  border-color: var(--ember);
+  background: var(--elevated);
 }
 
 /* ---------- Reveal animation (progressive enhancement) ----------
@@ -505,12 +527,30 @@ html[lang="zh"] .download__outro { letter-spacing: 0; }
   .bento { grid-template-columns: repeat(4, 1fr); }
   .bento__cell, .bento__cell--wide { grid-column: span 2; }
   .steps { grid-template-columns: repeat(2, 1fr); }
+  .footer__top {
+    grid-template-columns: 1fr;
+    gap: 34px;
+  }
+  .footer__brand {
+    max-width: 420px;
+  }
+  .footer__cols {
+    max-width: 720px;
+  }
 }
 @media (max-width: 680px) {
   .grid--3, .grid--2 { grid-template-columns: 1fr; }
   .bento { grid-template-columns: 1fr; }
   .bento__cell, .bento__cell--wide { grid-column: span 1; }
   .steps { grid-template-columns: 1fr; }
+  .footer__cols {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 28px 36px;
+  }
+  .footer__bottom {
+    align-items: flex-start;
+    flex-direction: column;
+  }
   .window--hero { transform: none; }
 }
 @media (max-width: 520px) {
@@ -586,25 +626,27 @@ html[lang="zh"] .download__outro { letter-spacing: 0; }
     padding-block: 46px 28px;
   }
   .footer__top {
-    gap: 26px;
+    gap: 30px;
   }
   .footer__cols {
-    gap: 12px;
-    padding-block: 22px;
+    gap: 26px 24px;
   }
   .footer__col {
-    gap: 8px;
+    gap: 9px;
   }
   .footer__col h4 {
-    font-size: 10.5px;
+    font-size: 11px;
     letter-spacing: .12em;
   }
   .footer__col a {
-    font-size: 13.5px;
+    font-size: 14px;
   }
   .footer__bottom {
-    margin-top: 22px;
+    margin-top: 32px;
     gap: 14px;
+  }
+  .footer__legal {
+    max-width: 34ch;
   }
 }
 @media (max-width: 360px) {
