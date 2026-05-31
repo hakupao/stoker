@@ -165,6 +165,14 @@
       var ak = altNodes[a].getAttribute("data-shot") === "settings" ? "alt.settings" : "alt.activity";
       if (dict[ak] != null) altNodes[a].setAttribute("alt", dict[ak]);
     }
+    // Bilingual site → bilingual docs: point the footer "Documentation" link at the
+    // matching README (中文 README when in Chinese).
+    var docLink = document.querySelector("[data-doc-link]");
+    if (docLink) {
+      docLink.setAttribute("href", lang === "zh"
+        ? "https://github.com/hakupao/stoker/blob/main/README_CN.md"
+        : "https://github.com/hakupao/stoker/blob/main/README.md");
+    }
     document.title = lang === "zh"
       ? "Stoker — 让 Claude Code 与 Codex 的用量窗口长明"
       : "Stoker — Keep your Claude Code & Codex usage windows lit";

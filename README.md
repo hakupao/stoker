@@ -15,13 +15,14 @@ fixed times, then records activation logs, per-run token usage, and quota status
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/macOS-14%2B-000000?logo=apple&logoColor=white)](#requirements)
 [![Version](https://img.shields.io/badge/version-0.2.3-E36E43)](CHANGELOG.md)
+[![Website](https://img.shields.io/badge/Website-hakupao.github.io%2Fstoker-E36E43?logo=githubpages&logoColor=white)](https://hakupao.github.io/stoker/)
 
 ![Bash](https://img.shields.io/badge/Bash-4EAA25?logo=gnubash&logoColor=white)
 ![Swift 6](https://img.shields.io/badge/Swift_6-F05138?logo=swift&logoColor=white)
 ![SwiftUI](https://img.shields.io/badge/SwiftUI-2396F3?logo=swift&logoColor=white)
 ![launchd](https://img.shields.io/badge/launchd-scheduler-555555)
 
-[Features](#features) · [Quick Start](#quick-start) · [Menu Bar App](#menu-bar-app) · [How It Works](#how-it-works) · [Cost](#cost-optimization) · [Configuration](#configuration)
+[Website](https://hakupao.github.io/stoker/) · [Features](#features) · [Quick Start](#quick-start) · [Menu Bar App](#menu-bar-app) · [How It Works](#how-it-works) · [Cost](#cost-optimization) · [Configuration](#configuration) · [Download](https://github.com/hakupao/stoker/releases/latest)
 
 <br/>
 
