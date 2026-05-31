@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="140" viewBox="0 0 520 140" role="img" aria-label="Stoker logo lockup">
+  <rect width="520" height="140" rx="28" fill="#F3EEE6"/>
+  <g transform="translate(26 6)">
+  <defs>
+    <linearGradient id="ember" x1="36" y1="30" x2="92" y2="98" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFB15E"/>
+      <stop offset="1" stop-color="#E36E43"/>
+    </linearGradient>
+  </defs>
+  <rect x="10" y="10" width="108" height="108" rx="30" fill="#171716"/>
+  <path d="M31 76a38 38 0 0 1 55-45" fill="none" stroke="#B97A54" stroke-width="7" stroke-linecap="round"/>
+  <path d="M87 33a38 38 0 0 1 15 43" fill="none" stroke="#9EB392" stroke-width="9" stroke-linecap="round"/>
+  <path d="M42 71c14-4 19-14 22-28 9 14 22 22 39 22-12 10-20 18-24 35-9-14-20-22-37-29z" fill="#0E0F0D" stroke="#E36E43" stroke-width="2" stroke-linejoin="round"/>
+  <circle cx="64" cy="70" r="16" fill="url(#ember)"/>
+  <circle cx="93" cy="72" r="5" fill="#EAF0E9"/>
+</g>
+  <text x="168" y="87" fill="#171716" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', Inter, Helvetica, Arial, sans-serif" font-size="70" font-weight="650" letter-spacing="0">Stoker</text>
+  <circle cx="468" cy="72" r="7" fill="#E36E43"/>
+</svg>

@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Stoker — Keep your Claude Code & Codex usage windows lit</title>
+<meta name="description" content="A tiny macOS launchd scheduler that sends low-cost Claude Code and Codex check-ins on a schedule you choose — then logs every run, token, and quota snapshot. Runs entirely on your Mac." />
+<meta name="theme-color" content="#16110D" media="(prefers-color-scheme: dark)" />
+<meta name="theme-color" content="#FAF8F6" media="(prefers-color-scheme: light)" />
+<link rel="icon" type="image/png" href="./assets/app-icon/stoker-app-icon-1024.png" />
+<link rel="apple-touch-icon" href="./assets/app-icon/stoker-app-icon-1024.png" />
+<link rel="canonical" href="https://hakupao.github.io/stoker/" />
+<!-- Open Graph / Twitter -->
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Stoker — Keep your Claude Code & Codex usage windows lit" />
+<meta property="og:description" content="A tiny macOS launchd scheduler for Claude Code & Codex. Schedule low-cost check-ins, log usage and quota, all on your Mac." />
+<meta property="og:image" content="./assets/app-icon/stoker-app-icon-1024.png" />
+<meta property="og:url" content="https://hakupao.github.io/stoker/" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Stoker — Keep your Claude Code & Codex usage windows lit" />
+<meta name="twitter:description" content="A tiny macOS launchd scheduler for Claude Code & Codex. Schedule check-ins, log usage and quota, all on your Mac." />
+<meta name="twitter:image" content="./assets/app-icon/stoker-app-icon-1024.png" />
+<!-- No-flash theme + lang bootstrap (+ progressive-enhancement flag for scroll reveal) -->
+<script>
+(function () {
+  var d = document.documentElement;
+  try {
+    var t = localStorage.getItem('stoker-theme');
+    if (t === 'light' || t === 'dark') d.setAttribute('data-theme', t);
+    var l = localStorage.getItem('stoker-lang');
+    if (!l) l = (navigator.language || 'en').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en';
+    d.setAttribute('lang', l);
+  } catch (e) {}
+  // Only hide-then-reveal when we can actually animate; otherwise content stays visible.
+  try {
+    if ('IntersectionObserver' in window &&
+        !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)) {
+      d.classList.add('js-reveal');
+    }
+  } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+<a class="skip-link" href="#main" data-i18n="a11y.skip">Skip to content</a>
+
+<!-- ============ NAV ============ -->
+<header class="nav" id="nav">
+  <div class="nav__inner">
+    <a class="brand" href="#top" aria-label="Stoker home">
+      <span class="brand__mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="28" height="28" fill="none">
+          <circle cx="16" cy="16" r="13.2" stroke="currentColor" stroke-width="1.6" opacity="0.55"/>
+          <path d="M16 4.2 A11.8 11.8 0 0 1 27.8 16" stroke="var(--ember)" stroke-width="2.2" stroke-linecap="round"/>
+          <circle cx="16" cy="16" r="4.4" fill="var(--ember)"/>
+          <circle cx="16" cy="16" r="7.6" stroke="currentColor" stroke-width="1.4" opacity="0.4"/>
+        </svg>
+      </span>
+      <span class="brand__name">Stoker</span>
+    </a>
+
+    <nav class="nav__links" aria-label="Primary">
+      <a href="#features" data-i18n="nav.features">Features</a>
+      <a href="#how" data-i18n="nav.how">How it works</a>
+      <a href="#cost" data-i18n="nav.cost">Cost</a>
+      <a href="#faq" data-i18n="nav.faq">FAQ</a>
+    </nav>
+
+    <div class="nav__actions">
+      <button class="lang-toggle" id="langToggle" type="button" aria-label="Switch language">
+        <span data-lang-en>EN</span><span class="sep">·</span><span data-lang-zh>中</span>
+      </button>
+      <button class="icon-btn" id="themeToggle" type="button" aria-label="Toggle theme">
+        <svg class="i-sun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.1 5.1l1.6 1.6M17.3 17.3l1.6 1.6M18.9 5.1l-1.6 1.6M6.7 17.3l-1.6 1.6"/></svg>
+        <svg class="i-moon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.2A8 8 0 1 1 9.8 4 6.4 6.4 0 0 0 20 14.2z"/></svg>
+      </button>
+      <a class="icon-btn" href="https://github.com/hakupao/stoker" target="_blank" rel="noopener" aria-label="GitHub repository">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 1.5a10.5 10.5 0 0 0-3.32 20.46c.52.1.71-.23.71-.5v-1.76c-2.92.63-3.54-1.4-3.54-1.4-.48-1.22-1.17-1.55-1.17-1.55-.95-.65.07-.64.07-.64 1.06.07 1.61 1.09 1.61 1.09.94 1.6 2.46 1.14 3.06.87.1-.68.37-1.14.67-1.4-2.33-.27-4.78-1.17-4.78-5.2 0-1.15.41-2.09 1.08-2.83-.11-.27-.47-1.34.1-2.8 0 0 .88-.28 2.88 1.08a10 10 0 0 1 5.24 0c2-1.36 2.88-1.08 2.88-1.08.57 1.46.21 2.53.1 2.8.68.74 1.08 1.68 1.08 2.83 0 4.04-2.46 4.93-4.8 5.19.38.33.71.97.71 1.96v2.9c0 .28.19.61.72.5A10.5 10.5 0 0 0 12 1.5z"/></svg>
+      </a>
+      <a class="btn btn--primary nav__cta" href="https://github.com/hakupao/stoker/releases" target="_blank" rel="noopener" data-i18n="nav.download">Download</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+<span id="top"></span>
+
+<!-- ============ HERO ============ -->
+<section class="hero" id="hero">
+  <div class="hero__bg" aria-hidden="true">
+    <div class="hero__glow"></div>
+    <canvas class="hero__sparks" id="sparks"></canvas>
+    <div class="hero__noise"></div>
+  </div>
+
+  <div class="hero__inner">
+    <p class="eyebrow reveal"><span class="eyebrow__dot"></span><span data-i18n="hero.eyebrow">Keep the fire lit.</span></p>
+    <h1 class="hero__title reveal" data-i18n="hero.title">Keep your Claude Code &amp; Codex usage windows lit.</h1>
+    <p class="hero__sub reveal" data-i18n="hero.sub">A tiny macOS launchd scheduler that sends low-cost check-ins at the times you choose — then logs every run, token, and quota snapshot. Runs entirely on your Mac.</p>
+
+    <div class="hero__cta reveal">
+      <a class="btn btn--primary btn--lg magnetic" href="https://github.com/hakupao/stoker/releases" target="_blank" rel="noopener" data-i18n="hero.cta_primary">Download for macOS</a>
+      <a class="btn btn--ghost btn--lg" href="https://github.com/hakupao/stoker" target="_blank" rel="noopener" data-i18n="hero.cta_secondary">View on GitHub</a>
+    </div>
+    <p class="hero__meta reveal" data-i18n="hero.meta">v0.2.3 · macOS 14+ · Free &amp; open source (MIT)</p>
+
+    <div class="schedule reveal">
+      <span class="schedule__label" data-i18n="hero.schedule_label">Default schedule</span>
+      <div class="schedule__track" aria-hidden="true">
+        <div class="schedule__marquee">
+          <span>07:00</span><i>·</i><span>12:00</span><i>·</i><span>17:00</span><i>·</i><span>22:00</span><i>·</i>
+          <span>07:00</span><i>·</i><span>12:00</span><i>·</i><span>17:00</span><i>·</i><span>22:00</span><i>·</i>
+        </div>
+      </div>
+      <span class="sr-only" data-i18n="hero.schedule_sr">Default schedule: 07:00, 12:00, 17:00 and 22:00 — fully customizable.</span>
+    </div>
+
+    <figure class="hero__shot reveal">
+      <div class="window window--hero">
+        <div class="window__bar"><span class="dot dot--r"></span><span class="dot dot--y"></span><span class="dot dot--g"></span></div>
+        <img id="heroShot" class="window__img" width="760" height="720" alt="Stoker activity dashboard" data-alt-i18n="alt.activity" loading="eager" decoding="async" src="./images/activity-en.png" data-shot="activity" />
+      </div>
+    </figure>
+  </div>
+</section>
+
+<!-- ============ PROBLEM ============ -->
+<section class="section problem" id="problem">
+  <div class="container">
+    <h2 class="section__title reveal" data-i18n="problem.title">Usage windows reset on a clock — not on your schedule.</h2>
+    <p class="section__sub reveal" data-i18n="problem.sub">If the first prompt of a window lands late, the whole window shifts late. Stoker fires a tiny check-in at fixed times so your windows open when you actually start working.</p>
+    <div class="grid grid--3">
+      <article class="card reveal" style="--i:0">
+        <h3 class="card__t" data-i18n="problem.c1.t">Fixed start times</h3>
+        <p class="card__d" data-i18n="problem.c1.d">Pick the hours that match your day; each time fires independently.</p>
+      </article>
+      <article class="card reveal" style="--i:1">
+        <h3 class="card__t" data-i18n="problem.c2.t">Quota you can see</h3>
+        <p class="card__d" data-i18n="problem.c2.d">Five-hour and weekly snapshots recorded after every run.</p>
+      </article>
+      <article class="card reveal" style="--i:2">
+        <h3 class="card__t" data-i18n="problem.c3.t">Skips when exhausted</h3>
+        <p class="card__d" data-i18n="problem.c3.d">Quota preflight skips a tool gracefully instead of wasting a call.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ============ HOW IT WORKS ============ -->
+<section class="section how" id="how">
+  <div class="container">
+    <h2 class="section__title reveal" data-i18n="how.title">How it works</h2>
+    <p class="section__sub reveal" data-i18n="how.sub">Every run is the same calm, four-beat loop.</p>
+    <ol class="steps">
+      <li class="step reveal" style="--i:0"><span class="step__n">1</span><h3 class="step__t" data-i18n="how.s1.t">Load &amp; lock</h3><p class="step__d" data-i18n="how.s1.d">Reads .env, then takes a lock so concurrent triggers skip safely.</p></li>
+      <li class="step reveal" style="--i:1"><span class="step__n">2</span><h3 class="step__t" data-i18n="how.s2.t">Quota preflight</h3><p class="step__d" data-i18n="how.s2.d">Checks quota before sending. Exhausted tools are skipped and logged.</p></li>
+      <li class="step reveal" style="--i:2"><span class="step__n">3</span><h3 class="step__t" data-i18n="how.s3.t">Send a tiny prompt</h3><p class="step__d" data-i18n="how.s3.d">Asks each CLI to reply READY — no files read, no tools run, nothing modified.</p></li>
+      <li class="step reveal" style="--i:3"><span class="step__n">4</span><h3 class="step__t" data-i18n="how.s4.t">Record &amp; release</h3><p class="step__d" data-i18n="how.s4.d">Appends usage + quota snapshots, then releases the lock for next time.</p></li>
+    </ol>
+    <div class="terminal reveal" role="img" aria-label="Example command: ./install.sh">
+      <div class="terminal__bar"><span class="dot dot--r"></span><span class="dot dot--y"></span><span class="dot dot--g"></span><span class="terminal__title">zsh — stoker</span></div>
+      <pre class="terminal__body"><code><span class="c-com"># clone, configure, and light the pilot</span>
+<span class="c-pmt">$</span> git clone https://github.com/hakupao/stoker.git
+<span class="c-pmt">$</span> cd stoker &amp;&amp; cp .env.example .env
+<span class="c-pmt">$</span> ./install.sh check
+<span class="c-pmt">$</span> ./install.sh dry-run   <span class="c-com"># shows commands, sends nothing</span>
+<span class="c-pmt">$</span> ./install.sh           <span class="c-ok">✓ schedule loaded · next run 12:00</span></code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FEATURES (BENTO) ============ -->
+<section class="section features" id="features">
+  <div class="container">
+    <h2 class="section__title reveal" data-i18n="feat.title">Small tool, fully accountable.</h2>
+    <div class="bento">
+      <article class="bento__cell bento__cell--wide reveal" style="--i:0">
+        <span class="ficon">
+          <svg viewBox="0 0 28 28" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="14" cy="14" r="10.5"/><path d="M14 8.5V14l3.6 2.2"/></svg>
+          <i class="ficon__dot"></i>
+        </span>
+        <h3 class="bento__t" data-i18n="feat.f1.t">Scheduled activation</h3>
+        <p class="bento__d" data-i18n="feat.f1.d">Triggers Claude Code and Codex through macOS launchd at the times you set.</p>
+      </article>
+      <article class="bento__cell reveal" style="--i:1">
+        <span class="ficon">
+          <svg viewBox="0 0 28 28" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 22c0-7 5.5-13 13.5-15C16 14 11 18 5 18.5z"/><path d="M5 22c2.5-2.5 5-4 8-5"/></svg>
+          <i class="ficon__dot"></i>
+        </span>
+        <h3 class="bento__t" data-i18n="feat.f2.t">Minimal, safe prompt</h3>
+        <p class="bento__d" data-i18n="feat.f2.d">Tells both CLIs not to inspect files, run tools, or modify anything.</p>
+      </article>
+      <article class="bento__cell reveal" style="--i:2">
+        <span class="ficon">
+          <svg viewBox="0 0 28 28" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4.5h10l4 4v15H7z"/><path d="M16.5 4.5V9H21M10 13h8M10 17h8M10 9h3"/></svg>
+          <i class="ficon__dot"></i>
+        </span>
+        <h3 class="bento__t" data-i18n="feat.f3.t">Readable run history</h3>
+        <p class="bento__d" data-i18n="feat.f3.d">Every activation in plain text at logs/activation.log.</p>
+      </article>
+      <article class="bento__cell reveal" style="--i:3">
+        <span class="ficon">
+          <svg viewBox="0 0 28 28" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 23h20"/><rect x="6" y="13" width="4" height="8" rx="1"/><rect x="12" y="8" width="4" height="13" rx="1"/><rect x="18" y="16" width="4" height="5" rx="1"/></svg>
+          <i class="ficon__dot"></i>
+        </span>
+        <h3 class="bento__t" data-i18n="feat.f4.t">Per-run usage records</h3>
+        <p class="bento__d" data-i18n="feat.f4.d">Structured token and cost rows in logs/usage.jsonl.</p>
+      </article>
+      <article class="bento__cell reveal" style="--i:4">
+        <span class="ficon">
+          <svg viewBox="0 0 28 28" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="8.5" width="18" height="11" rx="2.4"/><path d="M21.5 12.5h1.6a1 1 0 0 1 1 1v1a1 1 0 0 1-1 1h-1.6"/><path d="M7 14h7"/></svg>
+          <i class="ficon__dot"></i>
+        </span>
+        <h3 class="bento__t" data-i18n="feat.f5.t">Quota snapshots</h3>
+        <p class="bento__d" data-i18n="feat.f5.d">Five-hour and weekly quota status in logs/status.jsonl.</p>
+      </article>
+      <article class="bento__cell reveal" style="--i:5">
+        <span class="ficon">
+          <svg viewBox="0 0 28 28" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3.5" width="10" height="21" rx="5"/><circle cx="14" cy="9" r="2.2"/><circle cx="14" cy="19" r="2.2"/></svg>
+          <i class="ficon__dot"></i>
+        </span>
+        <h3 class="bento__t" data-i18n="feat.f6.t">Quota preflight</h3>
+        <p class="bento__d" data-i18n="feat.f6.d">Skips activation gracefully when a known quota is exhausted.</p>
+      </article>
+      <article class="bento__cell bento__cell--wide reveal" style="--i:6">
+        <span class="ficon">
+          <svg viewBox="0 0 28 28" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8h11M21 8h2M5 20h2M12 20h11"/><circle cx="18" cy="8" r="2.6"/><circle cx="9" cy="20" r="2.6"/></svg>
+          <i class="ficon__dot"></i>
+        </span>
+        <h3 class="bento__t" data-i18n="feat.f7.t">Clone-friendly config</h3>
+        <p class="bento__d" data-i18n="feat.f7.d">Schedule, tools, prompts, timeouts and paths — all in one .env.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ============ COST ============ -->
+<section class="section cost" id="cost">
+  <div class="container container--narrow">
+    <h2 class="section__title reveal" data-i18n="cost.title">Honest about cost. About a tenth of a cent.</h2>
+    <p class="section__sub reveal" data-i18n="cost.sub">Stoker sends real prompts, so it uses real quota. Here is exactly how much.</p>
+    <div class="cost__rows reveal">
+      <div class="cost__row">
+        <span class="cost__tool"><b style="--series:var(--series-claude)"></b>Claude</span>
+        <span class="cost__val mono" data-i18n="cost.claude">~170 input tokens · ≈ $0.001 per activation</span>
+      </div>
+      <div class="cost__row">
+        <span class="cost__tool"><b style="--series:var(--series-codex)"></b>Codex</span>
+        <span class="cost__val mono" data-i18n="cost.codex">~22K input tokens per activation (−31% optimized)</span>
+      </div>
+    </div>
+    <p class="cost__month reveal" data-i18n="cost.month">≈ $0.16 / month for Claude at 4 activations a day.</p>
+    <details class="disclose reveal">
+      <summary data-i18n="cost.note">The bottleneck is the system prompt each CLI injects — Stoker keeps its own prompt under ~300 tokens.</summary>
+    </details>
+  </div>
+</section>
+
+<!-- ============ SCREENSHOTS ============ -->
+<section class="section shots" id="shots">
+  <div class="container">
+    <h2 class="section__title reveal" data-i18n="shots.title">Built to be watched, not babysat.</h2>
+    <p class="section__sub reveal" data-i18n="shots.sub">A native menu bar app over the same engine — bilingual, light or dark.</p>
+    <div class="tabs reveal" role="tablist" aria-label="Screenshots">
+      <button class="tab is-active" role="tab" aria-selected="true" data-tab="activity" data-i18n="shots.tab_activity">Activity</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="settings" data-i18n="shots.tab_settings">Settings</button>
+    </div>
+    <figure class="shots__frame reveal">
+      <div class="window window--shot">
+        <div class="window__bar"><span class="dot dot--r"></span><span class="dot dot--y"></span><span class="dot dot--g"></span></div>
+        <img id="tabShot" class="window__img" width="760" height="720" alt="Stoker menu bar app" data-alt-i18n="alt.activity" loading="lazy" decoding="async" src="./images/activity-en.png" data-shot="activity" />
+      </div>
+    </figure>
+  </div>
+</section>
+
+<!-- ============ TRUST ============ -->
+<section class="section trust" id="trust">
+  <div class="container container--narrow">
+    <div class="trust__badges reveal">
+      <span class="badge"><svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2.5 3.5 5.2v4.3c0 4 2.7 6.6 6.5 8 3.8-1.4 6.5-4 6.5-8V5.2z"/></svg><span data-i18n="trust.b1">Independent &amp; unofficial</span></span>
+      <span class="badge"><svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="8.5" width="13" height="9" rx="2"/><path d="M6.5 8.5V6a3.5 3.5 0 0 1 7 0v2.5"/></svg><span data-i18n="trust.b2">100% local — no data sent to the author</span></span>
+      <span class="badge"><svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 4h5l4 4v8a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 4.5 16V5.5A1.5 1.5 0 0 1 6 4z"/><path d="M8 11l1.6 1.6L13 9"/></svg><span data-i18n="trust.b3">Open source · MIT</span></span>
+    </div>
+    <p class="trust__note reveal" data-i18n="trust.note">Not affiliated with, endorsed, or sponsored by Anthropic, OpenAI, or Apple. Stoker uses your real quota; you are responsible for complying with each provider's terms.</p>
+  </div>
+</section>
+
+<!-- ============ FAQ ============ -->
+<section class="section faq" id="faq">
+  <div class="container container--narrow">
+    <h2 class="section__title reveal" data-i18n="faq.title">Questions, answered plainly.</h2>
+    <div class="faq__list reveal">
+      <details class="qa" open><summary data-i18n="faq.q1">How much does it cost to run?</summary><p data-i18n="faq.a1">About $0.001 per Claude activation (~170 tokens). Roughly $0.16/month at four runs a day. Codex uses your plan quota.</p></details>
+      <details class="qa"><summary data-i18n="faq.q2">Does it consume my quota?</summary><p data-i18n="faq.a2">Yes — it sends real prompts. That is the point. Quota preflight skips a tool when its quota is already exhausted.</p></details>
+      <details class="qa"><summary data-i18n="faq.q3">Is it safe? Does it touch my projects?</summary><p data-i18n="faq.a3">No. It runs in its own folder, sends a tiny "reply READY" prompt, and never reads or modifies your real projects. dry-run and quota send nothing.</p></details>
+      <details class="qa"><summary data-i18n="faq.q4">Is this official?</summary><p data-i18n="faq.a4">No. Stoker is an independent open-source project, not affiliated with Anthropic, OpenAI, or Apple. You are responsible for following their terms.</p></details>
+      <details class="qa"><summary data-i18n="faq.q5">How do I uninstall?</summary><p data-i18n="faq.a5">Run ./install.sh uninstall (or use the menu bar app) to unload and remove the LaunchAgent.</p></details>
+    </div>
+  </div>
+</section>
+
+<!-- ============ DOWNLOAD ============ -->
+<section class="section download" id="download">
+  <div class="download__glow" aria-hidden="true"></div>
+  <div class="container container--narrow">
+    <h2 class="section__title reveal" data-i18n="dl.title">Light the pilot.</h2>
+    <p class="section__sub reveal" data-i18n="dl.sub">Two ways to install — same scheduler underneath.</p>
+    <div class="grid grid--2 download__cards">
+      <article class="dlcard dlcard--feature reveal" style="--i:0">
+        <span class="dlcard__tag" data-i18n="dl.gui.t">Menu bar app</span>
+        <p class="dlcard__d" data-i18n="dl.gui.d">For most people. A GUI monitor + settings over the bundled engine.</p>
+        <a class="btn btn--primary magnetic" href="https://github.com/hakupao/stoker/releases" target="_blank" rel="noopener" data-i18n="dl.gui.btn">Download .dmg</a>
+        <p class="dlcard__note" data-i18n="dl.gui.note">Ad-hoc signed — first launch needs Right-click ▸ Open (or System Settings ▸ Privacy ▸ Open Anyway).</p>
+      </article>
+      <article class="dlcard reveal" style="--i:1">
+        <span class="dlcard__tag" data-i18n="dl.cli.t">CLI / launchd</span>
+        <p class="dlcard__d" data-i18n="dl.cli.d">For terminal users who want the lightest install and direct shell control.</p>
+        <pre class="dlcard__code mono"><code>git clone https://github.com/hakupao/stoker.git
+cd stoker &amp;&amp; cp .env.example .env
+./install.sh</code></pre>
+        <a class="btn btn--ghost" href="https://github.com/hakupao/stoker#quick-start" target="_blank" rel="noopener" data-i18n="dl.cli.btn">View install steps</a>
+      </article>
+    </div>
+    <p class="download__outro reveal" data-i18n="dl.outro">Keep the fire lit.</p>
+  </div>
+</section>
+</main>
+
+<!-- ============ FOOTER ============ -->
+<footer class="footer">
+  <div class="container">
+    <div class="footer__top">
+      <div class="footer__brand">
+        <a class="brand" href="#top" aria-label="Stoker home">
+          <span class="brand__mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" width="26" height="26" fill="none">
+              <circle cx="16" cy="16" r="13.2" stroke="currentColor" stroke-width="1.6" opacity="0.55"/>
+              <path d="M16 4.2 A11.8 11.8 0 0 1 27.8 16" stroke="var(--ember)" stroke-width="2.2" stroke-linecap="round"/>
+              <circle cx="16" cy="16" r="4.4" fill="var(--ember)"/>
+              <circle cx="16" cy="16" r="7.6" stroke="currentColor" stroke-width="1.4" opacity="0.4"/>
+            </svg>
+          </span>
+          <span class="brand__name">Stoker</span>
+        </a>
+        <p class="footer__tagline" data-i18n="footer.tagline">A quiet macOS utility that tends your AI usage windows.</p>
+      </div>
+      <nav class="footer__cols" aria-label="Footer">
+        <div class="footer__col">
+          <h4 data-i18n="footer.col_product">Product</h4>
+          <a href="#features" data-i18n="footer.link_features">Features</a>
+          <a href="#download" data-i18n="footer.link_download">Download</a>
+          <a href="https://github.com/hakupao/stoker/blob/main/CHANGELOG.md" target="_blank" rel="noopener" data-i18n="footer.link_changelog">Changelog</a>
+        </div>
+        <div class="footer__col">
+          <h4 data-i18n="footer.col_resources">Resources</h4>
+          <a href="https://github.com/hakupao/stoker/blob/main/README.md" target="_blank" rel="noopener" data-i18n="footer.link_readme">Documentation</a>
+          <a href="https://github.com/hakupao/stoker" target="_blank" rel="noopener" data-i18n="footer.link_source">Source code</a>
+          <a href="https://github.com/hakupao/stoker/issues" target="_blank" rel="noopener" data-i18n="footer.link_issues">Issues</a>
+        </div>
+        <div class="footer__col">
+          <h4 data-i18n="footer.col_legal">Legal</h4>
+          <a href="https://github.com/hakupao/stoker/blob/main/LICENSE" target="_blank" rel="noopener" data-i18n="footer.link_license">License (MIT)</a>
+          <a href="https://github.com/hakupao/stoker/blob/main/DISCLAIMER.md" target="_blank" rel="noopener" data-i18n="footer.link_disclaimer">Disclaimer</a>
+          <a href="https://github.com/hakupao/stoker/blob/main/SECURITY.md" target="_blank" rel="noopener" data-i18n="footer.link_security">Security</a>
+        </div>
+      </nav>
+    </div>
+    <div class="footer__bottom">
+      <p class="footer__legal" data-i18n="footer.disclaimer">Not affiliated with Anthropic, OpenAI, or Apple. © 2026 hakupao.</p>
+      <button class="lang-toggle lang-toggle--sm" id="langToggleFoot" type="button" aria-label="Switch language">
+        <span data-lang-en>EN</span><span class="sep">·</span><span data-lang-zh>中</span>
+      </button>
+    </div>
+  </div>
+</footer>
+
+<script src="./main.js" defer></script>
+</body>
+</html>

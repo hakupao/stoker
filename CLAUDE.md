@@ -114,7 +114,7 @@ bundled engine (shipped in `Contents/Resources/stoker`) into
   (`DS.textPrimary`/`textSecondary`/`textMuted`/`hairline`, which wrap `NSColor` label colors) for
   all text/surfaces. Never hardcode `Color.white…` or raw `.secondary`/`.tertiary` — they don't
   adapt across appearances.
-- **Version bumps touch 7 sites** (keep in sync). `package-release.sh --check` only checks file
+- **Version bumps touch 8 sites** (keep in sync). `package-release.sh --check` only checks file
   presence — it does **not** catch a version mismatch, so after editing always `grep -rn` the old
   version to confirm none remain. Line numbers below drift; treat them as hints and anchor on the
   identifier:
@@ -126,6 +126,11 @@ bundled engine (shipped in `Contents/Resources/stoker`) into
   5. `README.md:17` — the `version-…` shields.io badge.
   6. `README_CN.md:17` — the same version badge.
   7. `CHANGELOG.md` — add the new release header.
+  8. `docs/` landing page — the hardcoded `v0.2.x` appears in `docs/index.html` (the
+     `hero.meta` line) **and** `docs/main.js` (the `hero.meta` string in *both* the `en` and
+     `zh` i18n dicts, so 3 occurrences total). `grep -rn` the old version under `docs/` to
+     confirm none remain. (The GitHub Pages site is served from `/docs`; it is not part of
+     `validate.sh`.)
 - **Rename migration:** `install-launchd.sh` defaults `LEGACY_LABELS=com.activation-timer.ai-window`
   and boots out/removes those agents at install/uninstall. A stale
   `launchd/com.activation-timer.ai-window.plist` remains in the repo but is referenced by nothing.
