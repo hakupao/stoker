@@ -152,6 +152,22 @@ svg { display: block; }
   backdrop-filter: blur(14px) saturate(140%);
   border-bottom-color: var(--hairline);
 }
+/* The transparent nav overlays the ALWAYS-dark hero, but its text colors follow the
+   page theme — so in light mode the dark nav text vanishes on the dark hero. While the
+   nav is unscrolled (over the hero) force hero-light text; once .scrolled it gets a
+   solid themed background and reverts to the normal themed text colors. */
+.nav:not(.scrolled) .brand,
+.nav:not(.scrolled) .brand__mark,
+.nav:not(.scrolled) .brand__name { color: var(--hero-text-1); }
+.nav:not(.scrolled) .nav__links a,
+.nav:not(.scrolled) .icon-btn,
+.nav:not(.scrolled) .lang-toggle { color: var(--hero-text-2); }
+.nav:not(.scrolled) .nav__links a:hover,
+.nav:not(.scrolled) .icon-btn:hover { color: var(--hero-text-1); }
+.nav:not(.scrolled) .lang-toggle { border-color: var(--hero-hairline); }
+.nav:not(.scrolled) .icon-btn:hover { background: rgba(255, 255, 255, .08); border-color: var(--hero-hairline); }
+html[lang="en"] .nav:not(.scrolled) [data-lang-en],
+html[lang="zh"] .nav:not(.scrolled) [data-lang-zh] { color: var(--ember); }
 .nav__inner { width: 100%; max-width: var(--maxw); margin-inline: auto; padding-inline: var(--pad-x);
   display: flex; align-items: center; gap: 18px; }
 .brand { display: inline-flex; align-items: center; gap: 9px; color: var(--text-1); }
