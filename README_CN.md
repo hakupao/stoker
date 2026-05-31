@@ -22,7 +22,7 @@
 ![SwiftUI](https://img.shields.io/badge/SwiftUI-2396F3?logo=swift&logoColor=white)
 ![launchd](https://img.shields.io/badge/launchd-scheduler-555555)
 
-[功能](#功能) · [快速开始](#快速开始) · [菜单栏-app](#菜单栏-app) · [工作方式](#工作方式) · [成本优化](#成本优化) · [配置](#配置)
+[网站](https://hakupao.github.io/stoker/) · [功能](#功能) · [快速开始](#快速开始) · [菜单栏-app](#菜单栏-app) · [工作方式](#工作方式) · [成本优化](#成本优化) · [配置](#配置) · [下载](https://github.com/hakupao/stoker/releases/latest)
 
 <br/>
 
