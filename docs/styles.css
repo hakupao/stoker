@@ -298,6 +298,7 @@ html[lang="en"] [data-lang-en], html[lang="zh"] [data-lang-zh] { color: var(--em
 .grid { display: grid; gap: 18px; }
 .grid--3 { grid-template-columns: repeat(3, 1fr); }
 .grid--2 { grid-template-columns: repeat(2, 1fr); }
+.grid > *, .bento__cell, .step, .card, .dlcard, .terminal, .window { min-width: 0; }
 
 /* card */
 .card { background: var(--elevated); border-radius: var(--radius-md); padding: 24px;
@@ -454,6 +455,84 @@ html[lang="zh"] .download__outro { letter-spacing: 0; }
   .steps { grid-template-columns: 1fr; }
   .footer__top { flex-direction: column; gap: 32px; }
   .window--hero { transform: none; }
+}
+@media (max-width: 520px) {
+  :root {
+    --nav-h: 58px;
+    --pad-x: 18px;
+  }
+  .nav__inner { gap: 12px; }
+  .brand__name { font-size: 16px; }
+  .hero {
+    padding-top: calc(var(--nav-h) + 24px);
+    padding-bottom: 16px;
+  }
+  .hero__inner { max-width: 390px; }
+  .eyebrow {
+    margin-bottom: 14px;
+    padding: 5px 12px 5px 10px;
+    font-size: 12px;
+  }
+  .hero__title {
+    max-width: 14ch;
+    font-size: clamp(2.02rem, 8.5vw + .25rem, 2.35rem);
+    line-height: 1.07;
+  }
+  .hero__sub {
+    margin-top: 14px;
+    max-width: 33ch;
+    font-size: .98rem;
+    line-height: 1.52;
+  }
+  .hero__cta {
+    flex-wrap: nowrap;
+    gap: 9px;
+    margin-top: 20px;
+  }
+  .hero__cta .btn--lg {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 13px 10px;
+    font-size: 14px;
+  }
+  .hero__meta {
+    display: none;
+  }
+  .hero__shot {
+    max-width: min(74vw, 280px);
+    margin-top: 20px;
+  }
+  .hero .schedule { display: none; }
+  .window { border-radius: 18px; }
+  .section { padding-block: 56px; }
+  .problem { padding-top: 16px; }
+  html.js-reveal .problem .section__title.reveal {
+    opacity: 1;
+    transform: none;
+  }
+  .section .grid, .section .bento, .section .steps, .section .cost__rows, .section .tabs,
+  .section .shots__frame, .section .trust__badges, .section .faq__list, .section .download__cards {
+    margin-top: 28px;
+  }
+  .card, .bento__cell, .step, .dlcard { padding: 22px; }
+  .terminal__body {
+    padding: 16px;
+    font-size: 12.5px;
+  }
+  .shots__frame { max-width: min(100%, 350px); }
+  .dlcard__code {
+    max-width: 100%;
+    padding: 14px;
+    font-size: 12px;
+  }
+}
+@media (max-width: 360px) {
+  .hero { padding-top: calc(var(--nav-h) + 20px); }
+  .eyebrow { display: none; }
+  .hero__cta .btn--lg {
+    padding-inline: 6px;
+    font-size: 13px;
+  }
 }
 
 /* ---------- Reduced motion ---------- */
