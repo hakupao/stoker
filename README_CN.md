@@ -15,14 +15,14 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/macOS-14%2B-000000?logo=apple&logoColor=white)](#环境要求)
 [![Version](https://img.shields.io/badge/version-0.2.3-E36E43)](CHANGELOG.md)
-[![Website](https://img.shields.io/badge/Website-hakupao.github.io%2Fstoker-E36E43?logo=githubpages&logoColor=white)](https://hakupao.github.io/stoker/)
+[![Website](https://img.shields.io/badge/Website-stoker.bojiangz.com-E36E43?logo=githubpages&logoColor=white)](https://stoker.bojiangz.com/)
 
 ![Bash](https://img.shields.io/badge/Bash-4EAA25?logo=gnubash&logoColor=white)
 ![Swift 6](https://img.shields.io/badge/Swift_6-F05138?logo=swift&logoColor=white)
 ![SwiftUI](https://img.shields.io/badge/SwiftUI-2396F3?logo=swift&logoColor=white)
 ![launchd](https://img.shields.io/badge/launchd-scheduler-555555)
 
-[网站](https://hakupao.github.io/stoker/) · [功能](#功能) · [快速开始](#快速开始) · [菜单栏-app](#菜单栏-app) · [工作方式](#工作方式) · [成本优化](#成本优化) · [配置](#配置) · [下载](https://github.com/hakupao/stoker/releases/latest)
+[网站](https://stoker.bojiangz.com/) · [功能](#功能) · [快速开始](#快速开始) · [菜单栏-app](#菜单栏-app) · [工作方式](#工作方式) · [成本优化](#成本优化) · [配置](#配置) · [下载](https://github.com/hakupao/stoker/releases/latest)
 
 <br/>
 
