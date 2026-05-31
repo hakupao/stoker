@@ -409,18 +409,76 @@ html[lang="en"] [data-lang-en], html[lang="zh"] [data-lang-zh] { color: var(--em
   font-weight: 650; letter-spacing: -0.02em; color: var(--ember-ink); }
 
 /* ---------- Footer ---------- */
-.footer { border-top: 1px solid var(--hairline); padding-block: clamp(48px, 6vw, 72px) 32px; background: var(--bg); }
-.footer__top { display: flex; flex-wrap: wrap; gap: 40px; justify-content: space-between; }
-.footer__brand { max-width: 300px; }
-.footer__tagline { margin-top: 14px; color: var(--text-2); font-size: 14.5px; }
-.footer__cols { display: flex; gap: clamp(28px, 6vw, 72px); flex-wrap: wrap; }
-.footer__col { display: flex; flex-direction: column; gap: 10px; }
-.footer__col h4 { font-size: 12px; text-transform: uppercase; letter-spacing: .1em; color: var(--text-3); font-weight: 600; margin-bottom: 4px; }
-.footer__col a { color: var(--text-2); font-size: 14.5px; transition: color var(--dur-fast); }
+.footer {
+  border-top: 1px solid var(--hairline);
+  padding-block: clamp(52px, 7vw, 78px) 34px;
+  background: color-mix(in srgb, var(--bg) 88%, var(--bg-2));
+}
+.footer__top {
+  display: grid;
+  justify-items: center;
+  gap: clamp(28px, 4vw, 38px);
+  text-align: center;
+}
+.footer__brand {
+  display: grid;
+  justify-items: center;
+  max-width: 420px;
+}
+.footer__brand .brand { justify-content: center; }
+.footer__brand .brand__name { font-size: 18px; }
+.footer__tagline {
+  margin-top: 14px;
+  max-width: 36ch;
+  color: var(--text-2);
+  font-size: 14.5px;
+  line-height: 1.7;
+}
+.footer__cols {
+  width: min(100%, 760px);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(18px, 4vw, 38px);
+  padding-block: 26px;
+  border-block: 1px solid var(--hairline);
+}
+.footer__col {
+  min-width: 0;
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 9px;
+}
+.footer__col h4 {
+  margin: 0 0 2px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .13em;
+  color: var(--text-3);
+  font-weight: 650;
+}
+.footer__col a {
+  color: var(--text-2);
+  font-size: 14.5px;
+  line-height: 1.35;
+  text-align: center;
+  transition: color var(--dur-fast);
+}
 .footer__col a:hover { color: var(--ember-ink); }
-.footer__bottom { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
-  margin-top: 40px; padding-top: 24px; border-top: 1px solid var(--hairline); }
-.footer__legal { color: var(--text-3); font-size: 13px; }
+.footer__bottom {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+.footer__legal {
+  color: var(--text-3);
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+}
 
 /* ---------- Reveal animation (progressive enhancement) ----------
    Default: fully visible. Only when JS confirms IntersectionObserver + motion-OK
@@ -453,7 +511,6 @@ html[lang="zh"] .download__outro { letter-spacing: 0; }
   .bento { grid-template-columns: 1fr; }
   .bento__cell, .bento__cell--wide { grid-column: span 1; }
   .steps { grid-template-columns: 1fr; }
-  .footer__top { flex-direction: column; gap: 32px; }
   .window--hero { transform: none; }
 }
 @media (max-width: 520px) {
@@ -524,6 +581,30 @@ html[lang="zh"] .download__outro { letter-spacing: 0; }
     max-width: 100%;
     padding: 14px;
     font-size: 12px;
+  }
+  .footer {
+    padding-block: 46px 28px;
+  }
+  .footer__top {
+    gap: 26px;
+  }
+  .footer__cols {
+    gap: 12px;
+    padding-block: 22px;
+  }
+  .footer__col {
+    gap: 8px;
+  }
+  .footer__col h4 {
+    font-size: 10.5px;
+    letter-spacing: .12em;
+  }
+  .footer__col a {
+    font-size: 13.5px;
+  }
+  .footer__bottom {
+    margin-top: 22px;
+    gap: 14px;
   }
 }
 @media (max-width: 360px) {
