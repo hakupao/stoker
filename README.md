@@ -38,9 +38,9 @@ fixed times, then records activation logs, per-run token usage, and quota status
 ## About
 
 Stoker is a small Bash-based utility for people who want predictable Claude Code and Codex
-usage-window start times. It installs a macOS `launchd` agent that runs in a dedicated
-lightweight folder, asks each CLI to reply `READY`, and keeps the prompt intentionally small
-so it does not scan real projects or modify files.
+usage-window probes. It installs a macOS `launchd` agent that keeps prompts intentionally
+small: Claude replies `READY`, while Codex runs from a tiny `codex-probe/` folder and reads
+one simple file instead of scanning real projects or modifying files.
 
 The name is a nod to a *stoker* — the crew member who keeps a furnace fed so the fire never
 goes out. That is exactly what this tool does for your AI usage windows: it keeps them lit on
@@ -181,8 +181,10 @@ Copy `.env.example` to `.env` and adjust values:
 | `LABEL` | macOS LaunchAgent label | `com.stoker.ai-window` |
 | `SCHEDULE_TIMES` | Comma-separated `HH:MM` schedule entries; each time point is independent | `"07:00,12:00,17:00,22:00"` |
 | `ACTIVATION_TOOL` | `all`, `claude`, or `codex` | `all` |
-| `ACTIVATION_PROMPT` | Low-cost prompt sent to the CLIs | `Reply exactly READY...` |
+| `ACTIVATION_PROMPT` | Low-cost prompt sent to Claude | `Reply exactly READY...` |
 | `CODEX_MODEL` | Codex activation model; set `default` to let Codex CLI choose | `gpt-5.4-mini` |
+| `CODEX_WORK_DIR` | Tiny working directory used by Codex probe runs | `${ROOT_DIR}/codex-probe` |
+| `CODEX_ACTIVATION_PROMPT` | Read-only Codex probe prompt | `Read only ./probe.py...` |
 | `TIMEOUT_SECONDS` | Per-tool timeout | `120` |
 | `ENABLE_STATUS_SNAPSHOTS` | Record quota snapshots after real activation | `1` |
 | `ENABLE_QUOTA_PREFLIGHT` | Check quota before sending prompts | `1` |
@@ -320,10 +322,10 @@ script executes this sequence:
 3. **Quota preflight** (optional) — queries Claude and Codex quota status *before* sending any
    prompt. If a tool's quota is exhausted, that tool is skipped and the skip is recorded in
    `logs/usage.jsonl`.
-4. **Send prompt** — calls each enabled CLI with a minimal prompt (`Reply exactly READY`).
-   Claude runs in ultra-lightweight mode (see [Cost Optimization](#cost-optimization)). Codex
-   runs on the configured lightweight model with `--ephemeral`, `--skip-git-repo-check`,
-   `--sandbox read-only`, and stripped-down config (see below).
+4. **Send prompt** — calls each enabled CLI with a minimal prompt. Claude replies `READY`;
+   Codex runs a tiny read-only probe from `codex-probe/`. Codex uses the configured lightweight
+   model with `--ephemeral`, `--skip-git-repo-check`, `--sandbox read-only`, and stripped-down
+   config (see below).
 5. **Record usage** — parses each CLI's JSON output with `jq` and appends a structured record
    to `logs/usage.jsonl` (token counts, cost, session ID, model, duration, etc.).
 6. **Post-run snapshots** (optional) — takes another quota snapshot after activation and
@@ -428,6 +430,7 @@ optimization).
 | --- | --- |
 | `--ignore-user-config` | Skip `~/.codex/config.toml` — removes plugins, MCP servers, developer instructions |
 | `--ignore-rules` | Skip `.rules` files |
+| `--cd "$CODEX_WORK_DIR"` | Keep Codex scoped to the tiny probe folder |
 | `--model "$CODEX_MODEL"` | Use the configured lightweight activation model (`gpt-5.4-mini` by default) |
 | `-c 'features.memories=false'` | Disable memories |
 | `-c 'features.multi_agent=false'` | Disable multi-agent |
@@ -460,8 +463,8 @@ for routine activation turns. Set `CODEX_MODEL=default` if you prefer the Codex 
   `--effort low`, `--strict-mcp-config` with an empty config, no tools, no slash commands, and
   no session persistence. See [Cost Optimization](#cost-optimization) for details.
 - The Codex invocation uses `--model "$CODEX_MODEL"`, `--ephemeral`, `--skip-git-repo-check`,
-  `--sandbox read-only`, `--ignore-user-config`, `--ignore-rules`, and disables features like
-  memories, multi-agent, goals, and hooks.
+  `--cd "$CODEX_WORK_DIR"`, `--sandbox read-only`, `--ignore-user-config`, `--ignore-rules`,
+  and disables features like memories, multi-agent, goals, and hooks.
 - The generated plist is intentionally ignored by git because it contains machine-specific
   absolute paths.
 

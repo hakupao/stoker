@@ -154,7 +154,7 @@
     <ol class="steps">
       <li class="step reveal" style="--i:0"><span class="step__n">1</span><h3 class="step__t" data-i18n="how.s1.t">Load &amp; lock</h3><p class="step__d" data-i18n="how.s1.d">Reads .env, then takes a lock so concurrent triggers skip safely.</p></li>
       <li class="step reveal" style="--i:1"><span class="step__n">2</span><h3 class="step__t" data-i18n="how.s2.t">Quota preflight</h3><p class="step__d" data-i18n="how.s2.d">Checks quota before sending. Exhausted tools are skipped and logged.</p></li>
-      <li class="step reveal" style="--i:2"><span class="step__n">3</span><h3 class="step__t" data-i18n="how.s3.t">Send a tiny prompt</h3><p class="step__d" data-i18n="how.s3.d">Asks each CLI to reply READY — no files read, no tools run, nothing modified.</p></li>
+      <li class="step reveal" style="--i:2"><span class="step__n">3</span><h3 class="step__t" data-i18n="how.s3.t">Send a tiny prompt</h3><p class="step__d" data-i18n="how.s3.d">Each CLI gets a tiny check-in, kept to its own folder — no tools run, your real projects never touched.</p></li>
       <li class="step reveal" style="--i:3"><span class="step__n">4</span><h3 class="step__t" data-i18n="how.s4.t">Record &amp; release</h3><p class="step__d" data-i18n="how.s4.d">Appends usage + quota snapshots, then releases the lock for next time.</p></li>
     </ol>
     <div class="terminal reveal" role="img" aria-label="Example command: ./install.sh">
@@ -188,7 +188,7 @@
           <i class="ficon__dot"></i>
         </span>
         <h3 class="bento__t" data-i18n="feat.f2.t">Minimal, safe prompt</h3>
-        <p class="bento__d" data-i18n="feat.f2.d">Tells both CLIs not to inspect files, run tools, or modify anything.</p>
+        <p class="bento__d" data-i18n="feat.f2.d">Each check-in stays tiny and read-only, kept to its own folder — never your real projects.</p>
       </article>
       <article class="bento__cell reveal" style="--i:2">
         <span class="ficon">
@@ -292,7 +292,7 @@
     <div class="faq__list reveal">
       <details class="qa" open><summary data-i18n="faq.q1">How much does it cost to run?</summary><p data-i18n="faq.a1">About $0.001 per Claude activation (~170 tokens). Roughly $0.16/month at four runs a day. Codex uses your plan quota.</p></details>
       <details class="qa"><summary data-i18n="faq.q2">Does it consume my quota?</summary><p data-i18n="faq.a2">Yes — it sends real prompts. That is the point. Quota preflight skips a tool when its quota is already exhausted.</p></details>
-      <details class="qa"><summary data-i18n="faq.q3">Is it safe? Does it touch my projects?</summary><p data-i18n="faq.a3">No. It runs in its own folder, sends a tiny "reply READY" prompt, and never reads or modifies your real projects. dry-run and quota send nothing.</p></details>
+      <details class="qa"><summary data-i18n="faq.q3">Is it safe? Does it touch my projects?</summary><p data-i18n="faq.a3">No. It runs in its own folder with a tiny read-only check-in, and never reads or modifies your real projects. dry-run and quota send nothing.</p></details>
       <details class="qa"><summary data-i18n="faq.q4">Is this official?</summary><p data-i18n="faq.a4">No. Stoker is an independent open-source project, not affiliated with Anthropic, OpenAI, or Apple. You are responsible for following their terms.</p></details>
       <details class="qa"><summary data-i18n="faq.q5">How do I uninstall?</summary><p data-i18n="faq.a5">Run ./install.sh uninstall (or use the menu bar app) to unload and remove the LaunchAgent.</p></details>
     </div>

@@ -146,6 +146,11 @@ public enum L10n {
     public static var disabled: String {
         AppLanguage.current == .zh ? "已关闭" : "Disabled"
     }
+    public static var scheduleElsewhere: String {
+        AppLanguage.current == .zh
+            ? "定时已加载，但来自另一个副本；请在那个目录里开关，此处操作无效"
+            : "Schedule is loaded from a different copy; manage it from that folder — toggling here won't apply"
+    }
     public static var triggered: String {
         AppLanguage.current == .zh ? "已触发，额度稍后更新" : "Triggered, quota will update shortly"
     }

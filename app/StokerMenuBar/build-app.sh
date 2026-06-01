@@ -84,6 +84,7 @@ copy_path "${ROOT_DIR}/INSTALL_CN.md" "${ENGINE_DIR}/INSTALL_CN.md"
 copy_path "${ROOT_DIR}/CHANGELOG.md" "${ENGINE_DIR}/CHANGELOG.md"
 copy_path "${ROOT_DIR}/LICENSE" "${ENGINE_DIR}/LICENSE"
 copy_path "${ROOT_DIR}/bin" "${ENGINE_DIR}/bin"
+copy_path "${ROOT_DIR}/codex-probe" "${ENGINE_DIR}/codex-probe"
 
 # Bundle jq so users without it installed can still use quota features.
 _jq_src="${JQ_SRC:-$(command -v jq 2>/dev/null || true)}"

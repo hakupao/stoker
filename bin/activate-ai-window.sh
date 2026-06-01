@@ -40,6 +40,8 @@ NODE_BIN="${NODE_BIN:-$(command -v node 2>/dev/null || true)}"
 OMC_BIN="${OMC_BIN:-$(command -v omc 2>/dev/null || true)}"
 ACTIVATION_PROMPT="${ACTIVATION_PROMPT:-Reply exactly READY. Do not inspect files, run tools, or modify anything.}"
 CODEX_MODEL="${CODEX_MODEL:-gpt-5.4-mini}"
+CODEX_WORK_DIR="${CODEX_WORK_DIR:-${ROOT_DIR}/codex-probe}"
+CODEX_ACTIVATION_PROMPT="${CODEX_ACTIVATION_PROMPT:-Read only ./probe.py. Do not inspect any other path. Do not modify files. In two short bullets, explain what activation_probe_score returns for SAMPLE_EVENTS, then end with READY.}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-120}"
 ACTIVATION_TOOL="${ACTIVATION_TOOL:-all}"
 ENABLE_STATUS_SNAPSHOTS="${ENABLE_STATUS_SNAPSHOTS:-1}"
@@ -65,6 +67,8 @@ Environment overrides:
   CODEX_BIN=/path/to/codex
   ACTIVATION_PROMPT='Reply exactly READY...'
   CODEX_MODEL=gpt-5.4-mini
+  CODEX_WORK_DIR=/path/to/probe-dir
+  CODEX_ACTIVATION_PROMPT='Read only ./probe.py...'
   TIMEOUT_SECONDS=120
   ACTIVATION_TOOL=all
   ENABLE_STATUS_SNAPSHOTS=1
@@ -742,7 +746,7 @@ run_codex() {
   local cmd=(
     "$CODEX_BIN"
     exec
-    --cd "$ROOT_DIR"
+    --cd "$CODEX_WORK_DIR"
     --ephemeral
     --skip-git-repo-check
     --sandbox read-only
@@ -762,7 +766,7 @@ run_codex() {
 
   cmd+=(
     --json
-    "$ACTIVATION_PROMPT"
+    "$CODEX_ACTIVATION_PROMPT"
   )
 
   if [[ "$MODE" == "dry-run" ]]; then
@@ -771,6 +775,10 @@ run_codex() {
   fi
 
   require_bin "Codex" "$CODEX_BIN" || return 1
+  if [[ ! -d "$CODEX_WORK_DIR" ]]; then
+    log "ERROR: Codex work directory not found: $CODEX_WORK_DIR"
+    return 1
+  fi
   log "Codex job started"
   run_with_timeout "$output_file" "${cmd[@]}"
   local exit_code=$?
@@ -792,6 +800,7 @@ run_check() {
     if require_bin "Codex" "$CODEX_BIN"; then
       log "Codex binary: $CODEX_BIN ($("$CODEX_BIN" --version 2>&1 | tr '\n' ' '))"
       log "Codex model: $CODEX_MODEL"
+      log "Codex work directory: $CODEX_WORK_DIR"
     else
       status=1
     fi

@@ -13,6 +13,7 @@ file "$TMP_DIR/AppIcon.icns" | grep -q 'Mac OS X icon'
 
 grep -q 'CFBundleIconFile' "${ROOT_DIR}/app/StokerMenuBar/build-app.sh"
 grep -q 'INSTALL_CN.md' "${ROOT_DIR}/app/StokerMenuBar/build-app.sh"
+grep -q 'codex-probe' "${ROOT_DIR}/app/StokerMenuBar/build-app.sh"
 grep -q '安装' "${ROOT_DIR}/INSTALL_CN.md"
 
 echo "app bundle assets test passed"

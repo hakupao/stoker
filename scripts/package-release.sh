@@ -77,6 +77,7 @@ build_cli_archive() {
   cp "${ROOT_DIR}/INSTALL.md" "$root/"
   cp "${ROOT_DIR}/INSTALL_CN.md" "$root/"
   cp -R "${ROOT_DIR}/bin" "$root/bin"
+  cp -R "${ROOT_DIR}/codex-probe" "$root/codex-probe"
   mkdir -p "$root/scripts"
   cp "${ROOT_DIR}/scripts/install-launchd.sh" "$root/scripts/"
   mkdir -p "$root/logs/raw" "$root/run" "$root/launchd"

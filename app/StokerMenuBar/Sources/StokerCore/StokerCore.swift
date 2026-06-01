@@ -125,13 +125,15 @@ public enum ProjectLocator {
         try fileManager.createDirectory(at: installed, withIntermediateDirectories: true)
 
         let versionFile = installed.appendingPathComponent(".bundled-version")
+        let probeFile = installed.appendingPathComponent("codex-probe/probe.py")
         let bundleVersion = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""
         if let existing = try? String(contentsOf: versionFile, encoding: .utf8),
-           existing.trimmingCharacters(in: .whitespacesAndNewlines) == bundleVersion {
+           existing.trimmingCharacters(in: .whitespacesAndNewlines) == bundleVersion,
+           fileManager.fileExists(atPath: probeFile.path) {
             return
         }
 
-        for directory in ["bin", "scripts"] {
+        for directory in ["bin", "scripts", "codex-probe"] {
             let source = bundled.appendingPathComponent(directory)
             guard fileManager.fileExists(atPath: source.path) else {
                 continue
@@ -189,6 +191,16 @@ public struct ActivationState: Decodable {
     public struct Launchctl: Decodable {
         public var state: String?
         public var error: String?
+        public var program: String?
+        public var workingDirectory: String?
+        public var matchesRoot: Bool?
+        public var mismatch: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case state, error, program, mismatch
+            case workingDirectory = "working_directory"
+            case matchesRoot = "matches_root"
+        }
     }
 
     public struct Schedule: Decodable {

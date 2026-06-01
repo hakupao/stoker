@@ -35,6 +35,8 @@ fi
 LOG_DIR="${ROOT_DIR}/logs"
 USAGE_LOG="${LOG_DIR}/usage.jsonl"
 STATUS_LOG="${LOG_DIR}/status.jsonl"
+PLIST_INSTALLED="${HOME}/Library/LaunchAgents/${LABEL}.plist"
+EXPECTED_PROGRAM="${ROOT_DIR}/bin/activate-ai-window.sh"
 
 usage() {
   cat <<'USAGE'
@@ -113,19 +115,67 @@ read_last_jsonl() {
   "$JQ_BIN" -s -c 'last // null' "$file" 2>/dev/null || printf 'null'
 }
 
+plist_value() {
+  local key="$1"
+  if [[ ! -f "$PLIST_INSTALLED" ]]; then
+    return 1
+  fi
+
+  plutil -extract "$key" raw -o - "$PLIST_INSTALLED" 2>/dev/null
+}
+
+loaded_program_from_launchctl() {
+  awk '
+    /^[[:space:]]*arguments = \{/ {
+      in_args = 1
+      arg_index = 0
+      next
+    }
+    in_args && /^[[:space:]]*\}/ {
+      in_args = 0
+      next
+    }
+    in_args {
+      arg_index += 1
+      if (arg_index == 2) {
+        sub(/^[[:space:]]+/, "")
+        print
+        exit
+      }
+    }
+  '
+}
+
 installed=false
 running=false
 launchctl_state="unavailable"
 launchctl_error=""
+launchctl_program=""
+launchctl_working_directory=""
+launchctl_matches_root=false
+launchctl_mismatch=""
 
 if [[ "${STOKER_SKIP_LAUNCHCTL:-0}" == "1" ]]; then
   launchctl_state="skipped"
 else
   launchctl_output="$(launchctl print "gui/${UID}/${LABEL}" 2>&1)" && launchctl_status=0 || launchctl_status=$?
   if [[ "$launchctl_status" == "0" ]]; then
-    installed=true
     launchctl_state="$(printf '%s\n' "$launchctl_output" | awk -F'= ' '/state = / {print $2; exit}')"
     [[ -z "$launchctl_state" ]] && launchctl_state="unknown"
+    launchctl_program="$(plist_value ProgramArguments.1 || true)"
+    launchctl_working_directory="$(plist_value WorkingDirectory || true)"
+    if [[ -z "$launchctl_program" ]]; then
+      launchctl_program="$(printf '%s\n' "$launchctl_output" | loaded_program_from_launchctl)"
+    fi
+    if [[ -z "$launchctl_working_directory" ]]; then
+      launchctl_working_directory="$(printf '%s\n' "$launchctl_output" | awk -F'= ' '/working directory = / {print $2; exit}')"
+    fi
+    if [[ "$launchctl_program" == "$EXPECTED_PROGRAM" && "$launchctl_working_directory" == "$ROOT_DIR" ]]; then
+      installed=true
+      launchctl_matches_root=true
+    else
+      launchctl_mismatch="Loaded LaunchAgent points to ${launchctl_working_directory:-unknown root}; current root is ${ROOT_DIR}"
+    fi
     if [[ "$launchctl_state" == "running" ]]; then
       running=true
     fi
@@ -153,8 +203,12 @@ enable_quota_preflight="$(bool_from_1 "$ENABLE_QUOTA_PREFLIGHT")"
   --argjson keep_awake_seconds "$KEEP_AWAKE_SECONDS" \
   --arg launchctl_state "$launchctl_state" \
   --arg launchctl_error "$launchctl_error" \
+  --arg launchctl_program "$launchctl_program" \
+  --arg launchctl_working_directory "$launchctl_working_directory" \
+  --arg launchctl_mismatch "$launchctl_mismatch" \
   --argjson installed "$installed" \
   --argjson running "$running" \
+  --argjson launchctl_matches_root "$launchctl_matches_root" \
   --argjson schedule "$schedule" \
   --argjson quota "$quota" \
   --argjson last_usage "$last_usage" \
@@ -167,7 +221,11 @@ enable_quota_preflight="$(bool_from_1 "$ENABLE_QUOTA_PREFLIGHT")"
       running: $running,
       launchctl: {
         state: $launchctl_state,
-        error: (if $launchctl_error == "" then null else $launchctl_error end)
+        error: (if $launchctl_error == "" then null else $launchctl_error end),
+        program: (if $launchctl_program == "" then null else $launchctl_program end),
+        working_directory: (if $launchctl_working_directory == "" then null else $launchctl_working_directory end),
+        matches_root: $launchctl_matches_root,
+        mismatch: (if $launchctl_mismatch == "" then null else $launchctl_mismatch end)
       },
       schedule: {
         times: $schedule

@@ -185,6 +185,13 @@ private struct UnifiedHeader: View {
                 TabPicker(selected: $selectedTab)
             }
 
+            if let mismatch = model.state?.launchctl?.mismatch, !mismatch.isEmpty {
+                // Persistent warning: a LaunchAgent is loaded from a different
+                // root, so `installed` reads false and the toggle shows OFF.
+                // Explain why instead of leaving the user with a silent OFF.
+                NotificationBanner(message: L10n.scheduleElsewhere, isError: true)
+            }
+
             if !model.statusMessage.isEmpty {
                 NotificationBanner(message: model.statusMessage, isError: model.statusIsError)
                     .transition(.move(edge: .top).combined(with: .opacity))

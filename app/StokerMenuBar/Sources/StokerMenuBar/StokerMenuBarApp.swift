@@ -104,6 +104,12 @@ final class StokerAppModel: ObservableObject {
     func toggleSchedule() {
         if state?.installed == true {
             runInstallCommand("uninstall", success: L10n.disabled)
+        } else if let mismatch = state?.launchctl?.mismatch, !mismatch.isEmpty {
+            // A LaunchAgent is already loaded from a different root (e.g. an
+            // app-support copy of the engine). Installing from here would
+            // silently repoint the schedule at this copy and strand the user's
+            // real setup. Surface it instead of doing a hidden migration.
+            showStatus(L10n.scheduleElsewhere, isError: true)
         } else {
             runInstallCommand("install", success: L10n.scheduleOn)
         }
@@ -429,13 +435,14 @@ struct MenuContentView: View {
 
     var body: some View {
         let isOn = model.state?.installed == true
+        let loadedElsewhere = model.state?.launchctl?.mismatch?.isEmpty == false
 
         Button {
             model.toggleSchedule()
         } label: {
             Label(
-                isOn ? L10n.scheduleOn : L10n.scheduleOff,
-                systemImage: isOn ? "circle.inset.filled" : "circle"
+                loadedElsewhere ? L10n.scheduleElsewhere : (isOn ? L10n.scheduleOn : L10n.scheduleOff),
+                systemImage: loadedElsewhere ? "exclamationmark.triangle" : (isOn ? "circle.inset.filled" : "circle")
             )
         }
 

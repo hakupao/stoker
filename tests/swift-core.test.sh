@@ -57,6 +57,15 @@ try "LABEL=com.stoker.ai-window\n".write(
     atomically: true,
     encoding: .utf8
 )
+try FileManager.default.createDirectory(
+    at: bundledRoot.appendingPathComponent("codex-probe"),
+    withIntermediateDirectories: true
+)
+try "print(2)\n".write(
+    to: bundledRoot.appendingPathComponent("codex-probe/probe.py"),
+    atomically: true,
+    encoding: .utf8
+)
 
 let installedRoot = ProjectLocator.findRoot(
     from: tempRoot.appendingPathComponent("Stoker.app/Contents/MacOS"),
@@ -66,6 +75,7 @@ let installedRoot = ProjectLocator.findRoot(
 
 precondition(installedRoot.path == support.appendingPathComponent("Stoker/stoker").path)
 precondition(FileManager.default.fileExists(atPath: installedRoot.appendingPathComponent("bin/activate-ai-window.sh").path))
+precondition(FileManager.default.fileExists(atPath: installedRoot.appendingPathComponent("codex-probe/probe.py").path))
 SWIFT
 
 swiftc \
