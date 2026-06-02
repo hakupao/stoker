@@ -291,6 +291,29 @@ final class StokerAppModel: ObservableObject {
     }
 }
 
+// MARK: - Locale Store
+
+/// Observable source of truth for the UI language. `AppLanguage.current` (UserDefaults) stays
+/// what `L10n` reads; this just publishes a change so SwiftUI refreshes. A bare UserDefaults
+/// write doesn't refresh views SwiftUI skips during diffing (e.g. `ForEach` rows whose inputs
+/// are unchanged) — the run-history list was the visible victim, re-localizing only on hover.
+/// The main window re-identifies its content on `language` to rebuild every localized subview
+/// at once; the onboarding sheet (presented outside that subtree) observes this store directly.
+@MainActor
+final class LocaleStore: ObservableObject {
+    static let shared = LocaleStore()
+    @Published private(set) var language: AppLanguage
+
+    private init() { language = AppLanguage.current }
+
+    /// Flip zh↔en, persist to UserDefaults, and publish so every observer refreshes.
+    func toggle() {
+        let next: AppLanguage = (language == .zh) ? .en : .zh
+        AppLanguage.current = next
+        language = next
+    }
+}
+
 struct CommandError: LocalizedError {
     var status: Int32
     var message: String
@@ -500,7 +523,10 @@ enum ToolChecker {
         var builtIn: Bool
         var category: ToolCategory
         var installHint: String
-        var toolDescription: String
+        var descriptionEN: String
+        var descriptionZH: String
+        /// Resolved at render time (not check time) so it follows a live language switch.
+        var toolDescription: String { AppLanguage.current == .zh ? descriptionZH : descriptionEN }
     }
 
     private static let toolDefinitions: [(name: String, hint: String, cat: ToolCategory, en: String, zh: String)] = [
@@ -529,11 +555,10 @@ enum ToolChecker {
         var results: [ToolInfo] = []
         for def in toolDefinitions {
             let (found, builtIn) = await toolStatus(def.name, root: root)
-            let desc = AppLanguage.current == .zh ? def.zh : def.en
             results.append(ToolInfo(
                 name: def.name, found: found, builtIn: builtIn,
                 category: def.cat, installHint: def.hint,
-                toolDescription: desc
+                descriptionEN: def.en, descriptionZH: def.zh
             ))
         }
         return results
@@ -585,6 +610,7 @@ struct OnboardingView: View {
     @Binding var isPresented: Bool
     var root: URL?
     @Environment(\.stokerTheme) private var theme
+    @ObservedObject private var locale = LocaleStore.shared
     @AppStorage("hideOnboarding") private var hideOnboarding = false
     @State private var toolResults: [ToolChecker.ToolInfo] = []
     @State private var isChecking = true
@@ -696,6 +722,7 @@ struct ToolSectionCard: View {
 struct ToolStatusRow: View {
     var tool: ToolChecker.ToolInfo
     @Environment(\.stokerTheme) private var theme
+    @ObservedObject private var locale = LocaleStore.shared
 
     private var statusText: String {
         if tool.builtIn { return L10n.builtIn }

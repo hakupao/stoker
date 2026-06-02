@@ -180,6 +180,10 @@ public enum L10n {
     public static var settings: String {
         AppLanguage.current == .zh ? "设置..." : "Settings..."
     }
+    /// Tab label — no trailing ellipsis, unlike the menu's `settings`.
+    public static var settingsTab: String {
+        AppLanguage.current == .zh ? "设置" : "Settings"
+    }
     public static var environmentCheck: String {
         AppLanguage.current == .zh ? "环境检查..." : "Environment Check..."
     }
@@ -320,6 +324,24 @@ public enum L10n {
     }
     public static var exported: String {
         AppLanguage.current == .zh ? "已导出" : "Exported"
+    }
+    /// Label for the model's raw reply, shown in the expanded run detail (the run-history
+    /// row headline now shows a normalized status marker instead of this free-form text).
+    public static var replyLabel: String {
+        AppLanguage.current == .zh ? "回复" : "Reply"
+    }
+    /// Human-readable label for a usage row's machine `skip_reason`. The quota preflight only
+    /// emits a small known set; anything that isn't an outright "exhausted" verdict means the
+    /// preflight couldn't read quota, so it collapses to "quota unknown" rather than leaking a
+    /// raw token like `preflight_status_missing` into the UI.
+    public static func skipReasonText(_ raw: String?) -> String {
+        guard let raw, !raw.isEmpty else { return "" }
+        switch raw {
+        case "quota_exhausted":
+            return AppLanguage.current == .zh ? "配额耗尽" : "Quota exhausted"
+        default:
+            return AppLanguage.current == .zh ? "额度未知" : "Quota unknown"
+        }
     }
 
     // MARK: - Misc

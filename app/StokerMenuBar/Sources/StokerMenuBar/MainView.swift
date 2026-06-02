@@ -9,7 +9,7 @@ enum MainTab: String, CaseIterable, Identifiable {
     var label: String {
         switch self {
         case .activity: L10n.activity
-        case .settings: AppLanguage.current == .zh ? "设置" : "Settings"
+        case .settings: L10n.settingsTab
         }
     }
 }
@@ -26,10 +26,10 @@ struct MainView: View {
 
 private struct MainPanel: View {
     @ObservedObject var model: StokerAppModel
+    @ObservedObject private var locale = LocaleStore.shared
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var logStore: LogStore
     @State private var selectedTab = MainTab.activity
-    @State private var langRefresh = false
     @AppStorage("hideOnboarding") private var hideOnboarding = false
     @State private var showOnboarding = false
 
@@ -48,19 +48,27 @@ private struct MainPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            UnifiedHeader(model: model, selectedTab: $selectedTab, langRefresh: $langRefresh)
+            VStack(spacing: 0) {
+                UnifiedHeader(model: model, selectedTab: $selectedTab)
 
-            Group {
-                switch selectedTab {
-                case .activity:
-                    ActivityTabContent(logStore: logStore)
-                case .settings:
-                    SettingsTabContent(model: model)
+                Group {
+                    switch selectedTab {
+                    case .activity:
+                        ActivityTabContent(logStore: logStore)
+                    case .settings:
+                        SettingsTabContent(model: model)
+                    }
                 }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            BottomActionBar(model: model, logStore: logStore, selectedTab: selectedTab)
+                BottomActionBar(model: model, logStore: logStore, selectedTab: selectedTab)
+            }
+            // Re-identify the whole localized subtree on a language switch so EVERY subview
+            // re-reads L10n at once — including ForEach rows (e.g. run history) that SwiftUI
+            // would otherwise skip because their inputs didn't change. The lifecycle modifiers
+            // below stay on the OUTER container, so this never re-fires onAppear/.task or
+            // re-presents the onboarding sheet.
+            .id(locale.language)
         }
         .frame(minWidth: 720, minHeight: 600)
         .background(theme.surface)
@@ -96,9 +104,6 @@ private struct MainPanel: View {
                 await model.refresh(silent: true, reloadSettings: false)
             }
         }
-        .onChange(of: langRefresh) { _, _ in
-            logStore.objectWillChange.send()
-        }
         .onChange(of: model.requestToolCheck) { _, newValue in
             if newValue {
                 showOnboarding = true
@@ -113,7 +118,6 @@ private struct MainPanel: View {
 private struct UnifiedHeader: View {
     @ObservedObject var model: StokerAppModel
     @Binding var selectedTab: MainTab
-    @Binding var langRefresh: Bool
     @Environment(\.stokerTheme) private var theme
 
     private var isOn: Bool { model.state?.installed == true }
@@ -173,9 +177,7 @@ private struct UnifiedHeader: View {
                 }
 
                 Button {
-                    AppLanguage.current = AppLanguage.current == .zh ? .en : .zh
-                    model.objectWillChange.send()
-                    langRefresh.toggle()
+                    LocaleStore.shared.toggle()
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "globe")
@@ -190,7 +192,7 @@ private struct UnifiedHeader: View {
                     .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
-                .help(AppLanguage.current == .zh ? "Switch to English" : "切换到中文")
+                .help(AppLanguage.current == .zh ? L10n.switchToEnglish : L10n.switchToChinese)
             }
 
             HStack(spacing: 16) {

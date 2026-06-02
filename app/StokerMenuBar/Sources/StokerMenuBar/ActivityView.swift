@@ -264,12 +264,35 @@ private struct RunRow: View {
         record.tool == "claude" ? theme.seriesClaude : theme.seriesCodex
     }
 
-    private var resultText: String {
-        if record.skipped == true {
-            let reason = record.skipReason ?? ""
-            return reason.isEmpty ? L10n.skipped : "\(L10n.skipped) (\(reason))"
+    private var statusIcon: String {
+        switch record.status {
+        case .success: "checkmark.circle.fill"
+        case .skipped: "minus.circle.fill"
+        case .error: "xmark.circle.fill"
         }
-        return record.result ?? (record.ok == true ? L10n.success : L10n.failed)
+    }
+
+    /// Normalized, status-driven label — replaces dumping the model's free-form reply
+    /// (which varied every run and read as noise). The raw reply still lives in RunDetail.
+    private var statusLabel: String {
+        switch record.status {
+        case .success:
+            return L10n.success
+        case .skipped:
+            let reason = L10n.skipReasonText(record.skipReason)
+            return reason.isEmpty ? L10n.skipped : "\(L10n.skipped) · \(reason)"
+        case .error:
+            if let code = record.exitCode, code != 0 {
+                return "\(L10n.failed) · exit \(code)"
+            }
+            return L10n.failed
+        }
+    }
+
+    /// Sub-cent costs (Claude check-ins run ~$0.001) round to "$0.00" under %.2f and read as
+    /// free; widen to 4 decimals below a cent so the real number shows.
+    private func formatCost(_ cost: Double) -> String {
+        cost >= 0.01 ? String(format: "$%.2f", cost) : String(format: "$%.4f", cost)
     }
 
     var body: some View {
@@ -296,15 +319,19 @@ private struct RunRow: View {
                             .foregroundStyle(toolColor)
                             .frame(width: 48, alignment: .leading)
 
-                        Text(resultText)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(barColor)
-                            .lineLimit(1)
+                        HStack(spacing: 4) {
+                            Image(systemName: statusIcon)
+                                .font(.system(size: 10, weight: .bold))
+                            Text(statusLabel)
+                                .font(.system(size: 11, weight: .medium))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(barColor)
 
                         Spacer()
 
                         if let cost = record.totalCostUsd, cost > 0 {
-                            Text(String(format: "$%.2f", cost))
+                            Text(formatCost(cost))
                                 .font(.system(size: 10, weight: .medium, design: .monospaced))
                                 .foregroundStyle(theme.textMuted)
                         }
@@ -339,6 +366,7 @@ private struct RunRow: View {
 
 private struct RunDetail: View {
     var record: UsageRecord
+    @Environment(\.stokerTheme) private var theme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -365,6 +393,23 @@ private struct RunDetail: View {
                 if let cost = record.totalCostUsd, cost > 0 {
                     DetailChip(label: "$", value: String(format: "%.4f", cost))
                 }
+            }
+
+            if record.skipped != true,
+               let reply = record.result?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !reply.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L10n.replyLabel)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(theme.textMuted)
+                    Text(reply)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(theme.textSecondary)
+                        .lineLimit(6)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
