@@ -199,11 +199,34 @@ Copy `.env.example` to `.env` and adjust values:
 | `OMC_BIN` | Optional `omc` binary override | auto-discovered |
 | `PATH_VALUE` | PATH used by launchd and the runner | Homebrew/local/system defaults |
 
+**One config, shared by the CLI and the app.** `.env` is the single source of truth. The menu
+bar app writes the settings it manages — the schedule, tool selection, and the keep-awake / quota
+options it exposes — back to this same `.env`, leaving any other keys and comments untouched.
+Anything the app doesn't surface keeps falling back to built-in defaults, so a hand-written,
+CLI-only `.env` can be very short. The full annotated list of variables lives in `.env.example`.
+CLI-only users edit `.env` directly.
 After changing schedule or label values, reinstall the LaunchAgent:
 
 ```sh
 ./install.sh install
 ```
+
+> A standalone `Stoker.app` (one not launched from a clone) keeps its engine — and its own
+> `.env` — under `~/Library/Application Support/Stoker/stoker`, separate from a CLI checkout. If
+> you use both, edit the copy that owns the loaded schedule; the app warns when they diverge.
+
+### Sleep & wake
+
+Scheduled activation depends on the Mac being awake at the scheduled time. macOS `launchd`
+**does not fire `StartCalendarInterval` jobs while the Mac is asleep** — on wake it runs a missed
+job **once** (it does not replay every slot that was skipped). A closed-lid / sleeping Mac will
+miss check-ins until it next wakes.
+
+`KEEP_AWAKE_MODE` does **not** wake a sleeping Mac; it only prevents sleep *while a run is already
+in progress* (`caffeinate -i`). `always` additionally keeps the Mac awake the whole time the menu
+bar app is open. To make the schedule reliably hit its times, keep the Mac awake at those times
+(e.g. plugged in with sleep disabled), or set your own wakeups with `pmset repeat wake …`. Stoker
+does not configure `pmset` for you.
 
 ## Logs
 

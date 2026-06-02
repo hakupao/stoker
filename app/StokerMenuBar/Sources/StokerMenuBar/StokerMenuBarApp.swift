@@ -142,6 +142,16 @@ final class StokerAppModel: ObservableObject {
         NSWorkspace.shared.open(root.appendingPathComponent("logs"))
     }
 
+    /// Reveal the `.env` that backs every setting (single source of truth shared with the CLI).
+    func openConfigFile() {
+        let env = root.appendingPathComponent(".env")
+        if FileManager.default.fileExists(atPath: env.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([env])
+        } else {
+            NSWorkspace.shared.open(root)
+        }
+    }
+
     func openInstallGuide() {
         let file = AppLanguage.current == .zh ? "INSTALL_CN.md" : "INSTALL.md"
         let guide = root.appendingPathComponent(file)
@@ -1232,6 +1242,10 @@ struct AdvancedSection: View {
                         }
                         .pickerStyle(.segmented)
                         .labelsHidden()
+                        Text(L10n.keepAwakeNote)
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.textMuted)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
 
                     HStack {
@@ -1250,6 +1264,21 @@ struct AdvancedSection: View {
                         get: { model.launchAtLogin },
                         set: { model.setLaunchAtLogin($0) }
                     ))
+
+                    Rectangle().fill(theme.hairline).frame(height: 1)
+
+                    // Reveal the .env behind every setting — the source of truth shared with the CLI.
+                    Button {
+                        model.openConfigFile()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "doc.text.magnifyingglass")
+                            Text(L10n.openConfigFile)
+                        }
+                        .font(.system(size: 13))
+                        .foregroundStyle(theme.accentText)
+                    }
+                    .buttonStyle(.plain)
                 }
                 .font(.system(size: 13))
                 .padding(16)

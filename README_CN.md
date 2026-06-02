@@ -186,11 +186,30 @@ codex job skipped by quota preflight reason=quota_exhausted
 | `OMC_BIN` | `omc` 路径覆盖 | 自动发现 |
 | `PATH_VALUE` | launchd 和 runner 使用的 PATH | Homebrew/local/system 默认路径 |
 
-修改时间或 label 后，重新安装一次：
+**配置只有一份，CLI 和 App 共用。** `.env` 是唯一真相源。菜单栏 App 会把它管理的那几项设置——
+时间表、工具选择、以及它暴露的防睡眠／配额等选项——写回同一个 `.env`，不改动其它键和注释。App
+没有暴露的项继续走代码内置默认值，所以一份手写、纯 CLI 的 `.env` 可以很短。完整的变量清单和注释
+在 `.env.example` 里。只用 CLI 的用户直接编辑 `.env`。修改时间或 label 后，
+重新安装一次：
 
 ```sh
 ./install.sh install
 ```
+
+> 独立的 `Stoker.app`（不是从克隆目录启动的那种）会把引擎和它自己的 `.env` 放在
+> `~/Library/Application Support/Stoker/stoker`，与 CLI 仓库分开。如果两者都用，请编辑「拥有当前
+> 已加载 schedule」的那一份；当两者指向不同副本时 App 会给出警示。
+
+### 睡眠与唤醒
+
+定时触发依赖 Mac 在计划时刻处于唤醒状态。macOS `launchd` **在 Mac 睡眠期间不会触发
+`StartCalendarInterval` 任务**——唤醒后只补跑**一次**错过的任务（不会把睡眠期间错过的每个时间点都
+补齐）。所以合盖／睡眠中的 Mac 会一直错过 check-in，直到下次唤醒。
+
+`KEEP_AWAKE_MODE` **不会**唤醒睡着的 Mac；它只在**某次触发已经在运行时**防止睡眠
+（`caffeinate -i`）。`always` 则额外在菜单栏 App 打开期间一直保持 Mac 唤醒。想让定时可靠命中那几个
+时刻，请在那些时刻保持 Mac 唤醒（例如接通电源并关闭睡眠），或用 `pmset repeat wake …` 自行设定时
+唤醒。Stoker 不会替你配置 `pmset`。
 
 ## 日志
 

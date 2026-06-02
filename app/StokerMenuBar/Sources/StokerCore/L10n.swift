@@ -133,6 +133,16 @@ public enum L10n {
     public static var keepAwake: String {
         AppLanguage.current == .zh ? "防睡眠" : "Keep Awake"
     }
+    /// Spells out the launchd sleep behavior next to the Keep Awake picker (per user request:
+    /// neither README nor app surfaced this before).
+    public static var keepAwakeNote: String {
+        AppLanguage.current == .zh
+            ? "睡眠期间 launchd 不会触发（唤醒后只补跑一次）；防睡眠仅保护运行期间，不会唤醒电脑。要让定时可靠命中，请让 Mac 在计划时刻保持唤醒。"
+            : "launchd doesn't fire while the Mac sleeps (it runs one missed job on wake). Keep-awake only protects a run in progress — it can't wake the Mac. Keep the Mac awake at those times to hit the schedule reliably."
+    }
+    public static var openConfigFile: String {
+        AppLanguage.current == .zh ? "打开配置文件（.env）" : "Open config file (.env)"
+    }
     public static var off: String {
         AppLanguage.current == .zh ? "关闭" : "Off"
     }
