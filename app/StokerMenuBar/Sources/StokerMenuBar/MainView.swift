@@ -85,6 +85,17 @@ private struct MainPanel: View {
                 }
             }
         }
+        .task {
+            // Auto-refresh while the window is open; SwiftUI cancels this task when the
+            // window closes. Ticks are silent and don't re-read settings, so polling never
+            // flashes the busy spinner or clobbers edits the user hasn't saved yet.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(15))
+                if Task.isCancelled { break }
+                logStore.load()
+                await model.refresh(silent: true, reloadSettings: false)
+            }
+        }
         .onChange(of: langRefresh) { _, _ in
             logStore.objectWillChange.send()
         }
@@ -120,6 +131,18 @@ private struct UnifiedHeader: View {
                         Text(state.schedule.times.joined(separator: " · "))
                             .font(.system(size: 11, weight: .medium, design: .monospaced))
                             .foregroundStyle(theme.textSecondary)
+                        if isOn, !state.schedule.times.isEmpty {
+                            // Self-updating countdown to the next fire: re-evaluates every
+                            // minute and rolls over to the following time on its own.
+                            TimelineView(.periodic(from: .now, by: 60)) { context in
+                                if let next = ScheduleFormatter.nextFire(times: state.schedule.times, now: context.date) {
+                                    let total = ScheduleFormatter.minutesRemaining(until: next, now: context.date)
+                                    Text("\(L10n.nextRunPrefix) \(ScheduleFormatter.clock(next)) · \(L10n.nextRunCountdown(hours: total / 60, minutes: total % 60))")
+                                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                        .foregroundStyle(theme.accentText)
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -171,14 +194,17 @@ private struct UnifiedHeader: View {
             }
 
             HStack(spacing: 16) {
+                Text(L10n.quotaRemaining)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(theme.textMuted)
                 QuotaMiniBar(
                     label: "Claude",
-                    percent: model.state?.quota["claude"]?.fiveHour?.remainingPercent,
+                    window: model.state?.quota["claude"]?.fiveHour,
                     color: theme.seriesClaude
                 )
                 QuotaMiniBar(
                     label: "Codex",
-                    percent: model.state?.quota["codex"]?.fiveHour?.remainingPercent,
+                    window: model.state?.quota["codex"]?.fiveHour,
                     color: theme.seriesCodex
                 )
                 Spacer()
@@ -243,9 +269,11 @@ private struct TabPicker: View {
 
 private struct QuotaMiniBar: View {
     var label: String
-    var percent: Double?
+    var window: ActivationState.QuotaWindow?
     var color: Color
     @Environment(\.stokerTheme) private var theme
+
+    private var percent: Double? { window?.remainingPercent }
 
     private var quotaColor: Color {
         guard let percent else { return theme.textMuted }
@@ -276,6 +304,8 @@ private struct QuotaMiniBar: View {
                 .foregroundStyle(quotaColor)
                 .frame(width: 30, alignment: .trailing)
         }
+        // Spell out remaining vs used so the bar's meaning is unambiguous on hover.
+        .help(L10n.quotaMiniHelp(remaining: window?.remainingPercent, used: window?.usedPercent))
     }
 }
 

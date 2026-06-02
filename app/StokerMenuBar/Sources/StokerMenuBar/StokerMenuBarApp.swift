@@ -86,18 +86,25 @@ final class StokerAppModel: ObservableObject {
         keepAwakeProcess?.terminate()
     }
 
-    func refresh() async {
-        isBusy = true
-        defer { isBusy = false }
+    /// Refresh activation state from the engine.
+    /// - Parameters:
+    ///   - silent: skip the `isBusy` spinner and error banner — used by background polling.
+    ///   - reloadSettings: re-read `.env` into `settings`. Background ticks pass `false` so a
+    ///     periodic refresh never clobbers edits the user is typing but hasn't saved yet.
+    func refresh(silent: Bool = false, reloadSettings: Bool = true) async {
+        if !silent { isBusy = true }
+        defer { if !silent { isBusy = false } }
 
         do {
             let output = try await runExecutable(root.appendingPathComponent("bin/activation-state.sh"), arguments: ["--json"])
             let data = Data(output.utf8)
             state = try JSONDecoder().decode(ActivationState.self, from: data)
-            settings = AppSettings(values: EnvParser.parse(Self.readEnv(root: root)))
+            if reloadSettings {
+                settings = AppSettings(values: EnvParser.parse(Self.readEnv(root: root)))
+            }
             updateKeepAwakeProcess()
         } catch {
-            showStatus(L10n.failedToReadStatus, isError: true)
+            if !silent { showStatus(L10n.failedToReadStatus, isError: true) }
         }
     }
 
@@ -1132,6 +1139,27 @@ struct ToolToggleTile: View {
 
 // MARK: - Advanced Settings (full-row clickable)
 
+/// A low-key reveal: content settles down 8pt and fades in, rather than flying in from
+/// the window edge. Pairs with a soft spring on `isExpanded`, matching the quiet `.opacity`
+/// reveals already used by the run-history rows.
+private struct RevealModifier: ViewModifier {
+    var progress: Double
+    func body(content: Content) -> some View {
+        content
+            .opacity(progress)
+            .offset(y: (1 - progress) * -8)
+    }
+}
+
+extension AnyTransition {
+    static var advancedReveal: AnyTransition {
+        .modifier(
+            active: RevealModifier(progress: 0),
+            identity: RevealModifier(progress: 1)
+        )
+    }
+}
+
 struct AdvancedSection: View {
     @ObservedObject var model: StokerAppModel
     @Environment(\.stokerTheme) private var theme
@@ -1140,7 +1168,7 @@ struct AdvancedSection: View {
     var body: some View {
         VStack(spacing: 0) {
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
                     isExpanded.toggle()
                 }
             } label: {
@@ -1227,7 +1255,7 @@ struct AdvancedSection: View {
                 .padding(16)
                 .background(theme.fillSubtle)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .transition(.advancedReveal)
             }
         }
     }

@@ -61,6 +61,42 @@ public enum ScheduleFormatter {
         }
         return String(format: "%02d:%02d", hour, minute)
     }
+
+    /// The next scheduled fire strictly after `now`, given "HH:MM" entries (local wall
+    /// clock, matching launchd's `StartCalendarInterval`). Uses `Calendar.nextDate` so the
+    /// result stays correct across DST transitions — a 12:00 entry reads 12:00 even on the
+    /// spring-forward/fall-back day, instead of drifting an hour. Returns nil when no valid
+    /// times exist. A time exactly at `now` counts as already firing, so the next one is
+    /// returned (matching `after:` semantics).
+    public static func nextFire(times: [String], now: Date = Date(), calendar: Calendar = .current) -> Date? {
+        times.compactMap { entry -> Date? in
+            guard let (hour, minute) = hourMinute(entry) else { return nil }
+            var match = DateComponents()
+            match.hour = hour
+            match.minute = minute
+            match.second = 0
+            return calendar.nextDate(after: now, matching: match, matchingPolicy: .nextTime)
+        }.min()
+    }
+
+    /// Whole minutes from `now` until `date`, clamped at zero.
+    public static func minutesRemaining(until date: Date, now: Date = Date()) -> Int {
+        max(0, Int(date.timeIntervalSince(now) / 60))
+    }
+
+    /// Local "HH:MM" clock string for a date.
+    public static func clock(_ date: Date, calendar: Calendar = .current) -> String {
+        String(format: "%02d:%02d",
+               calendar.component(.hour, from: date),
+               calendar.component(.minute, from: date))
+    }
+
+    private static func hourMinute(_ entry: String) -> (Int, Int)? {
+        guard let normalized = normalize(entry) else { return nil }
+        let parts = normalized.split(separator: ":")
+        guard parts.count == 2, let hour = Int(parts[0]), let minute = Int(parts[1]) else { return nil }
+        return (hour, minute)
+    }
 }
 
 public enum ProjectLocator {

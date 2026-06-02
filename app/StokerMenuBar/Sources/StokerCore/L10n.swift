@@ -47,6 +47,26 @@ public enum L10n {
     public static var na: String {
         AppLanguage.current == .zh ? "暂无" : "N/A"
     }
+    /// Legend clarifying that the header bars show *remaining* quota, not used.
+    public static var quotaRemaining: String {
+        AppLanguage.current == .zh ? "剩余额度" : "Remaining"
+    }
+    /// Tooltip spelling out both sides of the 5-hour window so "余额 vs 已用" is unambiguous.
+    public static func quotaMiniHelp(remaining: Double?, used: Double?) -> String {
+        guard let remaining else {
+            return AppLanguage.current == .zh ? "暂无额度数据" : "No quota data yet"
+        }
+        let r = Int(remaining.rounded())
+        if AppLanguage.current == .zh {
+            var s = "本 5 小时窗口剩余 \(r)%"
+            if let used { s += "（已用 \(Int(used.rounded()))%）" }
+            return s
+        } else {
+            var s = "5-hour window: \(r)% remaining"
+            if let used { s += " (\(Int(used.rounded()))% used)" }
+            return s
+        }
+    }
     public static var noRunHistory: String {
         AppLanguage.current == .zh ? "暂无运行记录" : "No run history"
     }
@@ -63,6 +83,21 @@ public enum L10n {
     }
     public static var add: String {
         AppLanguage.current == .zh ? "添加" : "Add"
+    }
+    public static var nextRunPrefix: String {
+        AppLanguage.current == .zh ? "下次" : "Next"
+    }
+    /// Countdown to the next scheduled run, e.g. "还有 2 小时 13 分" / "in 2h 13m".
+    public static func nextRunCountdown(hours: Int, minutes: Int) -> String {
+        if AppLanguage.current == .zh {
+            if hours > 0 { return "还有 \(hours) 小时 \(minutes) 分" }
+            if minutes > 0 { return "还有 \(minutes) 分钟" }
+            return "即将运行"
+        } else {
+            if hours > 0 { return "in \(hours)h \(minutes)m" }
+            if minutes > 0 { return "in \(minutes)m" }
+            return "due now"
+        }
     }
 
     // MARK: - Tools
