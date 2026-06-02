@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.2.4 - 2026-06-02
+
+### Run history — clear status markers
+- Activity log rows now show a normalized status marker (icon + word, colored to match the row)
+  — Success / Skipped · reason / Failed · exit N — instead of the model's raw reply text, which
+  was chatty and differed on every run. The full model reply moves into the expanded row detail.
+- Sub-cent Claude check-in costs no longer round to "$0.00"; amounts below a cent now show with
+  enough precision to read the real number.
+
+### Reliable language switching
+- Switching the UI language now updates the whole window immediately. Some views (notably the
+  run-history rows) previously re-localized only after a hover, because the language was not an
+  observable source of truth.
+- Closed i18n gaps: the language-toggle tooltip, the Settings tab label, and the onboarding tool
+  descriptions (which were frozen at check time) now all follow the active language.
+
 ## 0.2.3 - 2026-05-31
 
 ### New app icon

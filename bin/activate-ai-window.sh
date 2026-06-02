@@ -485,7 +485,7 @@ send({
   id: 1,
   method: "initialize",
   params: {
-    clientInfo: { name: "stoker", version: "0.2.3" },
+    clientInfo: { name: "stoker", version: "0.2.4" },
     capabilities: null,
   },
 });
