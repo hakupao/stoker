@@ -52,19 +52,9 @@ else
   rm -rf "${ICON_DIR}/AppIcon.iconset" "${ICON_DIR}/icon_512x512@2x.png"
 fi
 
-# Menu bar icon: bundle the branded monochrome TEMPLATE mark (single schedule-sweep arc +
-# centered ember dot) so the running app can load it via NSImage(isTemplate:true). macOS
-# tints templates itself for light/dark menu bars + the highlighted state, so we ship ONE
-# pure-black-on-alpha image at @1x (18px) and @2x (36px); no white sibling. The app reads it
-# from Contents/Resources at runtime.
-MENUBAR_SRC="${PACK_DIR}/assets/png/menubar"
-if [[ -f "${MENUBAR_SRC}/stoker-menubar-template-black.png" ]]; then
-  cp "${MENUBAR_SRC}/stoker-menubar-template-black.png" "${ICON_DIR}/MenuBarIcon.png"
-  cp "${MENUBAR_SRC}/stoker-menubar-template-black@2x.png" "${ICON_DIR}/MenuBarIcon@2x.png"
-  echo "Installed Stoker menu bar template icon from ${MENUBAR_SRC}"
-else
-  echo "WARNING: menu bar template not found at ${MENUBAR_SRC}; app will fall back to SF Symbol" >&2
-fi
+# Menu bar icon: nothing to bundle. The menu bar flame is drawn in code
+# (StokerFlameIcon.swift) and rasterized at runtime via ImageRenderer, so there is
+# no menu-bar image asset to copy.
 
 copy_path() {
   local source="$1"

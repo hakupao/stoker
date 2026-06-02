@@ -19,7 +19,7 @@ struct StokerMenuBarApp: App {
                 await model.refresh()
             }
         } label: {
-            MenuBarLabel()
+            MenuBarLabel(model: model)
         }
         .menuBarExtraStyle(.menu)
 
@@ -32,32 +32,30 @@ struct StokerMenuBarApp: App {
 
 // MARK: - Menu Bar Label
 
-/// The `MenuBarExtra` label: the branded monochrome Stoker mark (schedule-sweep arc +
-/// centered ember dot), loaded as a macOS TEMPLATE image so the system tints it for
-/// light/dark menu bars and the highlighted state. The icon no longer encodes
-/// installed/not-installed — schedule state is shown by the window + the menu's text rows.
-/// The accessible text ("Stoker") is preserved via `Label`. Falls back to an SF Symbol when
-/// the bundled template asset is unavailable (e.g. `swift run` without the built bundle).
+/// The `MenuBarExtra` label: Stoker's flame mark, driven live off schedule state —
+/// a warm two-tone flame that gently flickers while the schedule is lit
+/// (`state.installed`), a cold tinted outline when it's off.
+///
+/// The icon is supplied as a pre-rendered `Image(nsImage:)` (see
+/// `StokerMenuBarIcon`): `MenuBarExtra` renders a raw filled SwiftUI `Shape` as a
+/// blank status item, but renders images faithfully. The lit frames are
+/// `.original` so their color survives; the cold outline is a template that macOS
+/// tints to the menu bar's appearance.
 struct MenuBarLabel: View {
-    var body: some View {
-        if let icon = Self.templateIcon {
-            Label {
-                Text("Stoker")
-            } icon: {
-                Image(nsImage: icon)
-            }
-        } else {
-            Label("Stoker", systemImage: "timer")
-        }
-    }
+    @ObservedObject var model: StokerAppModel
 
-    /// The bundled menu bar template, loaded once and marked `isTemplate` so AppKit tints it.
-    private static let templateIcon: NSImage? = {
-        guard let image = NSImage(named: "MenuBarIcon") else { return nil }
-        image.isTemplate = true
-        image.size = NSSize(width: 18, height: 18)
-        return image
-    }()
+    var body: some View {
+        Group {
+            if model.state?.installed == true {
+                let frames = StokerMenuBarIcon.liveFrames
+                Image(nsImage: frames[model.flameFrame % frames.count])
+                    .renderingMode(.original)
+            } else {
+                Image(nsImage: StokerMenuBarIcon.cold)
+            }
+        }
+        .accessibilityLabel("Stoker")
+    }
 }
 
 // MARK: - Model
@@ -71,19 +69,49 @@ final class StokerAppModel: ObservableObject {
     @Published var isBusy = false
     @Published var launchAtLogin: Bool
     @Published var requestToolCheck = false
+    /// Free-running counter that drives the menu-bar flame flicker (see `StokerFlameIcon`).
+    @Published var flameFrame = 0
 
     let root: URL
     private var keepAwakeProcess: Process?
+    private var flameTimer: Timer?
 
     init() {
         root = ProjectLocator.findRoot()
         settings = AppSettings(values: EnvParser.parse(Self.readEnv(root: root)))
         launchAtLogin = SMAppService.mainApp.status == .enabled
         updateKeepAwakeProcess()
+        // Load state once at launch so the menu-bar flame reflects the real
+        // schedule immediately. The menu's `.task` only fires when the menu is
+        // opened (and the window's only when it's shown), so without this the
+        // icon would sit in its "cold" state until the user first interacts.
+        Task { await refresh(silent: true) }
     }
 
     deinit {
         keepAwakeProcess?.terminate()
+        // The flicker timer is torn down in `updateFlameTimer()` whenever the
+        // schedule goes idle; we don't touch it here because `Timer.invalidate()`
+        // must run on the thread that installed it (the main run loop), which a
+        // nonisolated `deinit` can't guarantee. This model lives for the app's
+        // lifetime, so the only uncovered case is process exit.
+    }
+
+    /// The flame flickers only while the schedule is lit; when it's off the icon
+    /// is a static cold outline, so we run the redraw timer only when active.
+    private func updateFlameTimer() {
+        if state?.installed == true {
+            guard flameTimer == nil else { return }
+            let timer = Timer(timeInterval: 0.6, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.flameFrame &+= 1 }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            flameTimer = timer
+        } else {
+            flameTimer?.invalidate()
+            flameTimer = nil
+            flameFrame = 0
+        }
     }
 
     /// Refresh activation state from the engine.
@@ -103,6 +131,7 @@ final class StokerAppModel: ObservableObject {
                 settings = AppSettings(values: EnvParser.parse(Self.readEnv(root: root)))
             }
             updateKeepAwakeProcess()
+            updateFlameTimer()
         } catch {
             if !silent { showStatus(L10n.failedToReadStatus, isError: true) }
         }

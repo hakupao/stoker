@@ -41,11 +41,9 @@ def ensure_dirs() -> None:
         LOGO,
         ICONS / "cue",
         ICONS / "status",
-        ICONS / "menubar",
         PNG / "app-icon",
         PNG / "cue",
         PNG / "status",
-        PNG / "menubar",
         PNG / "scene",
     ]:
         path.mkdir(parents=True, exist_ok=True)
@@ -390,27 +388,6 @@ def save_glyph_pngs() -> None:
         draw_status(draw, color, COLORS["ivory"], mode)
         image.save(PNG / "status" / f"status-{mode}.png")
 
-    # Menu bar template raster: a SINGLE pure-black-on-alpha image (macOS tints templates
-    # itself, so no white sibling). Rendered straight from the canonical SVG when a real
-    # renderer is available so the bundle art matches the vector exactly, at 18px (@1x) and
-    # 36px (@2x) for a ~18pt menu bar slot. Falls back to PIL drawing the simplified
-    # single-arc + centered-dot mark if no renderer is present.
-    menubar_svg = ICONS / "menubar" / "stoker-menubar-template-black.svg"
-    renderer = _find_svg_renderer()
-    if renderer is not None and menubar_svg.exists():
-        _render_svg_to_png(renderer, menubar_svg, PNG / "menubar" / "stoker-menubar-template-black.png", 18)
-        _render_svg_to_png(renderer, menubar_svg, PNG / "menubar" / "stoker-menubar-template-black@2x.png", 36)
-    else:
-        for px, suffix in [(18, ""), (36, "@2x")]:
-            image = Image.new("RGBA", (px, px), (0, 0, 0, 0))
-            draw = ImageDraw.Draw(image)
-            s = px / 64
-            ring = (10 * s, 10 * s, 54 * s, 54 * s)  # ring bbox centered on (32,32)
-            draw.arc(ring, start=10, end=350, fill=(0, 0, 0, 255), width=max(1, round(5 * s)))
-            r = 7 * s
-            draw.ellipse((32 * s - r, 32 * s - r, 32 * s + r, 32 * s + r), fill=(0, 0, 0, 255))
-            image.save(PNG / "menubar" / f"stoker-menubar-template-black{suffix}.png")
-
 
 def save_scene_pngs() -> None:
     image = Image.new("RGBA", (1200, 760), hex_to_rgba("#F8F5EF"))
@@ -475,19 +452,6 @@ def write_svg_files() -> None:
     # are now HAND-AUTHORED canonical vector sources and the single source of truth for the
     # iconset; this generator renders them but must NOT overwrite them. See save_app_icons().
 
-    # Menu bar mark: a single template image only. macOS auto-tints template images for
-    # light/dark menu bars and the highlighted state, so we ship ONE pure-black-on-alpha
-    # variant (no white sibling). Simplified single schedule-sweep arc + centered ember dot,
-    # optically centered on (32,32) so it stays crisp at 16-18px instead of mudding.
-    (ICONS / "menubar" / "stoker-menubar-template-black.svg").write_text(
-        """<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="Stoker menu bar template icon">
-  <path d="M45.789 43.57A18 18 0 1 0 18.211 43.57" fill="none" stroke="#000000" stroke-width="5" stroke-linecap="round"/>
-  <circle cx="32" cy="32" r="7" fill="#000000"/>
-</svg>
-""",
-        encoding="utf-8",
-    )
-
     icon_svgs = {
         "cue-schedule.svg": "<path d='M18 39a22 22 0 0 1 33-26' fill='none' stroke='{ivory}' stroke-width='4' stroke-linecap='round'/><path d='M32 31V17M32 31h14' stroke='{ivory}' stroke-width='4' stroke-linecap='round'/><circle cx='32' cy='31' r='5' fill='{ember}'/>",
         "cue-quota.svg": "<path d='M16 43a24 24 0 0 1 48 0' fill='none' stroke='#4a4a45' stroke-width='5' stroke-linecap='round'/><path d='M16 43a24 24 0 0 1 35-21' fill='none' stroke='{sage}' stroke-width='5' stroke-linecap='round'/><circle cx='52' cy='42' r='5' fill='{ember}'/>",
@@ -537,7 +501,6 @@ def write_docs() -> None:
         "icon_principles": [
             "No literal flame as the primary shape.",
             "Use ember, aperture, time arc, and quota bead as the recurring motif.",
-            "Keep menu bar assets monochrome and template-friendly.",
             "Use warm ember sparingly against graphite and ivory surfaces.",
         ],
     }
@@ -724,8 +687,6 @@ def save_preview_sheet() -> None:
 def main() -> None:
     ensure_dirs()
     save_app_icons()
-    # write_svg_files() before save_glyph_pngs(): the menu bar template PNGs are rendered
-    # straight from the menu bar template SVG, so the vector must exist on disk first.
     write_svg_files()
     save_glyph_pngs()
     save_scene_pngs()
