@@ -34,13 +34,12 @@ struct StokerMenuBarApp: App {
 
 /// The `MenuBarExtra` label: Stoker's flame mark, driven live off schedule state —
 /// a warm two-tone flame that gently flickers while the schedule is lit
-/// (`state.installed`), a cold tinted outline when it's off.
+/// (`state.installed`), a hollow gold outline of the same flame when it's off.
 ///
 /// The icon is supplied as a pre-rendered `Image(nsImage:)` (see
 /// `StokerMenuBarIcon`): `MenuBarExtra` renders a raw filled SwiftUI `Shape` as a
-/// blank status item, but renders images faithfully. The lit frames are
-/// `.original` so their color survives; the cold outline is a template that macOS
-/// tints to the menu bar's appearance.
+/// blank status item, but renders images faithfully. Both states are `.original`
+/// so the gold survives instead of being flattened to the menu bar's tint.
 struct MenuBarLabel: View {
     @ObservedObject var model: StokerAppModel
 
@@ -52,6 +51,7 @@ struct MenuBarLabel: View {
                     .renderingMode(.original)
             } else {
                 Image(nsImage: StokerMenuBarIcon.cold)
+                    .renderingMode(.original)
             }
         }
         .accessibilityLabel("Stoker")

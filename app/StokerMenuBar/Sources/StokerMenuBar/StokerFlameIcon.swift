@@ -23,10 +23,12 @@ struct StokerFlameIcon: View {
 
     private static let ember     = Color(red: 0xE3 / 255, green: 0x6E / 255, blue: 0x43 / 255)
     private static let emberHot  = Color(red: 0xFF / 255, green: 0xB1 / 255, blue: 0x5E / 255)
-    /// Gold rim drawn behind the lit fill — a bright warm halo that glows on dark
-    /// menu bars and still outlines the silhouette on light ones. Baked into the
-    /// one `.original` image both appearances share.
-    private static let flameOutline = Color(red: 0xFF / 255, green: 0xC3 / 255, blue: 0x6E / 255)
+    /// Gold used both as the lit flame's rim (behind the fill) and as the unlit
+    /// "off" outline — a bright warm tone that glows on dark menu bars and still
+    /// outlines the silhouette on light ones. Baked into the `.original` images, so
+    /// it shows the same gold across light/dark instead of an adaptive tint.
+    /// `fileprivate` so `StokerMenuBarIcon` (same file) can reuse it for the outline.
+    fileprivate static let flameOutline = Color(red: 0xFF / 255, green: 0xC3 / 255, blue: 0x6E / 255)
 
     /// Per-frame breathing of the hot inner core, grown from the flame's base.
     /// Wide swing (±20%) so the flicker reads at menu-bar point sizes.
@@ -47,9 +49,10 @@ struct StokerFlameIcon: View {
                     .fill(Self.emberHot)
                     .scaleEffect(Self.innerScale[f], anchor: .bottom)
             } else {
+                // Unlit / schedule off: a hollow gold outline echoing the lit rim.
                 FlameShape(frame: 0)
-                    .stroke(Color(nsColor: .secondaryLabelColor),
-                            style: StrokeStyle(lineWidth: size * 0.075, lineJoin: .round))
+                    .stroke(Self.flameOutline,
+                            style: StrokeStyle(lineWidth: size * 0.085, lineJoin: .round))
             }
         }
         // Inset so the outline rim never clips the frame at the rounded base.
@@ -133,13 +136,15 @@ enum StokerMenuBarIcon {
         render(StokerFlameIcon(active: true, frame: frame, size: size), template: false)
     }
 
-    /// The unlit outline, rendered as a TEMPLATE (black mask) so macOS tints it to
-    /// the menu bar's adaptive light/dark color — the natural "cold / off" look.
+    /// The unlit "off" outline: a hollow GOLD flame, kept ORIGINAL (not template) so
+    /// the gold survives instead of being tinted to the menu bar's adaptive color —
+    /// it echoes the lit flame's gold rim. Drawn at the same inset so the silhouette
+    /// size stays put across on/off.
     static let cold: NSImage = render(
         FlameShape(frame: 0)
-            .stroke(Color.black, style: StrokeStyle(lineWidth: size * 0.075, lineJoin: .round))
-            .padding(size * 0.06),   // match the lit flame's inset so on/off keeps one silhouette size
-        template: true)
+            .stroke(StokerFlameIcon.flameOutline, style: StrokeStyle(lineWidth: size * 0.085, lineJoin: .round))
+            .padding(size * 0.06),
+        template: false)
 
     private static func render(_ view: some View, template: Bool) -> NSImage {
         let renderer = ImageRenderer(content: view.frame(width: size, height: size))
