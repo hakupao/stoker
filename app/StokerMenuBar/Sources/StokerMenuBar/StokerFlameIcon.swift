@@ -21,17 +21,26 @@ struct StokerFlameIcon: View {
     var frame: Int = 0
     var size: CGFloat = 18
 
-    private static let ember    = Color(red: 0xE3 / 255, green: 0x6E / 255, blue: 0x43 / 255)
-    private static let emberHot = Color(red: 0xFF / 255, green: 0xB1 / 255, blue: 0x5E / 255)
+    private static let ember     = Color(red: 0xE3 / 255, green: 0x6E / 255, blue: 0x43 / 255)
+    private static let emberHot  = Color(red: 0xFF / 255, green: 0xB1 / 255, blue: 0x5E / 255)
+    /// Gold rim drawn behind the lit fill — a bright warm halo that glows on dark
+    /// menu bars and still outlines the silhouette on light ones. Baked into the
+    /// one `.original` image both appearances share.
+    private static let flameOutline = Color(red: 0xFF / 255, green: 0xC3 / 255, blue: 0x6E / 255)
 
     /// Per-frame breathing of the hot inner core, grown from the flame's base.
-    private static let innerScale: [CGFloat] = [1.0, 1.08, 0.92]
+    /// Wide swing (±20%) so the flicker reads at menu-bar point sizes.
+    private static let innerScale: [CGFloat] = [1.0, 1.22, 0.80]
 
     private var f: Int { ((frame % 3) + 3) % 3 }
 
     var body: some View {
         ZStack {
             if active {
+                // Outline sits behind the fill so only its outer half shows as a rim.
+                FlameShape(frame: f)
+                    .stroke(Self.flameOutline,
+                            style: StrokeStyle(lineWidth: size * 0.11, lineJoin: .round))
                 FlameShape(frame: f)
                     .fill(Self.ember)
                 FlameInnerShape()
@@ -43,16 +52,19 @@ struct StokerFlameIcon: View {
                             style: StrokeStyle(lineWidth: size * 0.075, lineJoin: .round))
             }
         }
+        // Inset so the outline rim never clips the frame at the rounded base.
+        .padding(size * 0.06)
         .frame(width: size, height: size)
     }
 }
 
 // MARK: - Geometry
 
-/// The outer flame silhouette. `frame` (0–2) selects one of three subtly
-/// different shapes so the active flame flickers by swapping discrete frames —
-/// the `MenuBarExtra` label snapshots its content, so continuous interpolation
-/// is unreliable, but a state-driven frame swap redraws cleanly.
+/// The outer flame silhouette. `frame` (0–2) selects one of three distinct
+/// poses (rest / lick-up-right / squat-left) so the active flame visibly
+/// flickers by swapping discrete frames — the `MenuBarExtra` label snapshots its
+/// content, so continuous interpolation is unreliable, but a state-driven frame
+/// swap redraws cleanly.
 struct FlameShape: Shape {
     var frame: Int = 0
 
@@ -90,13 +102,16 @@ private enum FlameGeometry {
     }
 
     static let outer: [[CGFloat]] = [
-        [32, 4,  28, 16, 20, 22, 20, 34,  20, 47, 25, 60, 32, 60,  39, 60, 44, 47, 44, 34,  44, 26, 39, 22, 37, 15,  36, 20, 33, 21, 33, 16,  33, 11, 33, 7, 32, 4],
-        [32, 6,  27, 17, 20, 22, 20, 34,  20, 47, 25, 60, 32, 60,  39, 60, 44, 47, 44, 33,  44, 25, 38, 22, 36, 14,  35, 20, 32, 21, 32, 16,  32, 11, 33, 8, 32, 6],
-        [32, 3,  29, 15, 21, 23, 21, 35,  21, 48, 26, 60, 32, 60,  38, 60, 44, 48, 44, 35,  44, 27, 40, 21, 38, 16,  37, 21, 34, 22, 34, 17,  34, 12, 33, 7, 32, 3],
+        // frame 0 — rest: a plump teardrop, belly x≈13…51 (~56% wide vs the old 37%).
+        [32, 7,  28, 16, 13, 30, 13, 42,  13, 53, 21, 61, 32, 61,  43, 61, 51, 53, 51, 42,  51, 28, 45, 21, 36, 15,  34, 17, 33, 21, 33, 19,  33, 13, 33, 10, 32, 7],
+        // frame 1 — tall lick to the right: tip darts up-right, right belly pushes out.
+        [35, 3,  30, 13, 15, 28, 15, 41,  14, 53, 22, 61, 32, 61,  44, 61, 53, 52, 53, 40,  53, 26, 46, 19, 38, 12,  36, 14, 34, 18, 34, 16,  35, 10, 35, 6, 35, 3],
+        // frame 2 — squat & wide, leaning left: tip drops, belly fattens.
+        [29, 10,  26, 19, 11, 33, 11, 45,  11, 55, 20, 62, 32, 62,  44, 62, 49, 55, 49, 44,  49, 30, 43, 22, 35, 18,  33, 20, 32, 24, 32, 22,  32, 16, 32, 13, 29, 10],
     ]
 
     static let inner: [CGFloat] =
-        [32, 31,  29, 38, 27, 41, 27, 46,  27, 51, 29, 54, 32, 54,  35, 54, 37, 51, 37, 46,  37, 41, 35, 38, 32, 31]
+        [32, 33,  28, 40, 25, 44, 25, 49,  25, 54, 28, 57, 32, 57,  36, 57, 39, 54, 39, 49,  39, 44, 36, 40, 32, 33]
 }
 
 // MARK: - Menu-bar NSImages
@@ -122,7 +137,8 @@ enum StokerMenuBarIcon {
     /// the menu bar's adaptive light/dark color — the natural "cold / off" look.
     static let cold: NSImage = render(
         FlameShape(frame: 0)
-            .stroke(Color.black, style: StrokeStyle(lineWidth: size * 0.075, lineJoin: .round)),
+            .stroke(Color.black, style: StrokeStyle(lineWidth: size * 0.075, lineJoin: .round))
+            .padding(size * 0.06),   // match the lit flame's inset so on/off keeps one silhouette size
         template: true)
 
     private static func render(_ view: some View, template: Bool) -> NSImage {

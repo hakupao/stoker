@@ -102,7 +102,7 @@ final class StokerAppModel: ObservableObject {
     private func updateFlameTimer() {
         if state?.installed == true {
             guard flameTimer == nil else { return }
-            let timer = Timer(timeInterval: 0.6, repeats: true) { [weak self] _ in
+            let timer = Timer(timeInterval: 0.45, repeats: true) { [weak self] _ in
                 Task { @MainActor in self?.flameFrame &+= 1 }
             }
             RunLoop.main.add(timer, forMode: .common)
