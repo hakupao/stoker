@@ -47,8 +47,6 @@ def ensure_dirs() -> None:
         PNG / "status",
         PNG / "menubar",
         PNG / "scene",
-        MOCKUPS,
-        PREVIEW,
     ]:
         path.mkdir(parents=True, exist_ok=True)
 
@@ -545,91 +543,6 @@ def write_docs() -> None:
     }
     (ROOT / "brand-tokens.json").write_text(json.dumps(tokens, indent=2) + "\n", encoding="utf-8")
 
-    (ROOT / "research-notes.md").write_text(
-        """# Stoker Research Notes
-
-## Naming
-
-- Merriam-Webster defines "stoker" as one who tends a furnace and supplies it with fuel, and also as a machine that feeds a fire.
-- Etymonline traces "stoker" to maintaining or feeding a furnace fire.
-- Search results show existing unrelated uses such as coffee, books, BBQ controllers, and financial apps. This is not legal clearance; run formal trademark and App Store checks before shipping under the name.
-
-## Apple visual fit
-
-- Apple's app icon guidance emphasizes an icon that expresses purpose and remains recognizable across system locations.
-- For this pack, the mark avoids SF Symbols and Apple hardware in the logo/app icon, while keeping system-template menu bar variants separate.
-
-## Direction
-
-The chosen metaphor is a tended ember, not a dramatic flame. The recurring pieces are:
-
-- ember core: a small low-cost READY check-in
-- time arc: scheduled activation windows
-- aperture/forge shell: controlled local execution
-- sage bead: quota/status monitoring
-""",
-        encoding="utf-8",
-    )
-
-    (ROOT / "prompts.md").write_text(
-        """# Image Generation Prompt Used
-
-Built-in image generation mode was used once to create the exploratory app-icon concept saved under `assets/generated/`.
-
-```text
-Use case: logo-brand
-Asset type: macOS app icon concept reference for a menu bar utility named "Stoker"
-Primary request: Create a refined, minimalist app icon concept that suggests a quiet ember being tended on a schedule, for an AI usage-window scheduler and quota monitor. Do not include text.
-Subject: an abstract ember/forge aperture combined with a subtle clock arc or pulse tick, centered in a square app-icon composition.
-Style/medium: premium macOS-style icon concept, clean geometric forms, vector-friendly, elegant dimensional lighting, not photorealistic.
-Composition/framing: centered symbol with generous safe margins; square 1024 app icon framing; no UI screenshot.
-Lighting/mood: calm, precise, warm ember glow balanced by cool graphite; understated and high-end.
-Color palette: graphite charcoal, deep warm copper, muted ember coral, soft ivory highlight, one restrained cool sage accent.
-Materials/textures: smooth satin, glassy depth only at icon background; no rough fire, no smoke.
-Text (verbatim): none.
-Constraints: no words, no letters, no flame cliche, no mascot, no Apple hardware, no screenshots, no watermark; keep details legible at small sizes.
-```
-""",
-        encoding="utf-8",
-    )
-
-    (ROOT / "README.md").write_text(
-        """# Stoker UI Pack
-
-This is a non-destructive candidate art package for renaming Activation Timer to Stoker. It does not replace any current app resource.
-
-## Brand Idea
-
-Stoker is the quiet operator that tends the fire: it keeps Claude and Codex usage windows warm, checks quota, and records activity without making noise. The visual system uses an ember core, a schedule arc, a controlled aperture, and a sage quota bead.
-
-## Contents
-
-- `brand-tokens.json`: palette, type, and icon principles.
-- `assets/logo/`: mark, wordmark, horizontal lockup, and app-icon SVG source.
-- `assets/png/app-icon/`: 1024 PNG, full macOS iconset, and `Stoker.icns` when `iconutil` is available.
-- `assets/icons/cue/`: small option cue icons for settings rows and helper affordances.
-- `assets/icons/status/`: active, paused, warning, and error status badges.
-- `assets/icons/menubar/`: monochrome template-style menu bar marks.
-- `assets/mockups/`: main-window art direction mockup.
-- `assets/png/scene/`: empty-state and decorative scene art.
-- `preview/index.html`: local preview board.
-- `prompts.md`: image-generation prompt used for the concept reference.
-
-## Usage Guidance
-
-- App icon: start with `assets/png/app-icon/Stoker.icns` or the PNG iconset.
-- In-app badge: use `assets/logo/stoker-mark.svg` or a rendered PNG derivative.
-- Settings option hints: use cue icons at 16-20 pt with secondary label color, not as colorful buttons.
-- Status indicators: use status badges only for semantic state, not decoration.
-- Menu bar: use the monochrome template variants, not the full app icon.
-
-## Replacement Status
-
-No replacement has been performed. Review this folder first, then selectively copy approved assets into the app bundle/resources in a later pass.
-""",
-        encoding="utf-8",
-    )
-
 
 def write_preview() -> None:
     css = f"""html {{
@@ -817,8 +730,9 @@ def main() -> None:
     save_glyph_pngs()
     save_scene_pngs()
     write_docs()
-    write_preview()
-    save_preview_sheet()
+    # Candidate-only docs (README/preview/research-notes/prompts) and the preview sheet are no
+    # longer generated: the pack ships committed assets and a hand-maintained README, so a build
+    # no longer overwrites the README or recreates retired concept files.
     print(f"Generated Stoker UI pack at {ROOT}")
 
 
