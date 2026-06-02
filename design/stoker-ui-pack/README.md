@@ -9,15 +9,12 @@ Stoker is the quiet operator that tends the fire: it keeps Claude and Codex usag
 ## Contents
 
 - `brand-tokens.json`: palette, type, and icon principles.
-- `assets/logo/`: mark, wordmark, horizontal lockup, and app-icon SVG source.
+- `assets/logo/`: mark, wordmark, horizontal lockup, app-icon SVG source, and the Affinity (`.ai`) icon source.
 - `assets/png/app-icon/`: 1024 PNG, full macOS iconset, and `Stoker.icns` when `iconutil` is available.
 - `assets/icons/cue/`: small option cue icons for settings rows and helper affordances.
 - `assets/icons/status/`: active, paused, warning, and error status badges.
 - `assets/icons/menubar/`: monochrome template-style menu bar marks.
-- `assets/mockups/`: main-window art direction mockup.
 - `assets/png/scene/`: empty-state and decorative scene art.
-- `preview/index.html`: local preview board.
-- `prompts.md`: image-generation prompt used for the concept reference.
 
 ## Usage Guidance
 

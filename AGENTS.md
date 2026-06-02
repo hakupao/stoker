@@ -122,8 +122,7 @@ bundled engine (shipped in `Contents/Resources/stoker`) into
   `CHANGELOG.md` release header. `package-release.sh --check` validates file presence only — it does
   **not** catch a mismatched version across these sites.
 - **Rename migration:** `install-launchd.sh` defaults `LEGACY_LABELS=com.activation-timer.ai-window`
-  and boots out/removes those agents at install/uninstall. A stale
-  `launchd/com.activation-timer.ai-window.plist` remains in the repo but is referenced by nothing.
+  and boots out/removes those agents at install/uninstall.
 - **Release:** `scripts/package-release.sh` builds three artifacts into `dist/`
   (`stoker-cli-<v>.tar.gz`, `stoker-gui-<v>.dmg`, `stoker-gui-<v>.zip`; DMG only if `hdiutil` exists).
   The GUI build (`build-app.sh`) bundles the full CLI engine + an ad-hoc-codesigned `jq` into the
