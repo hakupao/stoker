@@ -171,6 +171,7 @@ codex job skipped by quota preflight reason=quota_exhausted
 | `SCHEDULE_TIMES` | 逗号分隔的 `HH:MM` 触发时间，每个时间点相互独立 | `"07:00,12:00,17:00,22:00"` |
 | `ACTIVATION_TOOL` | `all`、`claude` 或 `codex` | `all` |
 | `ACTIVATION_PROMPT` | 发送给 CLI 的低消耗 prompt | `Reply exactly READY...` |
+| `CLAUDE_CODE_OAUTH_TOKEN` | 由 `claude setup-token` 生成的长效 token，供无人值守认证（见下） | 未设置（用钥匙串登录） |
 | `CODEX_MODEL` | Codex 激活模型；设为 `default` 则交给 Codex CLI 自行选择 | `gpt-5.4-mini` |
 | `TIMEOUT_SECONDS` | 每个工具的超时时间 | `120` |
 | `ENABLE_STATUS_SNAPSHOTS` | 真实触发后是否记录额度快照 | `1` |
@@ -189,8 +190,23 @@ codex job skipped by quota preflight reason=quota_exhausted
 **配置只有一份，CLI 和 App 共用。** `.env` 是唯一真相源。菜单栏 App 会把它管理的那几项设置——
 时间表、工具选择、以及它暴露的防睡眠／配额等选项——写回同一个 `.env`，不改动其它键和注释。App
 没有暴露的项继续走代码内置默认值，所以一份手写、纯 CLI 的 `.env` 可以很短。完整的变量清单和注释
-在 `.env.example` 里。只用 CLI 的用户直接编辑 `.env`。修改时间或 label 后，
-重新安装一次：
+在 `.env.example` 里。只用 CLI 的用户直接编辑 `.env`。
+
+**无人值守认证（推荐）。** 默认情况下，定时的 `claude -p` 会复用你交互式 Claude Code 登录的
+macOS 钥匙串凭证。那份凭证寿命很短，且每当你的交互式会话刷新它时就会被轮换掉——于是共用它的
+无人值守任务可能报 `401 Invalid authentication credentials`，直到你重新登录。要让定时任务自给自足，
+用 `claude setup-token` 生成一份长效 token 存进 `.env`：
+
+```sh
+claude setup-token          # 打开浏览器，输出 sk-ant-oat01-...
+# 然后写入 .env：  CLAUDE_CODE_OAUTH_TOKEN="sk-ant-oat01-..."
+```
+
+这份 token 以你现有的 Claude 订阅身份认证、并计入订阅额度（**不产生额外 API 计费**）；由于它不再
+和交互式会话共用钥匙串凭证，导致 401 的轮换问题随之消失。若某次仍认证失败，`activation.log` 现在
+会打印一条明确指向 `claude setup-token` 的提示。
+
+修改时间或 label 后，重新安装一次：
 
 ```sh
 ./install.sh install

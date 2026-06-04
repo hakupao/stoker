@@ -52,6 +52,18 @@ KEEP_AWAKE_MODE="${KEEP_AWAKE_MODE:-off}"
 KEEP_AWAKE_SECONDS="${KEEP_AWAKE_SECONDS:-900}"
 RUN_ID="${RUN_ID:-$(date '+%Y%m%d-%H%M%S')-$$}"
 
+# Optional long-lived OAuth token for unattended auth (from `claude setup-token`).
+# When present, the scheduled `claude -p` run authenticates with this token instead
+# of the interactive session's shared macOS Keychain login — which is short-lived and
+# gets rotated out from under an unattended run, surfacing as "401 Invalid
+# authentication credentials". Only keep it exported when non-empty so a blank value
+# never overrides the normal Keychain login.
+if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+  export CLAUDE_CODE_OAUTH_TOKEN
+else
+  unset CLAUDE_CODE_OAUTH_TOKEN
+fi
+
 MODE="once"
 TOOL="$ACTIVATION_TOOL"
 
@@ -64,6 +76,7 @@ windows at predictable times. The default mode is --once.
 
 Environment overrides:
   CLAUDE_BIN=/path/to/claude
+  CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...   # long-lived headless auth (claude setup-token)
   CODEX_BIN=/path/to/codex
   ACTIVATION_PROMPT='Reply exactly READY...'
   CODEX_MODEL=gpt-5.4-mini
@@ -251,6 +264,7 @@ record_claude_usage() {
           tool: $tool,
           exit_code: $exit_code,
           ok: ($exit_code == 0),
+          api_error_status: ($o.api_error_status // null),
           result: ($o.result // null),
           session_id: ($o.session_id // null),
           model: ($o.model // $o.model_name // null),
@@ -726,16 +740,31 @@ run_claude() {
     --tools ""
   )
 
+  # Report the auth source without ever logging the token value.
+  local auth_mode="keychain (interactive login)"
+  if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+    auth_mode="CLAUDE_CODE_OAUTH_TOKEN (setup-token)"
+  fi
+
   if [[ "$MODE" == "dry-run" ]]; then
+    log "DRY-RUN Claude auth=${auth_mode}"
     log "DRY-RUN Claude: ${cmd[*]}"
     return 0
   fi
 
   require_bin "Claude" "$CLAUDE_BIN" || return 1
-  log "Claude job started"
+  log "Claude job started auth=${auth_mode}"
   run_with_timeout "$output_file" "${cmd[@]}"
   local exit_code=$?
   record_claude_usage "$exit_code" "$output_file"
+  if (( exit_code != 0 )) \
+    && grep -qiE '"api_error_status": ?401|Invalid authentication credentials|Failed to authenticate' "$output_file" 2>/dev/null; then
+    if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+      log "ERROR: Claude authentication failed (401) while using CLAUDE_CODE_OAUTH_TOKEN: the token is invalid or expired. Re-mint it with 'claude setup-token' and update CLAUDE_CODE_OAUTH_TOKEN in ${ENV_FILE}. See README (Headless authentication)."
+    else
+      log "ERROR: Claude authentication failed (401): the unattended run is sharing the short-lived interactive Keychain login. Run 'claude setup-token' and set CLAUDE_CODE_OAUTH_TOKEN in ${ENV_FILE} so it authenticates on its own. See README (Headless authentication)."
+    fi
+  fi
   log "Claude job completed exit=${exit_code} $(summarize_output "$output_file") raw=${output_file}"
   return "$exit_code"
 }

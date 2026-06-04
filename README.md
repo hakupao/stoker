@@ -182,6 +182,7 @@ Copy `.env.example` to `.env` and adjust values:
 | `SCHEDULE_TIMES` | Comma-separated `HH:MM` schedule entries; each time point is independent | `"07:00,12:00,17:00,22:00"` |
 | `ACTIVATION_TOOL` | `all`, `claude`, or `codex` | `all` |
 | `ACTIVATION_PROMPT` | Low-cost prompt sent to Claude | `Reply exactly READY...` |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Long-lived token from `claude setup-token` for unattended auth (see below) | unset (uses Keychain login) |
 | `CODEX_MODEL` | Codex activation model; set `default` to let Codex CLI choose | `gpt-5.4-mini` |
 | `CODEX_WORK_DIR` | Tiny working directory used by Codex probe runs | `${ROOT_DIR}/codex-probe` |
 | `CODEX_ACTIVATION_PROMPT` | Read-only Codex probe prompt | `Read only ./probe.py...` |
@@ -205,6 +206,23 @@ options it exposes — back to this same `.env`, leaving any other keys and comm
 Anything the app doesn't surface keeps falling back to built-in defaults, so a hand-written,
 CLI-only `.env` can be very short. The full annotated list of variables lives in `.env.example`.
 CLI-only users edit `.env` directly.
+
+**Headless authentication (recommended).** By default a scheduled `claude -p` run reuses your
+interactive Claude Code login from the macOS Keychain. That credential is short-lived and is
+rotated whenever your interactive session refreshes it, so an unattended run sharing it can fail
+with `401 Invalid authentication credentials` until you log in again. To make the scheduler
+self-sufficient, mint a long-lived token once and store it in `.env`:
+
+```sh
+claude setup-token          # opens a browser; prints sk-ant-oat01-...
+# then add to .env:  CLAUDE_CODE_OAUTH_TOKEN="sk-ant-oat01-..."
+```
+
+The token authenticates as — and bills against — your existing Claude subscription (no extra API
+charges), and because it no longer shares the interactive Keychain credential the rotation that
+caused the 401s goes away. When a run still fails to authenticate, `activation.log` now prints an
+explicit hint pointing back to `claude setup-token`.
+
 After changing schedule or label values, reinstall the LaunchAgent:
 
 ```sh

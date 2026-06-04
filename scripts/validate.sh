@@ -29,6 +29,7 @@ fi
 ./install.sh app-status >/tmp/stoker-app-status.json
 tests/activation-state.test.sh
 tests/keep-awake-config.test.sh
+tests/claude-oauth-token.test.sh
 tests/codex-probe-command.test.sh
 tests/swift-core.test.sh
 tests/release-packaging.test.sh
