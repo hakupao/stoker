@@ -14,7 +14,7 @@
 [![CI](https://github.com/hakupao/stoker/actions/workflows/ci.yml/badge.svg)](https://github.com/hakupao/stoker/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/macOS-14%2B-000000?logo=apple&logoColor=white)](#环境要求)
-[![Version](https://img.shields.io/badge/version-0.2.4-E36E43)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.0-E36E43)](CHANGELOG.md)
 [![Website](https://img.shields.io/badge/Website-stoker.bojiangz.com-E36E43?logo=githubpages&logoColor=white)](https://stoker.bojiangz.com/)
 
 ![Bash](https://img.shields.io/badge/Bash-4EAA25?logo=gnubash&logoColor=white)
@@ -206,6 +206,10 @@ claude setup-token          # 打开浏览器，输出 sk-ant-oat01-...
 和交互式会话共用钥匙串凭证，导致 401 的轮换问题随之消失。若某次仍认证失败，`activation.log` 现在
 会打印一条明确指向 `claude setup-token` 的提示。
 
+**也可以在菜单栏 App 里一键完成。** 打开 **设置 → 后台认证 → 配置长效令牌**，在弹出的浏览器中完成
+登录，App 会自动运行 `claude setup-token`、抓取令牌并写入 `.env`——无需开终端、无需复制粘贴；并始终
+提供「在终端运行 + 手动粘贴」（带格式校验）的兜底方式。
+
 修改时间或 label 后，重新安装一次：
 
 ```sh
@@ -255,6 +259,8 @@ CLI/launchd 仍然是主引擎；菜单栏 App 是单独给初学者使用的 GU
   session）的运行记录时间线，以及带「时间范围 / 状态 / 工具」筛选的统计条。
 - **设置** —— 编辑相互独立的多个触发时间、开关 Claude/Codex、配置高级选项（额度预检、运行后快照、
   防睡眠、开机自启）。
+- **后台认证** —— 一眼看清定时任务的认证方式，并一键配置长效 `CLAUDE_CODE_OAUTH_TOKEN`，让定时任务
+  不再退回会轮换的钥匙串登录（并提供手动粘贴兜底）。
 - **双语界面**，右上角 EN / 中 一键切换；主题随系统明暗自动适配。
 - **环境检查**，自动检测必需与可选的命令行工具。
 - **运行记录可导出 CSV。**

@@ -10,3 +10,4 @@ logs/*.jsonl
 logs/raw/
 run/
 launchd/*.plist
+.claude/

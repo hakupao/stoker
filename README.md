@@ -14,7 +14,7 @@ fixed times, then records activation logs, per-run token usage, and quota status
 [![CI](https://github.com/hakupao/stoker/actions/workflows/ci.yml/badge.svg)](https://github.com/hakupao/stoker/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/macOS-14%2B-000000?logo=apple&logoColor=white)](#requirements)
-[![Version](https://img.shields.io/badge/version-0.2.4-E36E43)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.0-E36E43)](CHANGELOG.md)
 [![Website](https://img.shields.io/badge/Website-stoker.bojiangz.com-E36E43?logo=githubpages&logoColor=white)](https://stoker.bojiangz.com/)
 
 ![Bash](https://img.shields.io/badge/Bash-4EAA25?logo=gnubash&logoColor=white)
@@ -223,6 +223,11 @@ charges), and because it no longer shares the interactive Keychain credential th
 caused the 401s goes away. When a run still fails to authenticate, `activation.log` now prints an
 explicit hint pointing back to `claude setup-token`.
 
+**Or set it up in one click (menu bar app).** Open **Settings → Background auth → Configure token**,
+finish the login in the browser that opens, and the app runs `claude setup-token`, captures the
+token, and writes it to `.env` for you — no terminal, no copy-paste. A manual "run in Terminal +
+paste" path (with format validation) is always available as a fallback.
+
 After changing schedule or label values, reinstall the LaunchAgent:
 
 ```sh
@@ -277,6 +282,9 @@ Highlights:
   date-range / status / tool filters.
 - **Settings** — edit independent schedule times, toggle Claude/Codex, and configure advanced
   options (quota preflight, post-run snapshots, keep-awake, launch at login).
+- **Background auth** — at-a-glance status of how scheduled runs authenticate, plus one-click setup
+  of a long-lived `CLAUDE_CODE_OAUTH_TOKEN` so they never fall back to the rotating Keychain login
+  (with a manual paste fallback).
 - **Bilingual UI** with an EN / 中 switch; the appearance follows the system Light/Dark setting.
 - **Environment Check** that detects required and optional CLI tools.
 - **Export run history to CSV.**

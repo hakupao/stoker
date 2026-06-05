@@ -213,6 +213,8 @@ private struct UnifiedHeader: View {
                 TabPicker(selected: $selectedTab)
             }
 
+            AuthStatusBar(model: model, selectedTab: $selectedTab)
+
             if let mismatch = model.state?.launchctl?.mismatch, !mismatch.isEmpty {
                 // Persistent warning: a LaunchAgent is loaded from a different
                 // root, so `installed` reads false and the toggle shows OFF.
@@ -231,6 +233,53 @@ private struct UnifiedHeader: View {
         // shift is intentional and warms together with the rest of the window.
         .background(theme.header)
         .animation(.easeInOut(duration: 0.25), value: model.statusMessage)
+    }
+}
+
+// MARK: - Auth Status Bar
+//
+// Always-visible (both tabs) one-line indicator of how scheduled background runs authenticate:
+// green shield = their own long-lived token; amber shield = borrowing the rotating Keychain login
+// (can 401 overnight). The trailing button jumps straight to the Advanced → Background auth row.
+private struct AuthStatusBar: View {
+    @ObservedObject var model: StokerAppModel
+    @Binding var selectedTab: MainTab
+    @Environment(\.stokerTheme) private var theme
+
+    private var healthy: Bool { model.hasOAuthToken }
+    private var accent: Color { healthy ? theme.positive : theme.warning }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: healthy ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(accent)
+            Text(L10n.backgroundAuth)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(theme.textMuted)
+            Text(healthy ? L10n.authModeToken : L10n.authModeKeychain)
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundStyle(accent)
+            Spacer()
+            Button {
+                selectedTab = .settings
+                model.focusBackgroundAuth = true
+            } label: {
+                HStack(spacing: 3) {
+                    Text(healthy ? L10n.manage : L10n.setUpNow)
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 8, weight: .bold))
+                }
+                .foregroundStyle(healthy ? theme.textSecondary : theme.accentText)
+                .padding(.horizontal, 10)
+                .frame(height: 22)
+                .background(healthy ? theme.fillSubtle : theme.accentOn.opacity(0.16))
+                .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .help(healthy ? L10n.authModeToken : L10n.authKeychainWarning)
+        }
     }
 }
 
@@ -317,14 +366,34 @@ struct SettingsTabContent: View {
     @ObservedObject var model: StokerAppModel
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 12) {
-                ScheduleCard(model: model)
-                ToolCard(model: model)
-                AdvancedSection(model: model)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 12) {
+                    ScheduleCard(model: model)
+                    ToolCard(model: model)
+                    BackgroundAuthCard(model: model)
+                    AdvancedSection(model: model)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 14)
+            .onAppear { if model.focusBackgroundAuth { scrollToAuth(proxy) } }
+            .onChange(of: model.focusBackgroundAuth) { _, focus in
+                if focus { scrollToAuth(proxy) }
+            }
+        }
+    }
+
+    /// Give AdvancedSection a beat to expand, then center the background-auth row and clear the
+    /// one-shot trigger.
+    private func scrollToAuth(_ proxy: ScrollViewProxy) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.4))
+            withAnimation(.easeInOut(duration: 0.3)) {
+                proxy.scrollTo("backgroundAuth", anchor: .center)
+            }
+            try? await Task.sleep(for: .seconds(1.6))
+            model.focusBackgroundAuth = false
         }
     }
 }
@@ -338,7 +407,7 @@ struct BottomActionBar: View {
     @Environment(\.stokerTheme) private var theme
 
     private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.2.4"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.0"
     }
 
     var body: some View {
