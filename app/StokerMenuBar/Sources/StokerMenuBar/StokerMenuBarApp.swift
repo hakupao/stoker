@@ -69,6 +69,13 @@ final class StokerAppModel: ObservableObject {
     @Published var isBusy = false
     @Published var launchAtLogin: Bool
     @Published var requestToolCheck = false
+    /// Whether `.env` carries a non-empty `CLAUDE_CODE_OAUTH_TOKEN` — i.e. scheduled
+    /// runs authenticate with their own long-lived token instead of borrowing the
+    /// rotating interactive Keychain login (which makes unattended runs 401 overnight).
+    @Published var hasOAuthToken = false
+    /// One-shot trigger: the header's auth chip sets this to jump the user to the background-auth
+    /// row (switch to Settings, expand Advanced, scroll + highlight). SettingsTabContent resets it.
+    @Published var focusBackgroundAuth = false
     /// Free-running counter that drives the menu-bar flame flicker (see `StokerFlameIcon`).
     @Published var flameFrame = 0
 
@@ -80,6 +87,7 @@ final class StokerAppModel: ObservableObject {
         root = ProjectLocator.findRoot()
         settings = AppSettings(values: EnvParser.parse(Self.readEnv(root: root)))
         launchAtLogin = SMAppService.mainApp.status == .enabled
+        hasOAuthToken = Self.detectOAuthToken(root: root)
         updateKeepAwakeProcess()
         // Load state once at launch so the menu-bar flame reflects the real
         // schedule immediately. The menu's `.task` only fires when the menu is
@@ -127,9 +135,14 @@ final class StokerAppModel: ObservableObject {
             let output = try await runExecutable(root.appendingPathComponent("bin/activation-state.sh"), arguments: ["--json"])
             let data = Data(output.utf8)
             state = try JSONDecoder().decode(ActivationState.self, from: data)
+            // Read `.env` once: refresh the auth indicator every tick (cheap, and reading
+            // raw values never clobbers unsaved edits the user is typing into `settings`),
+            // but only rehydrate `settings` when asked.
+            let values = EnvParser.parse(Self.readEnv(root: root))
             if reloadSettings {
-                settings = AppSettings(values: EnvParser.parse(Self.readEnv(root: root)))
+                settings = AppSettings(values: values)
             }
+            hasOAuthToken = !((values["CLAUDE_CODE_OAUTH_TOKEN"] ?? "").isEmpty)
             updateKeepAwakeProcess()
             updateFlameTimer()
         } catch {
@@ -210,6 +223,39 @@ final class StokerAppModel: ObservableObject {
         }
     }
 
+    /// Persist a `claude setup-token` value into `.env` as `CLAUDE_CODE_OAUTH_TOKEN` so
+    /// scheduled launchd runs authenticate with their own long-lived token. Touches only
+    /// that one key (every other setting and comment in `.env` is preserved). Returns
+    /// whether the token looked valid and was written.
+    @discardableResult
+    func saveOAuthToken(_ token: String) -> Bool {
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Real setup tokens are ~108 chars; require the prefix AND a realistic minimum length so a
+        // half-copied paste (or a truncated capture) can't overwrite a working token with a broken one.
+        guard trimmed.hasPrefix("sk-ant-oat01-"), trimmed.count >= 80 else {
+            showStatus(L10n.authTokenInvalid, isError: true)
+            return false
+        }
+        do {
+            let envURL = root.appendingPathComponent(".env")
+            let existing: String
+            if FileManager.default.fileExists(atPath: envURL.path) {
+                existing = try String(contentsOf: envURL, encoding: .utf8)
+            } else {
+                existing = Self.readEnv(root: root)
+            }
+            let updated = EnvFile.updating(existing, values: ["CLAUDE_CODE_OAUTH_TOKEN": trimmed])
+            try updated.write(to: envURL, atomically: true, encoding: .utf8)
+            hasOAuthToken = true
+            showStatus(L10n.authSaved, isError: false, duration: .seconds(6))
+            Task { await refresh() }
+            return true
+        } catch {
+            showStatus(L10n.saveFailed, isError: true)
+            return false
+        }
+    }
+
     func setLaunchAtLogin(_ enabled: Bool) {
         do {
             if enabled {
@@ -223,11 +269,11 @@ final class StokerAppModel: ObservableObject {
         }
     }
 
-    func showStatus(_ message: String, isError: Bool) {
+    func showStatus(_ message: String, isError: Bool, duration: Duration = .seconds(3)) {
         statusMessage = message
         statusIsError = isError
         Task {
-            try? await Task.sleep(for: .seconds(3))
+            try? await Task.sleep(for: duration)
             if statusMessage == message {
                 withAnimation(.easeOut(duration: 0.3)) {
                     statusMessage = ""
@@ -317,6 +363,11 @@ final class StokerAppModel: ObservableObject {
         }
         let example = root.appendingPathComponent(".env.example")
         return (try? String(contentsOf: example, encoding: .utf8)) ?? ""
+    }
+
+    private static func detectOAuthToken(root: URL) -> Bool {
+        let values = EnvParser.parse(readEnv(root: root))
+        return !((values["CLAUDE_CODE_OAUTH_TOKEN"] ?? "").isEmpty)
     }
 }
 
@@ -1200,6 +1251,125 @@ struct ToolToggleTile: View {
         }
         .buttonStyle(PressButtonStyle())
         .animation(.easeInOut(duration: 0.2), value: isOn.wrappedValue)
+    }
+}
+
+// MARK: - Background Auth Card
+//
+// First-class Settings card (mirrors ScheduleCard/ToolCard) for how scheduled launchd runs
+// authenticate: their own long-lived setup-token (healthy) vs. the rotating Keychain login that
+// can 401 overnight. It owns the one-click setup sheet and is the jump target for the header chip
+// (anchor id "backgroundAuth" + a brief highlight ring on focus).
+struct BackgroundAuthCard: View {
+    @ObservedObject var model: StokerAppModel
+    @Environment(\.stokerTheme) private var theme
+    @State private var showAuthSheet = false
+    @State private var highlight = false
+
+    private var isHealthy: Bool { model.hasOAuthToken }
+    private var accent: Color { isHealthy ? theme.positive : theme.warning }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            cardHeader
+            statusStrip
+            detailText
+            actionButton
+        }
+        .padding(DS.cardPadding)
+        .background(cardBackground)
+        .overlay(cardBorder)
+        .shadow(color: highlight ? theme.accentOn.opacity(0.35) : .clear, radius: 10)
+        .id("backgroundAuth")
+        .sheet(isPresented: $showAuthSheet) {
+            SetupTokenSheet(model: model)
+        }
+        .onAppear { if model.focusBackgroundAuth { pulse() } }
+        .onChange(of: model.focusBackgroundAuth) { _, focus in
+            if focus { pulse() }
+        }
+    }
+
+    private var cardHeader: some View {
+        Label {
+            Text(L10n.backgroundAuth)
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+        } icon: {
+            Image(systemName: "key.horizontal.fill")
+                .foregroundStyle(theme.accent)
+        }
+    }
+
+    // Health-tinted status strip, echoing the ToolToggleTile treatment.
+    private var statusStrip: some View {
+        let tint = accent
+        return HStack(spacing: 8) {
+            Image(systemName: isHealthy ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(tint)
+            Text(isHealthy ? L10n.authModeToken : L10n.authModeKeychain)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundStyle(theme.onSurface)
+            Spacer()
+            Text(isHealthy ? L10n.authHealthyTag : L10n.authAttentionTag)
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundStyle(tint)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(tint.opacity(0.16)))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(tint.opacity(0.08)))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(tint.opacity(0.28), lineWidth: 1))
+    }
+
+    private var detailText: some View {
+        Text(isHealthy ? L10n.authHealthyDetail : L10n.authKeychainWarning)
+            .font(.system(size: 12))
+            .foregroundStyle(theme.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var cardBackground: some View {
+        RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous).fill(theme.card)
+    }
+
+    private var cardBorder: some View {
+        RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous)
+            .strokeBorder(highlight ? theme.accentOn : theme.hairline, lineWidth: highlight ? 2 : 1)
+    }
+
+    @ViewBuilder
+    private var actionButton: some View {
+        if isHealthy {
+            Button { showAuthSheet = true } label: { ctaLabel(L10n.reauthenticate) }
+                .buttonStyle(.bordered)
+                .tint(theme.accent)
+                .controlSize(.large)
+        } else {
+            Button { showAuthSheet = true } label: { ctaLabel(L10n.authenticate) }
+                .buttonStyle(.borderedProminent)
+                .tint(theme.accentOn)
+                .controlSize(.large)
+        }
+    }
+
+    private func ctaLabel(_ title: String) -> some View {
+        Label(title, systemImage: "key.horizontal")
+            .font(.system(size: 13, weight: .semibold, design: .rounded))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 2)
+    }
+
+    /// Brief highlight ring so a jump from the header chip lands somewhere obvious; the actual
+    /// scroll is performed by SettingsTabContent, which also clears the trigger.
+    private func pulse() {
+        withAnimation(.easeInOut(duration: 0.3)) { highlight = true }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.8))
+            withAnimation(.easeOut(duration: 0.5)) { highlight = false }
+        }
     }
 }
 

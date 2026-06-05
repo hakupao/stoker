@@ -219,6 +219,98 @@ public enum L10n {
         AppLanguage.current == .zh ? "登录启动设置失败" : "Launch at login failed"
     }
 
+    // MARK: - Background Auth
+    public static var backgroundAuth: String {
+        AppLanguage.current == .zh ? "后台认证" : "Background auth"
+    }
+    public static var authModeToken: String {
+        AppLanguage.current == .zh ? "长效令牌" : "Long-lived token"
+    }
+    public static var authModeKeychain: String {
+        AppLanguage.current == .zh ? "钥匙串登录" : "Keychain login"
+    }
+    /// Shown in the keychain-fallback state: why unattended runs are unreliable without a token.
+    public static var authKeychainWarning: String {
+        AppLanguage.current == .zh
+            ? "未配置长效令牌，后台运行将沿用交互式钥匙串登录，可能因令牌过期而中断并需重新登录。"
+            : "No long-lived token configured. Background runs fall back to the interactive Keychain login, which may expire and require re-login."
+    }
+    public static var authenticate: String {
+        AppLanguage.current == .zh ? "配置长效令牌" : "Configure token"
+    }
+    public static var reauthenticate: String {
+        AppLanguage.current == .zh ? "重新生成令牌" : "Regenerate token"
+    }
+    public static var authSheetTitle: String {
+        AppLanguage.current == .zh ? "配置后台认证令牌" : "Configure background authentication"
+    }
+    public static var authSheetIntro: String {
+        AppLanguage.current == .zh
+            ? "在弹出的浏览器中完成登录，令牌将自动写入 .env。此后 launchd 定时任务可独立认证，无需 /login，且不影响交互式会话。令牌有效期约一年，按订阅计费。"
+            : "Complete the login in the browser that opens; the token is written to .env automatically. Scheduled launchd runs then authenticate independently, with no /login required and no impact on interactive sessions. The token is valid for about one year and bills to your subscription."
+    }
+    public static var authStart: String {
+        AppLanguage.current == .zh ? "开始（将打开浏览器）" : "Start (opens browser)"
+    }
+    public static var authWaiting: String {
+        AppLanguage.current == .zh ? "等待浏览器登录完成…" : "Waiting for browser login…"
+    }
+    public static var authOpenLoginPage: String {
+        AppLanguage.current == .zh ? "打开登录页面" : "Open login page"
+    }
+    public static var authPasteManually: String {
+        AppLanguage.current == .zh ? "手动输入令牌" : "Enter token manually"
+    }
+    public static var authOpenInTerminal: String {
+        AppLanguage.current == .zh ? "在终端运行 claude setup-token" : "Run claude setup-token in Terminal"
+    }
+    public static var authPastePlaceholder: String { "sk-ant-oat01-…" }
+    public static var authSaved: String {
+        AppLanguage.current == .zh ? "令牌已保存至 .env" : "Token saved to .env"
+    }
+    public static var authSavedDetail: String {
+        AppLanguage.current == .zh
+            ? "后台运行将使用此长效令牌独立认证，无需 /login，且不影响交互式会话。"
+            : "Background runs will authenticate with this long-lived token — no /login required, with no impact on interactive sessions."
+    }
+    public static var done: String {
+        AppLanguage.current == .zh ? "完成" : "Done"
+    }
+    public static var manage: String {
+        AppLanguage.current == .zh ? "管理" : "Manage"
+    }
+    public static var setUpNow: String {
+        AppLanguage.current == .zh ? "配置" : "Configure"
+    }
+    public static var authHealthyTag: String {
+        AppLanguage.current == .zh ? "已配置" : "Configured"
+    }
+    public static var authAttentionTag: String {
+        AppLanguage.current == .zh ? "未配置" : "Not configured"
+    }
+    public static var authHealthyDetail: String {
+        AppLanguage.current == .zh
+            ? "后台运行正使用专属长效令牌认证，稳定可靠；可随时重新生成。"
+            : "Background runs authenticate with a dedicated long-lived token. You can regenerate it at any time."
+    }
+    public static var authTokenInvalid: String {
+        AppLanguage.current == .zh ? "令牌格式无效（须以 sk-ant-oat01- 开头）。" : "Invalid token format (must start with sk-ant-oat01-)."
+    }
+    public static var authFailed: String {
+        AppLanguage.current == .zh ? "未能获取令牌，请重试或手动输入。" : "Could not obtain the token. Retry, or enter it manually."
+    }
+    public static var authTimedOut: String {
+        AppLanguage.current == .zh ? "操作超时，请重试或手动输入。" : "Timed out. Retry, or enter the token manually."
+    }
+    public static var authClaudeNotFound: String {
+        AppLanguage.current == .zh
+            ? "未找到 claude 命令，请确认已安装，或手动输入令牌。"
+            : "claude command not found. Verify it is installed, or enter the token manually."
+    }
+    public static var authPtyFailed: String {
+        AppLanguage.current == .zh ? "无法启动认证流程，请改用手动输入。" : "Could not start authentication. Enter the token manually."
+    }
+
     // MARK: - Onboarding
     public static var environmentCheckTitle: String {
         AppLanguage.current == .zh ? "环境检查" : "Environment Check"

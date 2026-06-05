@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.3.0 - 2026-06-05
+
+### Headless authentication (CLI)
+- Scheduled `claude -p` runs can now authenticate with a dedicated long-lived
+  `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) set in `.env`, instead of borrowing the
+  short-lived interactive Keychain login. That shared login was being rotated out from under
+  unattended runs and caused intermittent `401 Invalid authentication credentials`. The token
+  bills against your existing Claude subscription (no extra API charges); `dry-run` and
+  `activation.log` now report the auth mode, and a failed run prints an actionable re-mint hint.
+
+### One-click background authentication (menu bar app)
+- New **Background auth** card in Settings shows at a glance whether scheduled runs use their own
+  long-lived token or are falling back to the rotating Keychain login, with one-click setup.
+- **Configure token** runs `claude setup-token` for you in a pseudo-terminal (so the real OAuth
+  browser flow opens), captures the printed `sk-ant-oat01-…`, and writes it to `.env` — no
+  terminal, no copy-paste. A manual "run in Terminal + paste" path with format validation is
+  always available as a fallback, and token capture is hardened (escape-stripped, frame-split,
+  length-checked) so a truncated or garbled value can never overwrite a working token.
+- A compact auth-status chip in the header (visible from both tabs) jumps straight to the card and
+  highlights it.
+
 ## 0.2.4 - 2026-06-02
 
 ### Run history — clear status markers
