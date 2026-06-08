@@ -419,6 +419,15 @@ enum DS {
         guard let pct else { return "--" }
         return "\(Int(pct.rounded()))%"
     }
+
+    /// Single source of truth for the quota *health* color (by remaining %): the header mini-bar
+    /// and the Activity gauge both call this, so a low-quota warning reads the same everywhere.
+    static func quotaColor(_ pct: Double?, theme: StokerTheme) -> Color {
+        guard let pct else { return theme.textMuted }
+        if pct > 50 { return theme.positive }
+        if pct > 20 { return theme.warning }
+        return theme.danger
+    }
 }
 
 // MARK: - Stoker "Forge" Theme (appearance × state aware)

@@ -190,10 +190,14 @@ public enum QuotaWindowType: String, CaseIterable, Sendable {
 // MARK: - Chart Data
 
 public struct QuotaChartPoint: Identifiable, Sendable {
-    public var id: String { "\(tool)-\(date.timeIntervalSince1970)" }
+    public var id: String { "\(tool)-\(segment)-\(date.timeIntervalSince1970)" }
     public var date: Date
     public var tool: String
     public var remainingPercent: Double
+    /// Monotonic index that bumps at each quota *reset* (an upward jump in remaining%), so the
+    /// chart can break the line per window instead of drawing a fake "refill" ramp across a
+    /// reset boundary. Points sharing (tool, segment) form one continuous line.
+    public var segment: Int
 }
 
 // MARK: - LogStore
@@ -241,17 +245,36 @@ public final class LogStore: ObservableObject {
         .sorted { ($0.date ?? .distantPast) < ($1.date ?? .distantPast) }
     }
 
+    /// Build chart points for the selected window, tagging each with a `segment` that bumps
+    /// whenever remaining% jumps *up* (a quota reset). filteredStatus is already sorted ascending
+    /// by date, so one pass — keyed per tool — assigns segments correctly even though Claude and
+    /// Codex rows are interleaved.
     public func chartPoints(window: QuotaWindowType) -> [QuotaChartPoint] {
-        filteredStatus.compactMap { record in
-            guard let date = record.date else { return nil }
+        let resetJump = 2.0  // above this, a rise reads as a reset rather than snapshot noise
+        var lastPct: [String: Double] = [:]
+        var segmentOf: [String: Int] = [:]
+        var out: [QuotaChartPoint] = []
+        for record in filteredStatus {
+            guard let date = record.date else { continue }
             let pct: Double?
             switch window {
             case .fiveHour: pct = record.fiveHour?.remainingPercent
             case .weekly: pct = record.weekly?.remainingPercent
             }
-            guard let pct else { return nil }
-            return QuotaChartPoint(date: date, tool: record.tool.capitalized, remainingPercent: pct)
+            guard let pct else { continue }
+            let key = record.tool
+            if let prev = lastPct[key], pct > prev + resetJump {
+                segmentOf[key, default: 0] += 1
+            }
+            lastPct[key] = pct
+            out.append(QuotaChartPoint(
+                date: date,
+                tool: record.tool.capitalized,
+                remainingPercent: pct,
+                segment: segmentOf[key, default: 0]
+            ))
         }
+        return out
     }
 
     public var totalRuns: Int { filteredUsage.count }

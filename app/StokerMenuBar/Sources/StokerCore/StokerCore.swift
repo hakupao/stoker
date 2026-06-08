@@ -268,12 +268,15 @@ public struct ActivationState: Decodable {
 
     public struct ToolQuota: Decodable {
         public var ok: Bool?
+        /// Timestamp of the snapshot row this quota came from (log format, e.g.
+        /// "2026-06-08 13:07:11 JST") — lets the UI honestly show "updated HH:mm".
+        public var timestamp: String?
         public var fiveHour: QuotaWindow?
         public var weekly: QuotaWindow?
         public var sonnetWeekly: QuotaWindow?
 
         private enum CodingKeys: String, CodingKey {
-            case ok
+            case ok, timestamp
             case fiveHour = "five_hour"
             case weekly
             case sonnetWeekly = "sonnet_weekly"

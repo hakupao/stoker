@@ -357,6 +357,43 @@ public enum L10n {
     public static var quotaTrend: String {
         AppLanguage.current == .zh ? "额度趋势" : "Quota Trend"
     }
+    public static var quotaOverview: String {
+        AppLanguage.current == .zh ? "额度概览" : "Quota Overview"
+    }
+    /// Shown in a gauge row when a tool is configured but its latest snapshot has no readable quota.
+    public static var quotaUnknownShort: String {
+        AppLanguage.current == .zh ? "额度未知" : "Quota unknown"
+    }
+    /// Inline tag on the gauge bar so the % is unambiguously "remaining", not "used".
+    public static var remaining: String {
+        AppLanguage.current == .zh ? "剩余" : "Remaining"
+    }
+    /// Reset countdown from the snapshot's absolute reset time (accurate even when the remaining%
+    /// reading is stale). Returns nil once the reset is in the past. Scales the unit to the
+    /// distance — minutes < 1h, hours < 1 day, else days — so the weekly window (resets up to
+    /// ~7 days out) reads "3 天后重置" instead of "71 小时后重置".
+    public static func resetsIn(_ resetAt: Date, now: Date) -> String? {
+        let secs = resetAt.timeIntervalSince(now)
+        guard secs > 0 else { return nil }
+        let totalMin = Int(secs / 60)
+        let h = totalMin / 60
+        let m = totalMin % 60
+        let d = Int((Double(h) / 24).rounded())
+        if AppLanguage.current == .zh {
+            if h >= 24 { return "\(d) 天后重置" }
+            if h >= 1 { return "\(h) 小时后重置" }
+            return "\(max(1, m)) 分钟后重置"
+        } else {
+            if h >= 24 { return "resets in \(d)d" }
+            if h >= 1 { return "resets in \(h)h" }
+            return "resets in \(max(1, m))m"
+        }
+    }
+    /// Honest "as of" label for the gauge — the remaining% is the last snapshot's value, not live.
+    public static func updatedAt(_ date: Date) -> String {
+        let t = LogTimestamp.display(date)
+        return AppLanguage.current == .zh ? "更新于 \(t)" : "updated \(t)"
+    }
     public static var allTools: String {
         AppLanguage.current == .zh ? "全部" : "All"
     }

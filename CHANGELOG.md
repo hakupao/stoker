@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.3.1 - 2026-06-08
+
+### Quota chart redesign (menu bar app)
+- The Activity tab's quota chart is now a clearer **Quota Overview**: per-tool gauges show the
+  current remaining quota with an explicit "Remaining N%" label (health-colored, so low quota warns
+  at a glance) and a reset countdown, above a clean mini-trend. The trend drops the decorative
+  shaded area, breaks the line at each window reset instead of drawing a misleading "refill" ramp,
+  dots the real snapshots, adds top headroom so a full 100% no longer clips, and shows the value on
+  hover.
+- A tool that isn't reporting now reads an honest "Quota unknown" with an "updated HH:mm" stamp
+  instead of a blank or misleading line.
+- The quota *health* color is now shared between the header mini-bar and the gauge (one definition),
+  and the gauge reads the same single quota source as the header and the menu summary instead of
+  recomputing it.
+
 ## 0.3.0 - 2026-06-05
 
 ### Headless authentication (CLI)

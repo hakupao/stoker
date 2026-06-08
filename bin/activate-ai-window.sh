@@ -499,7 +499,7 @@ send({
   id: 1,
   method: "initialize",
   params: {
-    clientInfo: { name: "stoker", version: "0.3.0" },
+    clientInfo: { name: "stoker", version: "0.3.1" },
     capabilities: null,
   },
 });

@@ -54,7 +54,7 @@ private struct MainPanel: View {
                 Group {
                     switch selectedTab {
                     case .activity:
-                        ActivityTabContent(logStore: logStore)
+                        ActivityTabContent(logStore: logStore, model: model)
                     case .settings:
                         SettingsTabContent(model: model)
                     }
@@ -326,12 +326,8 @@ private struct QuotaMiniBar: View {
 
     private var percent: Double? { window?.remainingPercent }
 
-    private var quotaColor: Color {
-        guard let percent else { return theme.textMuted }
-        if percent > 50 { return theme.positive }
-        if percent > 20 { return theme.warning }
-        return theme.danger
-    }
+    // Health color shared with the Activity gauge (one definition in DS.quotaColor).
+    private var quotaColor: Color { DS.quotaColor(percent, theme: theme) }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -407,7 +403,7 @@ struct BottomActionBar: View {
     @Environment(\.stokerTheme) private var theme
 
     private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.0"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.1"
     }
 
     var body: some View {

@@ -6,13 +6,13 @@ import SwiftUI
 
 struct ActivityTabContent: View {
     @ObservedObject var logStore: LogStore
+    @ObservedObject var model: StokerAppModel
     @State private var chartWindow: QuotaWindowType = .fiveHour
     @State private var statusFilter: StatusFilter = .all
 
     var body: some View {
         VStack(spacing: 10) {
-            QuotaChart(logStore: logStore, chartWindow: $chartWindow)
-                .frame(height: 150)
+            QuotaOverviewCard(logStore: logStore, model: model, chartWindow: $chartWindow)
 
             HStack(spacing: 0) {
                 StatsStrip(logStore: logStore)
@@ -33,17 +33,43 @@ struct ActivityTabContent: View {
     }
 }
 
-// MARK: - Quota Chart
+// MARK: - Quota Overview (current gauges + mini trend)
 
-private struct QuotaChart: View {
+/// Replaces the old dual-area trend chart. The top "gauges" show each tool's current remaining%
+/// (last snapshot) with a reset countdown; those colored rows double as the legend for the mini
+/// trend below. The trend is a clean line — no decorative area, broken at resets, real samples
+/// dotted, with a hover readout.
+private struct QuotaOverviewCard: View {
     @ObservedObject var logStore: LogStore
+    @ObservedObject var model: StokerAppModel
     @Binding var chartWindow: QuotaWindowType
     @Environment(\.stokerTheme) private var theme
 
+    /// Current per-tool quota straight from `model.state.quota` — the SAME source the header
+    /// mini-bar and the menu summary read (one "latest per tool" computation, done once in the
+    /// engine). Honors the tool filter; only tools that have produced a snapshot row appear.
+    private var gaugeTools: [String] {
+        guard let quota = model.state?.quota else { return [] }
+        let wanted: Set<String>
+        switch logStore.toolFilter {
+        case .all: wanted = ["claude", "codex"]
+        case .claude: wanted = ["claude"]
+        case .codex: wanted = ["codex"]
+        }
+        return ["claude", "codex"].filter { wanted.contains($0) && quota[$0] != nil }
+    }
+
+    private func window(for tool: String) -> ActivationState.QuotaWindow? {
+        let q = model.state?.quota[tool]
+        return chartWindow == .fiveHour ? q?.fiveHour : q?.weekly
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(L10n.quotaTrend)
+        let points = logStore.chartPoints(window: chartWindow)
+
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Text(L10n.quotaOverview)
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(theme.textSecondary)
 
@@ -54,7 +80,7 @@ private struct QuotaChart: View {
                     Text(L10n.weekly).tag(QuotaWindowType.weekly)
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 140)
+                .frame(width: 130)
 
                 Picker("", selection: $logStore.toolFilter) {
                     Text(L10n.allTools).tag(ToolFilter.all)
@@ -64,81 +90,26 @@ private struct QuotaChart: View {
                 .frame(width: 90)
             }
 
-            let data = logStore.chartPoints(window: chartWindow)
-
-            if data.isEmpty {
+            if gaugeTools.isEmpty {
                 Text(L10n.noData)
                     .font(.system(size: 12))
                     .foregroundStyle(theme.textMuted)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .frame(maxWidth: .infinity, minHeight: 90, alignment: .center)
             } else {
-                let claudeData = data.filter { $0.tool == "Claude" }
-                let codexData = data.filter { $0.tool == "Codex" }
-
-                Chart {
-                    ForEach(claudeData) { pt in
-                        AreaMark(
-                            x: .value("T", pt.date),
-                            y: .value("R", pt.remainingPercent),
-                            series: .value("Tool", "Claude")
+                VStack(spacing: 8) {
+                    ForEach(gaugeTools, id: \.self) { tool in
+                        GaugeRow(
+                            tool: tool,
+                            window: window(for: tool),
+                            asOf: model.state?.quota[tool]?.timestamp.flatMap(LogTimestamp.parse)
                         )
-                        .foregroundStyle(theme.seriesClaude.opacity(0.12))
-                        .interpolationMethod(.monotone)
-
-                        LineMark(
-                            x: .value("T", pt.date),
-                            y: .value("R", pt.remainingPercent),
-                            series: .value("Tool", "Claude")
-                        )
-                        .foregroundStyle(theme.seriesClaude)
-                        .interpolationMethod(.monotone)
-                        .lineStyle(StrokeStyle(lineWidth: 2))
-                    }
-
-                    ForEach(codexData) { pt in
-                        AreaMark(
-                            x: .value("T", pt.date),
-                            y: .value("R", pt.remainingPercent),
-                            series: .value("Tool", "Codex")
-                        )
-                        .foregroundStyle(theme.seriesCodex.opacity(0.12))
-                        .interpolationMethod(.monotone)
-
-                        LineMark(
-                            x: .value("T", pt.date),
-                            y: .value("R", pt.remainingPercent),
-                            series: .value("Tool", "Codex")
-                        )
-                        .foregroundStyle(theme.seriesCodex)
-                        .interpolationMethod(.monotone)
-                        .lineStyle(StrokeStyle(lineWidth: 2))
                     }
                 }
-                .chartYScale(domain: 0...100)
-                .chartYAxis {
-                    AxisMarks(position: .leading, values: [0, 50, 100]) { value in
-                        AxisValueLabel {
-                            if let v = value.as(Int.self) {
-                                Text("\(v)%").font(.system(size: 10)).foregroundStyle(theme.textMuted)
-                            }
-                        }
-                        AxisGridLine(stroke: StrokeStyle(lineWidth: 0.3, dash: [4]))
-                            .foregroundStyle(theme.hairline)
-                    }
-                }
-                .chartXAxis {
-                    AxisMarks(values: .automatic(desiredCount: 4)) { _ in
-                        AxisValueLabel(format: .dateTime.month(.abbreviated).day())
-                            .font(.system(size: 9))
-                            .foregroundStyle(theme.textMuted)
-                        AxisGridLine(stroke: StrokeStyle(lineWidth: 0.2))
-                            .foregroundStyle(theme.hairline)
-                    }
-                }
-                .chartLegend(.hidden)
-                .chartPlotStyle { plotArea in
-                    plotArea.clipped()
-                }
+
+                Rectangle().fill(theme.hairline).frame(height: 1)
+
+                MiniTrend(points: points)
+                    .frame(height: 84)
             }
         }
         .padding(14)
@@ -150,6 +121,203 @@ private struct QuotaChart: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(theme.hairline, lineWidth: 1)
         )
+    }
+}
+
+// MARK: - Gauge Row
+
+/// One tool's current-quota row: colored name (also the trend legend), an explicit "剩余 N%"
+/// (health-colored so low quota warns), a fill bar, and a reset countdown (falls back to an
+/// "updated HH:mm" stamp). Hover spells out remaining vs used so the single bar is unambiguous.
+private struct GaugeRow: View {
+    let tool: String
+    let window: ActivationState.QuotaWindow?
+    let asOf: Date?
+    @Environment(\.stokerTheme) private var theme
+
+    private var color: Color {
+        tool == "claude" ? theme.seriesClaude : theme.seriesCodex
+    }
+    private var name: String {
+        tool == "claude" ? "Claude" : "Codex"
+    }
+    private var remaining: Double? { window?.remainingPercent }
+    private var resetDate: Date? {
+        guard let iso = window?.resetsAt else { return nil }
+        return ISO8601DateFormatter().date(from: iso)
+    }
+    private var trailingText: String {
+        if let reset = resetDate, let s = L10n.resetsIn(reset, now: Date()) { return s }
+        if let asOf { return L10n.updatedAt(asOf) }
+        return ""
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(name)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(color)
+                .frame(width: 52, alignment: .leading)
+
+            // Explicit "剩余 N%" so the bar is never misread as "used"; the % is health-colored.
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                if let pct = remaining {
+                    Text(L10n.remaining)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(theme.textMuted)
+                    Text("\(Int(pct.rounded()))%")
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                        .foregroundStyle(DS.quotaColor(pct, theme: theme))
+                        .monospacedDigit()
+                } else {
+                    Text(L10n.quotaUnknownShort)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(theme.textMuted)
+                }
+            }
+            .frame(width: 110, alignment: .leading)
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(theme.fillSubtle)
+                    if let pct = remaining {
+                        Capsule()
+                            .fill(color)
+                            .frame(width: max(0, geo.size.width * CGFloat(min(100, max(0, pct)) / 100)))
+                    }
+                }
+            }
+            .frame(height: 8)
+
+            Text(trailingText)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(theme.textMuted)
+                .frame(width: 96, alignment: .trailing)
+                .lineLimit(1)
+        }
+        // Spell out remaining vs used on hover so the single bar's meaning is unambiguous.
+        .help(L10n.quotaMiniHelp(remaining: window?.remainingPercent, used: window?.usedPercent))
+    }
+}
+
+// MARK: - Mini Trend
+
+/// Compact history line for the selected window. No area fill; thin per-tool lines colored to
+/// match the gauges above; real snapshots dotted; line broken at resets (one series per
+/// tool+segment); a little top headroom so 100% never clips; hover shows the nearest sample.
+private struct MiniTrend: View {
+    let points: [QuotaChartPoint]
+    @Environment(\.stokerTheme) private var theme
+    @State private var hover: QuotaChartPoint?
+
+    private func color(_ tool: String) -> Color {
+        tool.lowercased() == "claude" ? theme.seriesClaude : theme.seriesCodex
+    }
+
+    var body: some View {
+        if points.isEmpty {
+            Text(L10n.noData)
+                .font(.system(size: 11))
+                .foregroundStyle(theme.textMuted)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        } else {
+            Chart {
+                ForEach(points) { pt in
+                    LineMark(
+                        x: .value("t", pt.date),
+                        y: .value("r", pt.remainingPercent),
+                        series: .value("s", "\(pt.tool)#\(pt.segment)")
+                    )
+                    .foregroundStyle(color(pt.tool))
+                    .interpolationMethod(.monotone)
+                    .lineStyle(StrokeStyle(lineWidth: 1.5))
+
+                    PointMark(
+                        x: .value("t", pt.date),
+                        y: .value("r", pt.remainingPercent)
+                    )
+                    .foregroundStyle(color(pt.tool))
+                    .symbolSize(12)
+                }
+
+                if let h = hover {
+                    RuleMark(x: .value("t", h.date))
+                        .foregroundStyle(theme.hairline)
+                        .lineStyle(StrokeStyle(lineWidth: 1))
+                    PointMark(x: .value("t", h.date), y: .value("r", h.remainingPercent))
+                        .foregroundStyle(color(h.tool))
+                        .symbolSize(44)
+                        .annotation(
+                            position: .top,
+                            spacing: 4,
+                            overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))
+                        ) {
+                            Text("\(h.tool) \(Int(h.remainingPercent.rounded()))% · \(LogTimestamp.display(h.date))")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(theme.onSurface)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(theme.card)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 4)
+                                                .strokeBorder(theme.hairline, lineWidth: 0.5)
+                                        )
+                                )
+                                .fixedSize()
+                        }
+                }
+            }
+            .chartYScale(domain: 0...104)
+            .chartYAxis {
+                AxisMarks(position: .leading, values: [0, 100]) { value in
+                    AxisValueLabel {
+                        if let v = value.as(Int.self) {
+                            Text("\(v)").font(.system(size: 8)).foregroundStyle(theme.textMuted)
+                        }
+                    }
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.3, dash: [3]))
+                        .foregroundStyle(theme.hairline)
+                }
+            }
+            .chartXAxis {
+                AxisMarks(values: .automatic(desiredCount: 3)) { _ in
+                    AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+                        .font(.system(size: 8))
+                        .foregroundStyle(theme.textMuted)
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.2))
+                        .foregroundStyle(theme.hairline)
+                }
+            }
+            .chartLegend(.hidden)
+            .chartOverlay { proxy in
+                GeometryReader { geo in
+                    Rectangle()
+                        .fill(.clear)
+                        .contentShape(Rectangle())
+                        .onContinuousHover { phase in
+                            switch phase {
+                            case .active(let location):
+                                hover = nearest(to: location, proxy: proxy, geo: geo)
+                            case .ended:
+                                hover = nil
+                            }
+                        }
+                }
+            }
+        }
+    }
+
+    private func nearest(to location: CGPoint, proxy: ChartProxy, geo: GeometryProxy) -> QuotaChartPoint? {
+        guard let plotFrame = proxy.plotFrame else { return nil }
+        let plot = geo[plotFrame]
+        let x = location.x - plot.origin.x
+        guard x >= 0, x <= plot.width,
+              let date = proxy.value(atX: x, as: Date.self) else { return nil }
+        return points.min {
+            abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date))
+        }
     }
 }
 
