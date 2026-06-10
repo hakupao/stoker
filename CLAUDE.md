@@ -79,9 +79,13 @@ post-run quota snapshot → release lock. Per-tool calls use `run_with_timeout()
 **Quota preflight** writes a status snapshot, then reads back only the row matching this tool *and*
 `RUN_ID` before deciding. A tool whose quota is exhausted is skipped and recorded to
 `logs/usage.jsonl` with `skipped:true`. When quota can't be determined, it falls back to
-`QUOTA_PREFLIGHT_ON_UNKNOWN` (default `allow`; only the literal `skip` skips). Note the quota
-*sources*: Claude status depends on the **oh-my-claudecode (`omc`) plugin** cache; Codex status
-spawns `codex app-server` over JSON-RPC via an inline **Node.js** heredoc.
+`QUOTA_PREFLIGHT_ON_UNKNOWN` (default `allow`; only the literal `skip` skips). An exhausted
+window whose `resets_at` is already in the past does **not** count as exhausted (snapshots can be
+last-known data). Note the quota *sources*: Claude status reads the **oh-my-claudecode plugin's
+local usage cache** directly (`CLAUDE_STATUS_SOURCE=cache`, the default — zero credential access;
+`omc` forces a live `omc wait status` query, which in headless runs consumes the shared Keychain
+OAuth refresh token without persisting the replacement and logs interactive sessions out); Codex
+status spawns `codex app-server` over JSON-RPC via an inline **Node.js** heredoc.
 
 **Three log streams** under `logs/`: `activation.log` (human-readable), `usage.jsonl` (one row per
 tool run), `status.jsonl` (one row per quota snapshot); raw CLI output goes to `logs/raw/`.

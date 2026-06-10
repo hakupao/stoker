@@ -48,6 +48,8 @@ ENABLE_STATUS_SNAPSHOTS="${ENABLE_STATUS_SNAPSHOTS:-1}"
 ENABLE_QUOTA_PREFLIGHT="${ENABLE_QUOTA_PREFLIGHT:-1}"
 QUOTA_PREFLIGHT_ON_UNKNOWN="${QUOTA_PREFLIGHT_ON_UNKNOWN:-allow}"
 QUOTA_EXHAUSTED_THRESHOLD_PERCENT="${QUOTA_EXHAUSTED_THRESHOLD_PERCENT:-0}"
+CLAUDE_STATUS_SOURCE="${CLAUDE_STATUS_SOURCE:-cache}"
+CLAUDE_USAGE_CACHE_FILE="${CLAUDE_USAGE_CACHE_FILE:-${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/plugins/oh-my-claudecode/.usage-cache-anthropic.json}"
 KEEP_AWAKE_MODE="${KEEP_AWAKE_MODE:-off}"
 KEEP_AWAKE_SECONDS="${KEEP_AWAKE_SECONDS:-900}"
 RUN_ID="${RUN_ID:-$(date '+%Y%m%d-%H%M%S')-$$}"
@@ -88,6 +90,8 @@ Environment overrides:
   ENABLE_QUOTA_PREFLIGHT=1
   QUOTA_PREFLIGHT_ON_UNKNOWN=allow
   QUOTA_EXHAUSTED_THRESHOLD_PERCENT=0
+  CLAUDE_STATUS_SOURCE=cache
+  CLAUDE_USAGE_CACHE_FILE=/path/to/.usage-cache-anthropic.json
   KEEP_AWAKE_MODE=off
   KEEP_AWAKE_SECONDS=900
   JQ_BIN=/path/to/jq
@@ -146,6 +150,14 @@ case "$QUOTA_PREFLIGHT_ON_UNKNOWN" in
   allow|skip) ;;
   *)
     echo "QUOTA_PREFLIGHT_ON_UNKNOWN must be allow or skip" >&2
+    exit 2
+    ;;
+esac
+
+case "$CLAUDE_STATUS_SOURCE" in
+  cache|omc) ;;
+  *)
+    echo "CLAUDE_STATUS_SOURCE must be cache or omc" >&2
     exit 2
     ;;
 esac
@@ -327,28 +339,35 @@ record_claude_status() {
   local output_file
   output_file="${RAW_LOG_DIR}/$(stamp_for_file)-claude-status.log"
   local status_exit=0
-  local auth_status="{}"
-  local cache_file="${HOME}/.claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json"
+  local cache_file="$CLAUDE_USAGE_CACHE_FILE"
 
   if [[ -z "$JQ_BIN" || ! -x "$JQ_BIN" ]]; then
     log "WARNING: jq not found; Claude status snapshot was not recorded"
     return 0
   fi
 
-  if [[ -z "$OMC_BIN" || ! -x "$OMC_BIN" ]]; then
-    log "WARNING: omc not found; Claude quota status snapshot was not recorded"
-    return 1
-  fi
-
-  "$OMC_BIN" wait status >"$output_file" 2>&1 || status_exit=$?
-
-  if [[ -n "$CLAUDE_BIN" && -x "$CLAUDE_BIN" ]]; then
-    auth_status="$("$CLAUDE_BIN" auth status 2>/dev/null || printf '{}')"
+  if [[ "$CLAUDE_STATUS_SOURCE" == "omc" ]]; then
+    # Legacy live query. In an unattended run `omc wait status` reads the shared
+    # Keychain OAuth credential and, once the access token has expired, consumes
+    # its refresh token without being able to persist the replacement — logging
+    # the interactive Claude Code session out. Prefer CLAUDE_STATUS_SOURCE=cache.
+    if [[ -z "$OMC_BIN" || ! -x "$OMC_BIN" ]]; then
+      log "WARNING: omc not found; Claude quota status snapshot was not recorded"
+      return 1
+    fi
+    "$OMC_BIN" wait status >"$output_file" 2>&1 || status_exit=$?
   fi
 
   if [[ ! -f "$cache_file" ]]; then
-    log "WARNING: Claude usage cache not found after status query"
+    log "WARNING: Claude usage cache not found at ${cache_file}; the oh-my-claudecode plugin writes it during interactive Claude Code use"
     return 1
+  fi
+
+  if [[ "$CLAUDE_STATUS_SOURCE" == "cache" ]]; then
+    # No live query: snapshot the plugin's last-known quota so unattended runs
+    # never touch the shared Keychain OAuth credential. cache_age_seconds in the
+    # row tells consumers how old the data is.
+    cp "$cache_file" "$output_file" 2>/dev/null || true
   fi
 
   # shellcheck disable=SC2016 # jq variables are intentionally evaluated by jq.
@@ -356,9 +375,9 @@ record_claude_status() {
     --arg timestamp "$(timestamp)" \
     --arg run_id "$RUN_ID" \
     --arg tool "claude" \
+    --arg status_source "$CLAUDE_STATUS_SOURCE" \
     --argjson query_exit_code "$status_exit" \
-    --arg raw_log "$output_file" \
-    --argjson auth "$auth_status" '
+    --arg raw_log "$output_file" '
       . as $cache
       | ($cache.data // {}) as $d
       | {
@@ -367,8 +386,10 @@ record_claude_status() {
           tool: $tool,
           ok: ($query_exit_code == 0 and ($cache.error // false | not)),
           query_exit_code: $query_exit_code,
+          status_source: $status_source,
           source: ($cache.source // null),
-          subscription_type: ($auth.subscriptionType // null),
+          subscription_type: null,
+          cache_age_seconds: (if $cache.timestamp == null then null else ((now - ($cache.timestamp / 1000)) | round) end),
           cache_timestamp_ms: ($cache.timestamp // null),
           last_success_at_ms: ($cache.lastSuccessAt // null),
           five_hour: {
@@ -393,7 +414,7 @@ record_claude_status() {
       return 1
     }
 
-  log "Claude status snapshot recorded status_log=${STATUS_LOG}"
+  log "Claude status snapshot recorded source=${CLAUDE_STATUS_SOURCE} status_log=${STATUS_LOG}"
 }
 
 record_codex_status() {
@@ -603,16 +624,29 @@ quota_preflight_decision() {
         elif ($x | type) == "string" then ($x | tonumber? // null)
         else null
         end;
-      def exhausted($name; $w):
-        (n($w.remaining_percent // null)) as $remaining
-        | (n($w.used_percent // null)) as $used
-        | if ($remaining != null and $remaining <= $threshold) then
-            $name + "_remaining_exhausted"
-          elif ($used != null and $used >= (100 - $threshold)) then
-            $name + "_used_exhausted"
+      # Snapshots can be last-known data (CLAUDE_STATUS_SOURCE=cache): a window
+      # whose resets_at is already in the past has rolled over since the data
+      # was captured, so it must not count as exhausted.
+      def reset_passed($w):
+        ($w.resets_at // null) as $r
+        | if $r == null then false
           else
-            empty
+            ((try ($r | tostring | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) catch null)) as $t
+            | if $t == null then false else ($t < now) end
           end;
+      def exhausted($name; $w):
+        if reset_passed($w) then empty
+        else
+          (n($w.remaining_percent // null)) as $remaining
+          | (n($w.used_percent // null)) as $used
+          | if ($remaining != null and $remaining <= $threshold) then
+              $name + "_remaining_exhausted"
+            elif ($used != null and $used >= (100 - $threshold)) then
+              $name + "_used_exhausted"
+            else
+              empty
+            end
+        end;
 
       (map(select(.tool == $tool and .run_id == $run_id)) | last // null) as $s
       | if $s == null then
@@ -844,10 +878,16 @@ run_check() {
   else
     log "WARNING: node not found; Codex status snapshots will be disabled"
   fi
-  if [[ -n "$OMC_BIN" && -x "$OMC_BIN" ]]; then
+  if [[ "$CLAUDE_STATUS_SOURCE" == "cache" ]]; then
+    if [[ -f "$CLAUDE_USAGE_CACHE_FILE" ]]; then
+      log "Claude usage cache: $CLAUDE_USAGE_CACHE_FILE"
+    else
+      log "WARNING: Claude usage cache not found at $CLAUDE_USAGE_CACHE_FILE; quota snapshots will be skipped until the oh-my-claudecode plugin writes it"
+    fi
+  elif [[ -n "$OMC_BIN" && -x "$OMC_BIN" ]]; then
     log "omc binary: $OMC_BIN ($("$OMC_BIN" --version 2>&1 | tr '\n' ' '))"
   else
-    log "WARNING: omc not found; Claude quota status snapshots will be disabled"
+    log "WARNING: omc not found; CLAUDE_STATUS_SOURCE=omc Claude quota snapshots will be disabled"
   fi
   return "$status"
 }

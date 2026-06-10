@@ -69,7 +69,9 @@ The default schedule is `07:00`, `12:00`, `17:00`, and `22:00` local macOS time.
 - Codex CLI, authenticated with ChatGPT.
 - `jq` for structured JSONL parsing.
 - Node.js for Codex quota status queries.
-- `omc` / oh-my-claudecode for Claude quota status snapshots.
+- oh-my-claudecode (omc) plugin for Claude quota status snapshots — its local usage cache is
+  read directly; the `omc` binary itself is only needed for the legacy `CLAUDE_STATUS_SOURCE=omc`
+  live-query mode.
 
 The activation itself only requires the Claude and Codex CLIs. Quota snapshots gracefully warn
 and skip if optional helpers such as `omc`, `node`, or `jq` are missing.
@@ -191,6 +193,8 @@ Copy `.env.example` to `.env` and adjust values:
 | `ENABLE_QUOTA_PREFLIGHT` | Check quota before sending prompts | `1` |
 | `QUOTA_PREFLIGHT_ON_UNKNOWN` | `allow` or `skip` when quota cannot be checked | `allow` |
 | `QUOTA_EXHAUSTED_THRESHOLD_PERCENT` | Skip when remaining quota is at or below this percent | `0` |
+| `CLAUDE_STATUS_SOURCE` | `cache` reads the oh-my-claudecode plugin's local usage cache (no credentials touched — safe for unattended runs); `omc` forces a live `omc wait status` query, which can rotate the shared Keychain OAuth login in headless runs | `cache` |
+| `CLAUDE_USAGE_CACHE_FILE` | Optional usage-cache path override | `~/.claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json` |
 | `KEEP_AWAKE_MODE` | `off`, `during`, or `always`; scheduled CLI runs use `caffeinate` when not `off` | `off` |
 | `KEEP_AWAKE_SECONDS` | Bounded keep-awake duration for each real activation run | `900` |
 | `CLAUDE_BIN` | Optional Claude binary override | auto-discovered |

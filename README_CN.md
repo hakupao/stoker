@@ -64,7 +64,8 @@ Stoker（司炉——锅炉房里负责不停添煤、让炉火长燃不灭的�
 - 已登录的 Codex CLI。
 - `jq`：用于解析 JSONL 日志。
 - Node.js：用于查询 Codex quota status。
-- `omc` / oh-my-claudecode：用于查询 Claude quota status。
+- oh-my-claudecode（omc）插件：Claude 额度快照直接读取其本地用量缓存；只有
+  `CLAUDE_STATUS_SOURCE=omc` 实时查询模式才需要 `omc` 命令本体。
 
 实际定时触发只依赖 Claude 和 Codex CLI；如果缺少 `omc`、`node` 或 `jq`，脚本会记录 warning
 并跳过对应的结构化状态记录。
@@ -178,6 +179,8 @@ codex job skipped by quota preflight reason=quota_exhausted
 | `ENABLE_QUOTA_PREFLIGHT` | 发送 prompt 前是否先检查额度 | `1` |
 | `QUOTA_PREFLIGHT_ON_UNKNOWN` | 无法确认额度时 `allow` 继续或 `skip` 跳过 | `allow` |
 | `QUOTA_EXHAUSTED_THRESHOLD_PERCENT` | 剩余额度低于或等于该百分比时跳过 | `0` |
+| `CLAUDE_STATUS_SOURCE` | `cache` 直接读 oh-my-claudecode 插件的本地用量缓存（不触碰任何凭证，无人值守安全）；`omc` 强制 `omc wait status` 实时查询，无头运行时可能轮换钥匙串登录凭证 | `cache` |
+| `CLAUDE_USAGE_CACHE_FILE` | 用量缓存路径覆盖（可选） | `~/.claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json` |
 | `KEEP_AWAKE_MODE` | `off`、`during` 或 `always`；非 `off` 时真实定时触发会用 `caffeinate` 防止睡眠 | `off` |
 | `KEEP_AWAKE_SECONDS` | 每次真实触发的防睡眠时长上限 | `900` |
 | `CLAUDE_BIN` | Claude 路径覆盖 | 自动发现 |
