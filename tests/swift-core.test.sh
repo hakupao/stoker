@@ -29,6 +29,13 @@ precondition(updated.contains("SCHEDULE_TIMES=\"06:15,13:15,21:15\""))
 precondition(updated.contains("KEEP_AWAKE_MODE=during"))
 precondition(updated.contains("CODEX_MODEL=gpt-5.4-mini"))
 
+// ToolRequirements: ACTIVATION_TOOL decides which CLIs the app treats as required.
+precondition(ToolRequirements.requiredCLIs(activationTool: "claude") == Set(["claude"]))
+precondition(ToolRequirements.requiredCLIs(activationTool: " CODEX ") == Set(["codex"]))
+precondition(ToolRequirements.requiredCLIs(activationTool: "all") == Set(["claude", "codex"]))
+precondition(ToolRequirements.requiredCLIs(activationTool: nil) == Set(["claude", "codex"]))
+precondition(ToolRequirements.requiredCLIs(activationTool: "bogus") == Set(["claude", "codex"]))
+
 let schedule = ScheduleFormatter.times(from: "6:05, 13:05,21:05")
 precondition(schedule == ["06:05", "13:05", "21:05"])
 

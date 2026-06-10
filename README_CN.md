@@ -84,7 +84,8 @@ curl -fsSL https://claude.ai/install.sh | bash
 curl -fsSL https://chatgpt.com/codex/install.sh | sh
 ```
 
-只用其中一个？在 `.env` 里设 `ACTIVATION_TOOL=claude`（或 `codex`）即可。
+只用其中一个？在 `.env` 里设 `ACTIVATION_TOOL=claude`（或 `codex`）即可——菜单栏 App 的
+环境检查会跟随该设置，不再把另一个 CLI 当作必需项。
 
 ## 快速开始
 

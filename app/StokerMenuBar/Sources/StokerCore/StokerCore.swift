@@ -406,3 +406,16 @@ public enum EnvParser {
         return value
     }
 }
+
+public enum ToolRequirements {
+    /// Maps the engine's ACTIVATION_TOOL setting to the CLIs the schedule will
+    /// actually invoke, so the app only treats those as required. Unknown values
+    /// fall back to requiring both — a typo must not hide a missing CLI.
+    public static func requiredCLIs(activationTool raw: String?) -> Set<String> {
+        switch raw?.trimmingCharacters(in: .whitespaces).lowercased() {
+        case "claude": return ["claude"]
+        case "codex": return ["codex"]
+        default: return ["claude", "codex"]
+        }
+    }
+}

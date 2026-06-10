@@ -91,7 +91,8 @@ curl -fsSL https://claude.ai/install.sh | bash
 curl -fsSL https://chatgpt.com/codex/install.sh | sh
 ```
 
-Only using one of the two? Set `ACTIVATION_TOOL=claude` (or `codex`) in `.env`.
+Only using one of the two? Set `ACTIVATION_TOOL=claude` (or `codex`) in `.env` — the menu
+bar app's environment check follows it and stops treating the other CLI as required.
 
 ## Quick Start
 

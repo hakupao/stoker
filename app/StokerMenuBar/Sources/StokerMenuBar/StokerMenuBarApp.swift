@@ -631,9 +631,27 @@ enum ToolChecker {
          "Claude quota snapshots (the oh-my-claudecode plugin)", "Claude 额度快照（oh-my-claudecode 插件）"),
     ]
 
+    /// CLIs the schedule actually activates, per ACTIVATION_TOOL in the root's
+    /// .env (engine default: all). The CLI a user opted out of is merely optional.
+    private static func requiredCLIs(root: URL?) -> Set<String> {
+        var activationTool: String?
+        if let root,
+           let contents = try? String(contentsOf: root.appendingPathComponent(".env"), encoding: .utf8) {
+            activationTool = EnvParser.parse(contents)["ACTIVATION_TOOL"]
+        }
+        return ToolRequirements.requiredCLIs(activationTool: activationTool)
+    }
+
+    private static func effectiveCategory(name: String, declared: ToolCategory, requiredCLIs: Set<String>) -> ToolCategory {
+        guard declared == .required, name == "claude" || name == "codex" else { return declared }
+        return requiredCLIs.contains(name) ? .required : .optional
+    }
+
     static func checkMissingTools(root: URL? = nil) async -> [String] {
+        let clis = requiredCLIs(root: root)
         var missing: [String] = []
-        for def in toolDefinitions where def.cat == .required {
+        for def in toolDefinitions
+        where effectiveCategory(name: def.name, declared: def.cat, requiredCLIs: clis) == .required {
             let (found, _) = await toolStatus(def.name, root: root)
             if !found { missing.append(def.name) }
         }
@@ -641,12 +659,14 @@ enum ToolChecker {
     }
 
     static func checkAllTools(root: URL? = nil) async -> [ToolInfo] {
+        let clis = requiredCLIs(root: root)
         var results: [ToolInfo] = []
         for def in toolDefinitions {
             let (found, builtIn) = await toolStatus(def.name, root: root)
             results.append(ToolInfo(
                 name: def.name, found: found, builtIn: builtIn,
-                category: def.cat, installHint: def.hint,
+                category: effectiveCategory(name: def.name, declared: def.cat, requiredCLIs: clis),
+                installHint: def.hint,
                 descriptionEN: def.en, descriptionZH: def.zh
             ))
         }
