@@ -53,5 +53,15 @@ App 会把工作副本放在：
 - macOS 和 `launchctl`。
 - 已登录的 Claude Code CLI 和/或 Codex CLI。
 - `jq`。
-- Node.js：用于 Codex quota 快照。
-- `omc`：用于 Claude quota 快照。
+- Node.js：用于 Codex quota 快照（可选）。
+- oh-my-claudecode 插件：用于 Claude quota 快照（可选；也可用 `CLAUDE_STATUS_SOURCE=native`）。
+
+还没装 CLI？桌面 App 并不自带 CLI，但 CLI 用量和 App 共享同一套订阅额度窗口。
+一次性安装，无需 Node 或 Homebrew：
+
+```sh
+curl -fsSL https://claude.ai/install.sh | bash   # 装好后运行 `claude` 登录一次
+curl -fsSL https://chatgpt.com/codex/install.sh | sh   # 装好后运行 `codex` 登录一次
+```
+
+只用其中一个？在 `.env` 里设 `ACTIVATION_TOOL=claude`（或 `codex`）即可。

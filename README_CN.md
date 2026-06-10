@@ -65,10 +65,26 @@ Stoker（司炉——锅炉房里负责不停添煤、让炉火长燃不灭的�
 - `jq`：用于解析 JSONL 日志。
 - Node.js：用于查询 Codex quota status。
 - oh-my-claudecode（omc）插件：Claude 额度快照直接读取其本地用量缓存；只有
-  `CLAUDE_STATUS_SOURCE=omc` 实时查询模式才需要 `omc` 命令本体。
+  `CLAUDE_STATUS_SOURCE=omc` 实时查询模式才需要 `omc` 命令本体。不想装插件？
+  `CLAUDE_STATUS_SOURCE=native` 零额外安装即可跟踪 Claude 额度。
 
 实际定时触发只依赖 Claude 和 Codex CLI；如果缺少 `omc`、`node` 或 `jq`，脚本会记录 warning
 并跳过对应的结构化状态记录。
+
+### 还没装 CLI？
+
+Claude / ChatGPT 桌面 App 并不自带 CLI，但 CLI 的用量和 App 共享同一套订阅额度窗口——
+所以习惯用 App 的用户同样能从 Stoker 受益。一次性安装，无需 Node 或 Homebrew：
+
+```sh
+# Claude Code CLI——装好后运行 `claude`，用你的 Claude 订阅登录一次
+curl -fsSL https://claude.ai/install.sh | bash
+
+# Codex CLI——装好后运行 `codex`，选 "Sign in with ChatGPT" 登录一次
+curl -fsSL https://chatgpt.com/codex/install.sh | sh
+```
+
+只用其中一个？在 `.env` 里设 `ACTIVATION_TOOL=claude`（或 `codex`）即可。
 
 ## 快速开始
 
@@ -179,7 +195,7 @@ codex job skipped by quota preflight reason=quota_exhausted
 | `ENABLE_QUOTA_PREFLIGHT` | 发送 prompt 前是否先检查额度 | `1` |
 | `QUOTA_PREFLIGHT_ON_UNKNOWN` | 无法确认额度时 `allow` 继续或 `skip` 跳过 | `allow` |
 | `QUOTA_EXHAUSTED_THRESHOLD_PERCENT` | 剩余额度低于或等于该百分比时跳过 | `0` |
-| `CLAUDE_STATUS_SOURCE` | `cache` 直接读 oh-my-claudecode 插件的本地用量缓存（不触碰任何凭证，无人值守安全）；`omc` 强制 `omc wait status` 实时查询，无头运行时可能轮换钥匙串登录凭证 | `cache` |
+| `CLAUDE_STATUS_SOURCE` | `cache` 直接读 oh-my-claudecode 插件的本地用量缓存（不触碰任何凭证）；`native` 用钥匙串 token 只读查询用量接口——无需 omc，token 过期即跳过、绝不刷新；`omc` 强制 `omc wait status` 实时查询，无头运行时可能轮换钥匙串登录凭证 | `cache` |
 | `CLAUDE_USAGE_CACHE_FILE` | 用量缓存路径覆盖（可选） | `~/.claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json` |
 | `KEEP_AWAKE_MODE` | `off`、`during` 或 `always`；非 `off` 时真实定时触发会用 `caffeinate` 防止睡眠 | `off` |
 | `KEEP_AWAKE_SECONDS` | 每次真实触发的防睡眠时长上限 | `900` |

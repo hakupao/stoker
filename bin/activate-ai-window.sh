@@ -50,6 +50,9 @@ QUOTA_PREFLIGHT_ON_UNKNOWN="${QUOTA_PREFLIGHT_ON_UNKNOWN:-allow}"
 QUOTA_EXHAUSTED_THRESHOLD_PERCENT="${QUOTA_EXHAUSTED_THRESHOLD_PERCENT:-0}"
 CLAUDE_STATUS_SOURCE="${CLAUDE_STATUS_SOURCE:-cache}"
 CLAUDE_USAGE_CACHE_FILE="${CLAUDE_USAGE_CACHE_FILE:-${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/plugins/oh-my-claudecode/.usage-cache-anthropic.json}"
+SECURITY_BIN="${SECURITY_BIN:-/usr/bin/security}"
+CURL_BIN="${CURL_BIN:-$(command -v curl 2>/dev/null || true)}"
+CLAUDE_USAGE_API_URL="${CLAUDE_USAGE_API_URL:-https://api.anthropic.com/api/oauth/usage}"
 KEEP_AWAKE_MODE="${KEEP_AWAKE_MODE:-off}"
 KEEP_AWAKE_SECONDS="${KEEP_AWAKE_SECONDS:-900}"
 RUN_ID="${RUN_ID:-$(date '+%Y%m%d-%H%M%S')-$$}"
@@ -90,7 +93,7 @@ Environment overrides:
   ENABLE_QUOTA_PREFLIGHT=1
   QUOTA_PREFLIGHT_ON_UNKNOWN=allow
   QUOTA_EXHAUSTED_THRESHOLD_PERCENT=0
-  CLAUDE_STATUS_SOURCE=cache
+  CLAUDE_STATUS_SOURCE=cache       # cache (plugin cache) | native (read-only Keychain+API) | omc (legacy live query)
   CLAUDE_USAGE_CACHE_FILE=/path/to/.usage-cache-anthropic.json
   KEEP_AWAKE_MODE=off
   KEEP_AWAKE_SECONDS=900
@@ -155,9 +158,9 @@ case "$QUOTA_PREFLIGHT_ON_UNKNOWN" in
 esac
 
 case "$CLAUDE_STATUS_SOURCE" in
-  cache|omc) ;;
+  cache|native|omc) ;;
   *)
-    echo "CLAUDE_STATUS_SOURCE must be cache or omc" >&2
+    echo "CLAUDE_STATUS_SOURCE must be cache, native, or omc" >&2
     exit 2
     ;;
 esac
@@ -335,43 +338,141 @@ record_codex_usage() {
   fi
 }
 
+# Resolve the macOS Keychain service name Claude Code stores its OAuth credential
+# under. When CLAUDE_CONFIG_DIR is set, Claude Code suffixes the service name with
+# the first 8 hex chars of sha256(config dir) — mirror that so native snapshots
+# find the right item. CLAUDE_KEYCHAIN_SERVICE overrides the whole computation.
+claude_keychain_service() {
+  if [[ -n "${CLAUDE_KEYCHAIN_SERVICE:-}" ]]; then
+    printf '%s' "$CLAUDE_KEYCHAIN_SERVICE"
+    return 0
+  fi
+  local service="Claude Code-credentials"
+  if [[ -n "${CLAUDE_CONFIG_DIR:-}" ]]; then
+    local suffix
+    suffix="$(printf '%s' "$CLAUDE_CONFIG_DIR" | /usr/bin/shasum -a 256 | cut -c1-8)"
+    service="${service}-${suffix}"
+  fi
+  printf '%s' "$service"
+}
+
+# Read-only Claude quota fetch for CLAUDE_STATUS_SOURCE=native: reads the Keychain
+# OAuth access token and, only while it is still valid, queries the usage endpoint.
+# It NEVER refreshes the token — consuming the shared refresh token from a headless
+# run is exactly what logs the interactive session out. Emits a cache-shaped JSON
+# document on stdout (warnings go to stderr) so the snapshot mapping is shared with
+# the cache/omc sources; the raw API response lands in $1.
+fetch_claude_usage_native() {
+  local raw_file="$1"
+  local service cred_json access_token expires_at now_ms
+
+  if [[ -z "$CURL_BIN" || ! -x "$CURL_BIN" ]]; then
+    log "WARNING: curl not found; Claude native quota snapshot was not recorded" >&2
+    return 1
+  fi
+
+  service="$(claude_keychain_service)"
+  if ! cred_json="$("$SECURITY_BIN" find-generic-password -s "$service" -w 2>/dev/null)"; then
+    log "WARNING: Claude Keychain credential not readable (service=${service}); log in to Claude Code interactively once, then retry" >&2
+    return 1
+  fi
+
+  access_token="$(printf '%s' "$cred_json" | "$JQ_BIN" -r '.claudeAiOauth.accessToken // empty' 2>/dev/null)"
+  expires_at="$(printf '%s' "$cred_json" | "$JQ_BIN" -r '.claudeAiOauth.expiresAt // 0' 2>/dev/null)"
+  cred_json=""
+  [[ "$expires_at" =~ ^[0-9]+$ ]] || expires_at=0
+
+  if [[ -z "$access_token" ]]; then
+    log "WARNING: Claude Keychain credential has no access token; native quota snapshot skipped" >&2
+    return 1
+  fi
+
+  now_ms=$(( $(date +%s) * 1000 ))
+  if (( expires_at <= now_ms + 120000 )); then
+    log "WARNING: Claude Keychain access token has expired; native quota snapshot skipped (it is never refreshed here — using Claude Code interactively renews it)" >&2
+    return 1
+  fi
+
+  # The token rides stdin (-H @-) so it never appears in argv, ps output, or logs.
+  if ! printf 'Authorization: Bearer %s\n' "$access_token" \
+    | "$CURL_BIN" -sf --max-time 10 -H @- -H 'anthropic-beta: oauth-2025-04-20' \
+        "$CLAUDE_USAGE_API_URL" >"$raw_file" 2>/dev/null; then
+    access_token=""
+    log "WARNING: Claude usage API request failed; native quota snapshot was not recorded" >&2
+    return 1
+  fi
+  access_token=""
+
+  # shellcheck disable=SC2016 # jq variables are intentionally evaluated by jq.
+  "$JQ_BIN" -c --argjson now_ms "$now_ms" '
+    {
+      timestamp: $now_ms,
+      data: {
+        fiveHourPercent: (.five_hour.utilization // null),
+        fiveHourResetsAt: (.five_hour.resets_at // null),
+        weeklyPercent: (.seven_day.utilization // null),
+        weeklyResetsAt: (.seven_day.resets_at // null),
+        sonnetWeeklyPercent: (.seven_day_sonnet.utilization // null),
+        sonnetWeeklyResetsAt: (.seven_day_sonnet.resets_at // null)
+      },
+      error: false,
+      source: "anthropic",
+      lastSuccessAt: $now_ms
+    }' "$raw_file" 2>/dev/null
+}
+
 record_claude_status() {
   local output_file
   output_file="${RAW_LOG_DIR}/$(stamp_for_file)-claude-status.log"
   local status_exit=0
   local cache_file="$CLAUDE_USAGE_CACHE_FILE"
+  local snapshot_json=""
 
   if [[ -z "$JQ_BIN" || ! -x "$JQ_BIN" ]]; then
     log "WARNING: jq not found; Claude status snapshot was not recorded"
     return 0
   fi
 
-  if [[ "$CLAUDE_STATUS_SOURCE" == "omc" ]]; then
-    # Legacy live query. In an unattended run `omc wait status` reads the shared
-    # Keychain OAuth credential and, once the access token has expired, consumes
-    # its refresh token without being able to persist the replacement — logging
-    # the interactive Claude Code session out. Prefer CLAUDE_STATUS_SOURCE=cache.
-    if [[ -z "$OMC_BIN" || ! -x "$OMC_BIN" ]]; then
-      log "WARNING: omc not found; Claude quota status snapshot was not recorded"
+  if [[ "$CLAUDE_STATUS_SOURCE" == "native" ]]; then
+    snapshot_json="$(fetch_claude_usage_native "$output_file")" || return 1
+    if [[ -z "$snapshot_json" ]]; then
+      log "WARNING: failed to parse Claude usage API response"
       return 1
     fi
-    "$OMC_BIN" wait status >"$output_file" 2>&1 || status_exit=$?
-  fi
+  else
+    if [[ "$CLAUDE_STATUS_SOURCE" == "omc" ]]; then
+      # Legacy live query. In an unattended run `omc wait status` reads the shared
+      # Keychain OAuth credential and, once the access token has expired, consumes
+      # its refresh token without being able to persist the replacement — logging
+      # the interactive Claude Code session out. Prefer cache or native.
+      if [[ -z "$OMC_BIN" || ! -x "$OMC_BIN" ]]; then
+        log "WARNING: omc not found; Claude quota status snapshot was not recorded"
+        return 1
+      fi
+      "$OMC_BIN" wait status >"$output_file" 2>&1 || status_exit=$?
+    fi
 
-  if [[ ! -f "$cache_file" ]]; then
-    log "WARNING: Claude usage cache not found at ${cache_file}; the oh-my-claudecode plugin writes it during interactive Claude Code use"
-    return 1
-  fi
+    if [[ ! -f "$cache_file" ]]; then
+      log "WARNING: Claude usage cache not found at ${cache_file}; the oh-my-claudecode plugin writes it during interactive Claude Code use"
+      return 1
+    fi
 
-  if [[ "$CLAUDE_STATUS_SOURCE" == "cache" ]]; then
-    # No live query: snapshot the plugin's last-known quota so unattended runs
-    # never touch the shared Keychain OAuth credential. cache_age_seconds in the
-    # row tells consumers how old the data is.
-    cp "$cache_file" "$output_file" 2>/dev/null || true
+    if [[ "$CLAUDE_STATUS_SOURCE" == "cache" ]]; then
+      # No live query: snapshot the plugin's last-known quota so unattended runs
+      # never touch the shared Keychain OAuth credential. cache_age_seconds in the
+      # row tells consumers how old the data is.
+      cp "$cache_file" "$output_file" 2>/dev/null || true
+    fi
+
+    snapshot_json="$(cat "$cache_file" 2>/dev/null)"
+    if [[ -z "$snapshot_json" ]]; then
+      log "WARNING: failed to read Claude usage cache at ${cache_file}"
+      return 1
+    fi
   fi
 
   # shellcheck disable=SC2016 # jq variables are intentionally evaluated by jq.
-  "$JQ_BIN" -c \
+  printf '%s' "$snapshot_json" | "$JQ_BIN" -c \
     --arg timestamp "$(timestamp)" \
     --arg run_id "$RUN_ID" \
     --arg tool "claude" \
@@ -409,7 +510,7 @@ record_claude_status() {
           },
           raw_log: $raw_log
         }
-    ' "$cache_file" >>"$STATUS_LOG" 2>/dev/null || {
+    ' >>"$STATUS_LOG" 2>/dev/null || {
       log "WARNING: failed to parse Claude status snapshot"
       return 1
     }
@@ -628,10 +729,13 @@ quota_preflight_decision() {
       # whose resets_at is already in the past has rolled over since the data
       # was captured, so it must not count as exhausted.
       def reset_passed($w):
+        # Normalize the two timestamp shapes seen in the wild — plugin cache
+        # ("…T05:30:00.673Z") and usage API ("…T05:30:00.473098+00:00") — into
+        # what fromdateiso8601 accepts; anything unparseable stays "not passed".
         ($w.resets_at // null) as $r
         | if $r == null then false
           else
-            ((try ($r | tostring | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) catch null)) as $t
+            ((try ($r | tostring | sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601) catch null)) as $t
             | if $t == null then false else ($t < now) end
           end;
       def exhausted($name; $w):
@@ -856,6 +960,7 @@ run_check() {
     if require_bin "Claude" "$CLAUDE_BIN"; then
       log "Claude binary: $CLAUDE_BIN ($("$CLAUDE_BIN" --version 2>&1 | tr '\n' ' '))"
     else
+      log "hint: install the Claude Code CLI with: curl -fsSL https://claude.ai/install.sh | bash"
       status=1
     fi
   fi
@@ -865,6 +970,7 @@ run_check() {
       log "Codex model: $CODEX_MODEL"
       log "Codex work directory: $CODEX_WORK_DIR"
     else
+      log "hint: install the Codex CLI with: curl -fsSL https://chatgpt.com/codex/install.sh | sh"
       status=1
     fi
   fi
@@ -883,6 +989,13 @@ run_check() {
       log "Claude usage cache: $CLAUDE_USAGE_CACHE_FILE"
     else
       log "WARNING: Claude usage cache not found at $CLAUDE_USAGE_CACHE_FILE; quota snapshots will be skipped until the oh-my-claudecode plugin writes it"
+    fi
+  elif [[ "$CLAUDE_STATUS_SOURCE" == "native" ]]; then
+    # Metadata-only probe (no -w): confirms the credential exists without reading it.
+    if "$SECURITY_BIN" find-generic-password -s "$(claude_keychain_service)" >/dev/null 2>&1; then
+      log "Claude Keychain credential: present (service=$(claude_keychain_service))"
+    else
+      log "WARNING: Claude Keychain credential not found (service=$(claude_keychain_service)); native quota snapshots will be skipped until you log in to Claude Code interactively"
     fi
   elif [[ -n "$OMC_BIN" && -x "$OMC_BIN" ]]; then
     log "omc binary: $OMC_BIN ($("$OMC_BIN" --version 2>&1 | tr '\n' ' '))"

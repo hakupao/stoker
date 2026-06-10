@@ -91,10 +91,16 @@ private struct QuotaOverviewCard: View {
             }
 
             if gaugeTools.isEmpty {
-                Text(L10n.noData)
-                    .font(.system(size: 12))
-                    .foregroundStyle(theme.textMuted)
-                    .frame(maxWidth: .infinity, minHeight: 90, alignment: .center)
+                VStack(spacing: 6) {
+                    Text(L10n.noData)
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.textMuted)
+                    Text(L10n.quotaSetupHint)
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.textMuted)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity, minHeight: 90, alignment: .center)
             } else {
                 VStack(spacing: 8) {
                     ForEach(gaugeTools, id: \.self) { tool in

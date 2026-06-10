@@ -619,16 +619,16 @@ enum ToolChecker {
     }
 
     private static let toolDefinitions: [(name: String, hint: String, cat: ToolCategory, en: String, zh: String)] = [
-        ("claude", "npm i -g @anthropic-ai/claude-code", .required,
+        ("claude", "curl -fsSL https://claude.ai/install.sh | bash", .required,
          "Activate Claude Code usage windows", "激活 Claude Code 使用窗口"),
-        ("codex", "npm i -g @openai/codex", .required,
+        ("codex", "curl -fsSL https://chatgpt.com/codex/install.sh | sh", .required,
          "Activate Codex usage windows", "激活 Codex 使用窗口"),
         ("jq", "brew install jq", .required,
          "JSON processor for quota data", "JSON 处理工具，用于额度数据"),
         ("node", "brew install node", .optional,
          "Enables Codex quota snapshots", "启用 Codex 额度快照"),
-        ("omc", "npm i -g oh-my-claudecode", .optional,
-         "Enables Claude quota snapshots", "启用 Claude 额度快照"),
+        ("omc", "npm i -g oh-my-claude-sisyphus", .optional,
+         "Claude quota snapshots (the oh-my-claudecode plugin)", "Claude 额度快照（oh-my-claudecode 插件）"),
     ]
 
     static func checkMissingTools(root: URL? = nil) async -> [String] {

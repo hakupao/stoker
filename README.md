@@ -71,10 +71,27 @@ The default schedule is `07:00`, `12:00`, `17:00`, and `22:00` local macOS time.
 - Node.js for Codex quota status queries.
 - oh-my-claudecode (omc) plugin for Claude quota status snapshots — its local usage cache is
   read directly; the `omc` binary itself is only needed for the legacy `CLAUDE_STATUS_SOURCE=omc`
-  live-query mode.
+  live-query mode. Don't want the plugin? `CLAUDE_STATUS_SOURCE=native` tracks Claude quota with
+  no extra install at all.
 
 The activation itself only requires the Claude and Codex CLIs. Quota snapshots gracefully warn
 and skip if optional helpers such as `omc`, `node`, or `jq` are missing.
+
+### Don't have the CLIs yet?
+
+The Claude / ChatGPT desktop apps do not ship the CLIs, but CLI usage shares the same
+subscription quota windows as the apps — so app-first users benefit from Stoker too.
+One-time setup, no Node or Homebrew required:
+
+```sh
+# Claude Code CLI — afterwards run `claude` once to log in with your Claude plan
+curl -fsSL https://claude.ai/install.sh | bash
+
+# Codex CLI — afterwards run `codex` once and pick "Sign in with ChatGPT"
+curl -fsSL https://chatgpt.com/codex/install.sh | sh
+```
+
+Only using one of the two? Set `ACTIVATION_TOOL=claude` (or `codex`) in `.env`.
 
 ## Quick Start
 
@@ -193,7 +210,7 @@ Copy `.env.example` to `.env` and adjust values:
 | `ENABLE_QUOTA_PREFLIGHT` | Check quota before sending prompts | `1` |
 | `QUOTA_PREFLIGHT_ON_UNKNOWN` | `allow` or `skip` when quota cannot be checked | `allow` |
 | `QUOTA_EXHAUSTED_THRESHOLD_PERCENT` | Skip when remaining quota is at or below this percent | `0` |
-| `CLAUDE_STATUS_SOURCE` | `cache` reads the oh-my-claudecode plugin's local usage cache (no credentials touched — safe for unattended runs); `omc` forces a live `omc wait status` query, which can rotate the shared Keychain OAuth login in headless runs | `cache` |
+| `CLAUDE_STATUS_SOURCE` | `cache` reads the oh-my-claudecode plugin's local usage cache (no credentials touched); `native` queries the usage API read-only with the Keychain token — no omc needed, skips when the token is expired, never refreshes; `omc` forces a live `omc wait status` query, which can rotate the shared Keychain OAuth login in headless runs | `cache` |
 | `CLAUDE_USAGE_CACHE_FILE` | Optional usage-cache path override | `~/.claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json` |
 | `KEEP_AWAKE_MODE` | `off`, `during`, or `always`; scheduled CLI runs use `caffeinate` when not `off` | `off` |
 | `KEEP_AWAKE_SECONDS` | Bounded keep-awake duration for each real activation run | `900` |

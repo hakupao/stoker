@@ -53,5 +53,15 @@ then run `./install.sh install` again.
 - macOS with `launchctl`.
 - Authenticated Claude Code CLI and/or Codex CLI.
 - `jq`.
-- Node.js for Codex quota snapshots.
-- `omc` for Claude quota snapshots.
+- Node.js for Codex quota snapshots (optional).
+- oh-my-claudecode plugin for Claude quota snapshots (optional; or `CLAUDE_STATUS_SOURCE=native`).
+
+Don't have the CLIs yet? The desktop apps don't ship them, but CLI usage shares the
+same subscription quota windows as the apps. One-time setup, no Node or Homebrew:
+
+```sh
+curl -fsSL https://claude.ai/install.sh | bash   # then run `claude` to log in once
+curl -fsSL https://chatgpt.com/codex/install.sh | sh   # then run `codex` to log in once
+```
+
+Only using one of the two? Set `ACTIVATION_TOOL=claude` (or `codex`) in `.env`.

@@ -364,6 +364,13 @@ public enum L10n {
     public static var quotaUnknownShort: String {
         AppLanguage.current == .zh ? "额度未知" : "Quota unknown"
     }
+    /// Shown under the quota card's empty state so users can discover the optional quota feature
+    /// without it ever being required — core scheduling works fine without any quota source.
+    public static var quotaSetupHint: String {
+        AppLanguage.current == .zh
+            ? "可选：安装 oh-my-claudecode 插件，或在 .env 中设 CLAUDE_STATUS_SOURCE=native，即可显示 Claude 额度"
+            : "Optional: install the oh-my-claudecode plugin — or set CLAUDE_STATUS_SOURCE=native in .env — to show Claude quota"
+    }
     /// Inline tag on the gauge bar so the % is unambiguously "remaining", not "used".
     public static var remaining: String {
         AppLanguage.current == .zh ? "剩余" : "Remaining"

@@ -10,6 +10,10 @@ set -euo pipefail
 #   E) an invalid CLAUDE_STATUS_SOURCE is rejected up front
 #   F) quota preflight ignores an exhausted window whose resets_at has passed
 #      (stale last-known data must not skip a run after the window rolled over)
+#   G) native mode queries the usage API read-only: maps the response, never
+#      leaks the token (stdin header, not argv), never calls the API with an
+#      expired token (the no-refresh contract), degrades when the Keychain is
+#      unreadable, and honors the CLAUDE_CONFIG_DIR keychain-service suffix
 #
 # The engine derives ROOT_DIR from its own location, so it is copied into a temp
 # root to keep logs/locks hermetic and away from the real install.
@@ -146,6 +150,15 @@ jq -e '(.skipped // false) == false' \
   <<<"$(grep '"tool":"claude"' "$USAGE" | tail -1)" >/dev/null \
   || { echo "expected a non-skipped usage row after a passed reset" >&2; exit 1; }
 
+# Same passed-reset case in the usage API's timestamp shape (microseconds + +00:00
+# offset instead of Z) — the normalization must handle both.
+rm -rf "$SENTINEL_DIR" && mkdir -p "$SENTINEL_DIR"
+past_offset="$(date -u -v-2H '+%Y-%m-%dT%H:%M:%S.473098+00:00')"
+write_cache 100 "$past_offset"
+run_once
+[[ -e "$SENTINEL_DIR/claude-invoked" ]] \
+  || { echo "expected run to proceed for a passed reset in +00:00 offset format" >&2; exit 1; }
+
 rm -rf "$SENTINEL_DIR" && mkdir -p "$SENTINEL_DIR"
 future="$(date -u -v+2H '+%Y-%m-%dT%H:%M:%S.000Z')"
 write_cache 100 "$future"
@@ -155,5 +168,87 @@ run_once
 jq -e '.skipped == true and .skip_reason == "quota_exhausted"' \
   <<<"$(grep '"tool":"claude"' "$USAGE" | tail -1)" >/dev/null \
   || { echo "expected a skipped usage row for an unexpired exhausted window" >&2; exit 1; }
+
+# ── G) native mode: read-only Keychain + usage API ──────────────────────────
+cat >"$TMP_DIR/bin/security-fake" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${SENTINEL_DIR}/security-args"
+[[ "${SECURITY_FAIL:-0}" == "1" ]] && exit 44
+if [[ "$*" == *" -w"* ]]; then
+  printf '{"claudeAiOauth":{"accessToken":"sk-ant-oat-TESTTOKENCANARY","expiresAt":%s,"refreshToken":"rt-TESTTOKENCANARY"}}' "${CRED_EXPIRES_AT}"
+fi
+SH
+cat >"$TMP_DIR/bin/curl-fake" <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null   # consume the stdin header block (-H @-)
+printf '%s\n' "$*" >>"${SENTINEL_DIR}/curl-args"
+touch "${SENTINEL_DIR}/curl-invoked"
+printf '{"five_hour":{"utilization":41,"resets_at":"2099-01-01T00:00:00Z"},"seven_day":{"utilization":7,"resets_at":"2099-01-02T00:00:00Z"}}'
+SH
+chmod +x "$TMP_DIR/bin/security-fake" "$TMP_DIR/bin/curl-fake"
+
+run_native() {
+  CLAUDE_STATUS_SOURCE=native \
+    SECURITY_BIN="$TMP_DIR/bin/security-fake" \
+    CURL_BIN="$TMP_DIR/bin/curl-fake" \
+    OMC_BIN="$TMP_DIR/bin/omc-fake" \
+    CLAUDE_BIN="$TMP_DIR/bin/claude-fake" \
+    "$@" "$ENGINE" --status --tool claude >/dev/null 2>&1
+}
+
+future_ms=$(( ($(date +%s) + 7200) * 1000 ))
+past_ms=$(( ($(date +%s) - 3600) * 1000 ))
+
+# G1: valid token → snapshot recorded from the API response, token never leaks
+rm -rf "$SENTINEL_DIR" && mkdir -p "$SENTINEL_DIR"
+run_native env CRED_EXPIRES_AT="$future_ms" \
+  || { echo "expected native status snapshot to succeed" >&2; exit 1; }
+row="$(grep '"tool":"claude"' "$STATUS" | tail -1)"
+jq -e '
+    .ok == true
+    and .status_source == "native"
+    and .five_hour.used_percent == 41
+    and .five_hour.remaining_percent == 59
+    and .weekly.used_percent == 7
+  ' <<<"$row" >/dev/null \
+  || { echo "unexpected native status row: $row" >&2; exit 1; }
+[[ -e "$SENTINEL_DIR/curl-invoked" ]] \
+  || { echo "expected native mode to query the usage API" >&2; exit 1; }
+if grep -rq 'TESTTOKENCANARY' "$TMP_DIR/logs"; then
+  echo "token value leaked into logs" >&2
+  exit 1
+fi
+if grep -q 'TESTTOKENCANARY' "$SENTINEL_DIR/curl-args"; then
+  echo "token value leaked into curl argv" >&2
+  exit 1
+fi
+
+# G2: expired token → never calls the API (no-refresh contract), no row
+rm -rf "$SENTINEL_DIR" && mkdir -p "$SENTINEL_DIR"
+rows_before="$(grep -c '"tool":"claude"' "$STATUS" || true)"
+if run_native env CRED_EXPIRES_AT="$past_ms"; then
+  echo "expected native snapshot to fail with an expired token" >&2
+  exit 1
+fi
+[[ ! -e "$SENTINEL_DIR/curl-invoked" ]] \
+  || { echo "an expired token must never reach the usage API" >&2; exit 1; }
+rows_after="$(grep -c '"tool":"claude"' "$STATUS" || true)"
+[[ "$rows_before" == "$rows_after" ]] \
+  || { echo "expected no status row for an expired token" >&2; exit 1; }
+
+# G3: unreadable Keychain → degrade without a row
+if run_native env CRED_EXPIRES_AT="$future_ms" SECURITY_FAIL=1; then
+  echo "expected native snapshot to fail when the Keychain is unreadable" >&2
+  exit 1
+fi
+
+# G4: CLAUDE_CONFIG_DIR suffixes the keychain service name (sha256 first 8 hex)
+rm -rf "$SENTINEL_DIR" && mkdir -p "$SENTINEL_DIR"
+cfg_dir="/tmp/stoker-test-config"
+expected_service="Claude Code-credentials-$(printf '%s' "$cfg_dir" | shasum -a 256 | cut -c1-8)"
+run_native env CRED_EXPIRES_AT="$future_ms" CLAUDE_CONFIG_DIR="$cfg_dir" \
+  || { echo "expected native snapshot to succeed with CLAUDE_CONFIG_DIR" >&2; exit 1; }
+grep -qF -- "-s $expected_service -w" "$SENTINEL_DIR/security-args" \
+  || { echo "expected keychain service '$expected_service' in security args" >&2; exit 1; }
 
 echo "claude status cache test passed"
