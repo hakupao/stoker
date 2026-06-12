@@ -57,7 +57,11 @@ is split across:
   send prompt → record usage → post-run snapshot). Owns the Claude/Codex invocation arrays.
 - `scripts/install-launchd.sh` — owns plist generation + the `launchctl` lifecycle
   (`bootstrap`/`bootout`/`kickstart` in the `gui/$UID` domain).
-- `bin/activation-state.sh` — owns the JSON state contract consumed by the app.
+- `bin/activation-state.sh` — owns the JSON state contract consumed by the app. Claude quota
+  prefers the live omc usage cache when it is newer than the last snapshot row, restamps
+  `timestamp` with the data-capture time (not the snapshot-write time), and blanks any window
+  whose `resets_at` already passed (`reset_passed: true`) so stale numbers are never shown as
+  current.
 
 **Path independence.** Every script computes `ROOT_DIR` at runtime from `${BASH_SOURCE[0]}`
 (`install.sh` uses its own dir; the rest use `…/..`), so the project works from any clone path

@@ -31,6 +31,7 @@ if [[ -z "$JQ_BIN" || ! -x "$JQ_BIN" ]]; then
   [[ -x "$_bundled_jq" ]] && JQ_BIN="$_bundled_jq"
   unset _bundled_jq
 fi
+CLAUDE_USAGE_CACHE_FILE="${CLAUDE_USAGE_CACHE_FILE:-${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/plugins/oh-my-claudecode/.usage-cache-anthropic.json}"
 
 LOG_DIR="${ROOT_DIR}/logs"
 USAGE_LOG="${LOG_DIR}/usage.jsonl"
@@ -187,6 +188,91 @@ fi
 
 schedule="$(schedule_json)"
 quota="$(read_latest_by_tool "$STATUS_LOG")"
+
+# ── Claude quota freshness ────────────────────────────────────────────────────
+# Snapshot rows freeze at the last scheduled run, and a cache-sourced snapshot
+# may itself carry much older data. Whenever the live omc usage cache is newer
+# than the recorded data, serve the Claude quota from it directly (no network,
+# no credentials); otherwise keep the snapshot row but restamp `timestamp` with
+# the time the DATA was captured, so the app's "Updated" line never overstates
+# freshness. All failures fall through to the unmodified snapshot.
+claude_data_ms="$("$JQ_BIN" -r '.claude.cache_timestamp_ms // 0' <<<"$quota" 2>/dev/null || printf '0')"
+[[ "$claude_data_ms" =~ ^[0-9]+$ ]] || claude_data_ms=0
+live_ms=0
+if [[ -f "$CLAUDE_USAGE_CACHE_FILE" ]]; then
+  live_ms="$("$JQ_BIN" -r 'if (.error // false) then 0 else (.timestamp // 0) end' "$CLAUDE_USAGE_CACHE_FILE" 2>/dev/null || printf '0')"
+fi
+[[ "$live_ms" =~ ^[0-9]+$ ]] || live_ms=0
+
+if (( live_ms > claude_data_ms )); then
+  live_stamp="$(date -r "$((live_ms / 1000))" '+%Y-%m-%d %H:%M:%S %Z')"
+  # shellcheck disable=SC2016 # jq variables are intentionally evaluated by jq.
+  refreshed="$("$JQ_BIN" -c --arg ts "$live_stamp" --slurpfile cache "$CLAUDE_USAGE_CACHE_FILE" '
+    ($cache[0]) as $c
+    | ($c.data // {}) as $d
+    | .claude = {
+        timestamp: $ts,
+        tool: "claude",
+        ok: true,
+        status_source: "live-cache",
+        source: ($c.source // null),
+        subscription_type: null,
+        cache_timestamp_ms: ($c.timestamp // null),
+        last_success_at_ms: ($c.lastSuccessAt // null),
+        cache_age_seconds: (if $c.timestamp == null then null else ((now - ($c.timestamp / 1000)) | round) end),
+        five_hour: {
+          used_percent: ($d.fiveHourPercent // null),
+          remaining_percent: (if $d.fiveHourPercent == null then null else (100 - $d.fiveHourPercent) end),
+          resets_at: ($d.fiveHourResetsAt // null)
+        },
+        weekly: {
+          used_percent: ($d.weeklyPercent // null),
+          remaining_percent: (if $d.weeklyPercent == null then null else (100 - $d.weeklyPercent) end),
+          resets_at: ($d.weeklyResetsAt // null)
+        },
+        sonnet_weekly: {
+          used_percent: ($d.sonnetWeeklyPercent // null),
+          remaining_percent: (if $d.sonnetWeeklyPercent == null then null else (100 - $d.sonnetWeeklyPercent) end),
+          resets_at: ($d.sonnetWeeklyResetsAt // null)
+        }
+      }
+  ' <<<"$quota" 2>/dev/null || true)"
+  [[ -n "$refreshed" ]] && quota="$refreshed"
+elif (( claude_data_ms > 0 )); then
+  data_stamp="$(date -r "$((claude_data_ms / 1000))" '+%Y-%m-%d %H:%M:%S %Z')"
+  # shellcheck disable=SC2016 # jq variables are intentionally evaluated by jq.
+  restamped="$("$JQ_BIN" -c --arg ts "$data_stamp" '.claude.timestamp = $ts' <<<"$quota" 2>/dev/null || true)"
+  [[ -n "$restamped" ]] && quota="$restamped"
+fi
+
+# A window whose resets_at is already in the past has rolled over since the data
+# was captured: its percentages are no longer true, so blank them (the app then
+# shows "quota unknown") instead of presenting stale numbers as current.
+# shellcheck disable=SC2016 # jq variables are intentionally evaluated by jq.
+normalized="$("$JQ_BIN" -c '
+  def normalize_window:
+    if (. // null) == null then .
+    else
+      (.resets_at // null) as $r
+      | ((try ($r | tostring | sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601) catch null)) as $t
+      | if ($t != null and $t < now) then
+          . + {used_percent: null, remaining_percent: null, reset_passed: true}
+        else
+          .
+        end
+    end;
+  map_values(
+    if type == "object" then
+      (if has("five_hour") then .five_hour |= normalize_window else . end)
+      | (if has("weekly") then .weekly |= normalize_window else . end)
+      | (if has("sonnet_weekly") then .sonnet_weekly |= normalize_window else . end)
+    else
+      .
+    end
+  )
+' <<<"$quota" 2>/dev/null || true)"
+[[ -n "$normalized" ]] && quota="$normalized"
+
 last_usage="$(read_last_jsonl "$USAGE_LOG")"
 enable_status_snapshots="$(bool_from_1 "$ENABLE_STATUS_SNAPSHOTS")"
 enable_quota_preflight="$(bool_from_1 "$ENABLE_QUOTA_PREFLIGHT")"

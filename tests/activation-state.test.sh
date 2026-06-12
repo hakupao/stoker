@@ -7,6 +7,10 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 mkdir -p "$TMP_DIR/logs"
 
+# Hermetic: never read the real machine's omc usage cache (absent until a case
+# writes it).
+export CLAUDE_USAGE_CACHE_FILE="$TMP_DIR/usage-cache.json"
+
 cat >"$TMP_DIR/.env" <<'ENV'
 LABEL=com.example.stoker.test
 SCHEDULE_TIMES="06:15,13:15,21:15"
@@ -133,5 +137,57 @@ jq -e --arg expected "$OTHER_ROOT/bin/activate-ai-window.sh" '
   and .launchctl.program == $expected
   and (.launchctl.mismatch | contains("current root"))
 ' <<<"$mismatch_json" >/dev/null
+
+# ── Claude quota freshness: restamp, reset blanking, live-cache override ─────
+
+now_ms=$(( $(date +%s) * 1000 ))
+old_ms=$(( now_ms - 36 * 3600 * 1000 ))   # data captured 36h ago
+
+# Snapshot row whose DATA is 36h old, with an exhausted five_hour window whose
+# reset has long passed; weekly still in the future.
+cat >"$TMP_DIR/logs/status.jsonl" <<JSONL
+{"timestamp":"2026-06-12 07:00:20 JST","run_id":"r2","tool":"claude","ok":true,"status_source":"cache","cache_timestamp_ms":${old_ms},"five_hour":{"used_percent":70,"remaining_percent":30,"resets_at":"2026-01-01T00:00:00.123Z"},"weekly":{"used_percent":30,"remaining_percent":70,"resets_at":"2099-01-01T00:00:00Z"},"sonnet_weekly":{"used_percent":0,"remaining_percent":100,"resets_at":null}}
+{"timestamp":"2026-06-12 07:00:21 JST","run_id":"r2","tool":"codex","ok":true,"five_hour":{"used_percent":1,"remaining_percent":99,"resets_at":"2099-01-01T00:00:00Z"},"weekly":{"used_percent":0,"remaining_percent":100,"resets_at":"2099-01-01T00:00:00Z"}}
+JSONL
+
+# A) no live cache → snapshot kept, but timestamp restamped to the data-capture
+#    time and the passed-reset five_hour window blanked; future windows intact.
+stale_json="$(STOKER_ROOT="$TMP_DIR" STOKER_SKIP_LAUNCHCTL=1 "$ROOT_DIR/bin/activation-state.sh" --json)"
+expected_stamp="$(date -r $(( old_ms / 1000 )) '+%Y-%m-%d %H:%M:%S %Z')"
+jq -e --arg ts "$expected_stamp" '
+  .quota.claude.timestamp == $ts
+  and .quota.claude.status_source == "cache"
+  and .quota.claude.five_hour.used_percent == null
+  and .quota.claude.five_hour.reset_passed == true
+  and .quota.claude.weekly.used_percent == 30
+  and .quota.codex.five_hour.remaining_percent == 99
+' <<<"$stale_json" >/dev/null
+
+# B) a NEWER live cache wins: quota.claude served from it, stamped with its own
+#    data time; codex untouched.
+cat >"$CLAUDE_USAGE_CACHE_FILE" <<JSON
+{"timestamp":${now_ms},"data":{"fiveHourPercent":4,"fiveHourResetsAt":"2099-01-01T00:00:00.422Z","weeklyPercent":33,"weeklyResetsAt":"2099-01-02T00:00:00Z","sonnetWeeklyPercent":0,"sonnetWeeklyResetsAt":null},"error":false,"source":"anthropic","lastSuccessAt":${now_ms}}
+JSON
+live_json="$(STOKER_ROOT="$TMP_DIR" STOKER_SKIP_LAUNCHCTL=1 "$ROOT_DIR/bin/activation-state.sh" --json)"
+live_stamp="$(date -r $(( now_ms / 1000 )) '+%Y-%m-%d %H:%M:%S %Z')"
+jq -e --arg ts "$live_stamp" '
+  .quota.claude.status_source == "live-cache"
+  and .quota.claude.timestamp == $ts
+  and .quota.claude.five_hour.used_percent == 4
+  and .quota.claude.five_hour.remaining_percent == 96
+  and .quota.claude.weekly.used_percent == 33
+  and (.quota.claude.five_hour.reset_passed // false) == false
+  and .quota.codex.five_hour.remaining_percent == 99
+' <<<"$live_json" >/dev/null
+
+# C) a live cache flagged error=true is ignored even when newer → snapshot wins.
+cat >"$CLAUDE_USAGE_CACHE_FILE" <<JSON
+{"timestamp":${now_ms},"data":{"fiveHourPercent":4},"error":true,"source":"anthropic","lastSuccessAt":null}
+JSON
+error_json="$(STOKER_ROOT="$TMP_DIR" STOKER_SKIP_LAUNCHCTL=1 "$ROOT_DIR/bin/activation-state.sh" --json)"
+jq -e '
+  .quota.claude.status_source == "cache"
+  and .quota.claude.weekly.used_percent == 30
+' <<<"$error_json" >/dev/null
 
 echo "activation-state JSON test passed"
