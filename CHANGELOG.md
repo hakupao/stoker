@@ -2,6 +2,44 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.3.2 - 2026-06-12
+
+### Keychain-safe quota tracking (CLI)
+- Claude quota snapshots no longer shell out to `omc wait status`. In an unattended run that
+  live query read the shared macOS Keychain OAuth login and, once the ~8-hour access token had
+  expired, consumed its refresh token without being able to persist the replacement — silently
+  logging the interactive Claude Code session out (the "must log in again every morning" bug).
+  The new default `CLAUDE_STATUS_SOURCE=cache` reads the oh-my-claudecode plugin's local usage
+  cache directly: no subprocess, no network, no credentials. The live query remains available as
+  an explicit `CLAUDE_STATUS_SOURCE=omc` opt-in. (Root cause reported upstream and fixed:
+  oh-my-claudecode#3238.)
+- New `CLAUDE_STATUS_SOURCE=native` tracks Claude quota with **no omc plugin at all**: it reads
+  the Keychain token read-only and queries Anthropic's usage endpoint, hard-skipping whenever
+  the token has expired — it never refreshes anything, and the token never appears in argv,
+  `ps` output, or logs.
+- Quota preflight no longer treats a window as exhausted once its `resets_at` has passed, so
+  stale last-known data can't skip the first run after an overnight reset. Snapshot rows now
+  record `status_source` and `cache_age_seconds`.
+
+### Honest quota display (menu bar app)
+- The Activity gauges, header bars, and menu summary no longer present frozen snapshot numbers
+  as current (the app could show "5h 70% used" while the live figure was 4%). The state contract
+  now prefers the live plugin cache whenever it is newer than the last snapshot, stamps the
+  display with the time the data was actually **captured** (not when the snapshot was written),
+  and blanks any window whose reset has already passed instead of showing stale percentages.
+- The quota card's empty state now points at both ways to enable quota tracking (the
+  oh-my-claudecode plugin, or `CLAUDE_STATUS_SOURCE=native`).
+
+### Install guidance
+- Fixed the onboarding install hint for `omc`, which pointed at an unrelated squatted npm
+  package — the real package behind the `omc` binary is `oh-my-claude-sisyphus`. The claude and
+  codex hints now use the official curl installers (the desktop apps don't ship the CLIs).
+- The app's environment check now respects `ACTIVATION_TOOL`: a Claude-only (or Codex-only)
+  setup is no longer nagged about the other CLI.
+- New "Don't have the CLIs yet?" sections in README/INSTALL (EN + CN) with one-line installers
+  and the note that CLI usage shares the same subscription quota windows as the desktop apps;
+  `install.sh check` now prints an installer hint when a CLI is missing.
+
 ## 0.3.1 - 2026-06-08
 
 ### Quota chart redesign (menu bar app)

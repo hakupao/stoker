@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${VERSION:-0.3.1}"
+VERSION="${VERSION:-0.3.2}"
 DIST_DIR="${ROOT_DIR}/dist"
 CLI_NAME="stoker-cli-${VERSION}"
 GUI_NAME="stoker-gui-${VERSION}"
