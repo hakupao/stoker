@@ -19,7 +19,16 @@ struct StokerMenuBarApp: App {
                 await model.refresh()
             }
         } label: {
+            // The flame flickers via a 0.45s @Published counter (`flameFrame`). Left to its
+            // default transaction, every label swap drove an implicit *animated* status-item
+            // relayout (NSAnimationContext.runAnimationGroup) whose ~0.45s duration matched the
+            // tick interval — so the animations ran back-to-back and SwiftUI's display link
+            // never went idle, pinning a core at ~100% CPU (and churning ~1GB of view-graph
+            // allocations) for as long as the schedule stayed lit, even with the window closed.
+            // Disabling animation on the label makes each frame an instant redraw, so the
+            // render loop settles between ticks.
             MenuBarLabel(model: model)
+                .transaction { $0.animation = nil }
         }
         .menuBarExtraStyle(.menu)
 

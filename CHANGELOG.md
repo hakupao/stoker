@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.3.3 - 2026-06-22
+
+### Fixed
+- **The menu bar app pinned a CPU core at ~100% (and grew to ~1 GB resident) the whole time the
+  schedule was lit.** Stoker's flame icon flickers via a 0.45s `@Published` frame counter; left to
+  its default transaction, every frame swap drove an *animated* status-item relayout
+  (`NSAnimationContext.runAnimationGroup`) whose ~0.45s duration matched the tick interval — so the
+  animations ran back-to-back and SwiftUI's display link never went idle, leaving a full view-tree
+  layout/render loop spinning on the main thread. It burned a core even with the window closed,
+  because the driver is the always-present `MenuBarExtra` label rather than any window. The label
+  now disables implicit animation (`.transaction { $0.animation = nil }`), making each frame an
+  instant redraw: measured on the same machine, CPU dropped from ~100% to ~1% (process state
+  `running` → `sleeping`) and resident memory from ~1053 MB to ~18 MB, with the flicker preserved.
+
 ## 0.3.2 - 2026-06-12
 
 ### Keychain-safe quota tracking (CLI)
