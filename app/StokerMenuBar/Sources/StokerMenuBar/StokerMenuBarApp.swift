@@ -19,15 +19,20 @@ struct StokerMenuBarApp: App {
                 await model.refresh()
             }
         } label: {
-            // The flame flickers via a 0.45s @Published counter (`flameFrame`). Left to its
-            // default transaction, every label swap drove an implicit *animated* status-item
-            // relayout (NSAnimationContext.runAnimationGroup) whose ~0.45s duration matched the
-            // tick interval — so the animations ran back-to-back and SwiftUI's display link
-            // never went idle, pinning a core at ~100% CPU (and churning ~1GB of view-graph
-            // allocations) for as long as the schedule stayed lit, even with the window closed.
-            // Disabling animation on the label makes each frame an instant redraw, so the
-            // render loop settles between ticks.
-            MenuBarLabel(model: model)
+            // The flame flickers via `FlameTicker`'s 0.45s counter. Two layers keep that
+            // cheap, both learned the hard way:
+            //  1. The ticker is its own ObservableObject observed only by the label — as a
+            //     @Published counter on the shared model, every tick invalidated every view
+            //     holding the model, including the main window's whole tree (which macOS
+            //     keeps alive, offscreen, after the window closes), re-rendering a Swift
+            //     Charts view each tick and pinning a core at ~100% while the schedule
+            //     stayed lit (see FlameTicker's doc comment).
+            //  2. Animation is disabled: left to its default transaction, every label swap
+            //     drove an implicit *animated* status-item relayout
+            //     (NSAnimationContext.runAnimationGroup) whose ~0.45s duration matched the
+            //     tick interval — animations ran back-to-back and SwiftUI's display link
+            //     never went idle. Disabling animation makes each frame an instant redraw.
+            MenuBarLabel(model: model, ticker: model.flameTicker)
                 .transaction { $0.animation = nil }
         }
         .menuBarExtraStyle(.menu)
@@ -51,12 +56,13 @@ struct StokerMenuBarApp: App {
 /// so the gold survives instead of being flattened to the menu bar's tint.
 struct MenuBarLabel: View {
     @ObservedObject var model: StokerAppModel
+    @ObservedObject var ticker: FlameTicker
 
     var body: some View {
         Group {
             if model.state?.installed == true {
                 let frames = StokerMenuBarIcon.liveFrames
-                Image(nsImage: frames[model.flameFrame % frames.count])
+                Image(nsImage: frames[ticker.frame % frames.count])
                     .renderingMode(.original)
             } else {
                 Image(nsImage: StokerMenuBarIcon.cold)
@@ -85,12 +91,14 @@ final class StokerAppModel: ObservableObject {
     /// One-shot trigger: the header's auth chip sets this to jump the user to the background-auth
     /// row (switch to Settings, expand Advanced, scroll + highlight). SettingsTabContent resets it.
     @Published var focusBackgroundAuth = false
-    /// Free-running counter that drives the menu-bar flame flicker (see `StokerFlameIcon`).
-    @Published var flameFrame = 0
+    /// Drives the menu-bar flame flicker (see `StokerFlameIcon`). Deliberately a plain `let`
+    /// holding a separate ObservableObject observed only by `MenuBarLabel` — never a
+    /// @Published counter on this shared model, whose every tick would invalidate the whole
+    /// main-window tree too (see `FlameTicker`'s doc comment for the CPU-pinning bug).
+    let flameTicker = FlameTicker()
 
     let root: URL
     private var keepAwakeProcess: Process?
-    private var flameTimer: Timer?
 
     init() {
         root = ProjectLocator.findRoot()
@@ -107,28 +115,17 @@ final class StokerAppModel: ObservableObject {
 
     deinit {
         keepAwakeProcess?.terminate()
-        // The flicker timer is torn down in `updateFlameTimer()` whenever the
-        // schedule goes idle; we don't touch it here because `Timer.invalidate()`
-        // must run on the thread that installed it (the main run loop), which a
-        // nonisolated `deinit` can't guarantee. This model lives for the app's
-        // lifetime, so the only uncovered case is process exit.
+        // The flame ticker's timer is torn down in `FlameTicker.setRunning(false)`
+        // whenever the schedule goes idle; we don't touch it here because
+        // `Timer.invalidate()` must run on the thread that installed it (the main
+        // run loop), which a nonisolated `deinit` can't guarantee. This model lives
+        // for the app's lifetime, so the only uncovered case is process exit.
     }
 
     /// The flame flickers only while the schedule is lit; when it's off the icon
     /// is a static cold outline, so we run the redraw timer only when active.
-    private func updateFlameTimer() {
-        if state?.installed == true {
-            guard flameTimer == nil else { return }
-            let timer = Timer(timeInterval: 0.45, repeats: true) { [weak self] _ in
-                Task { @MainActor in self?.flameFrame &+= 1 }
-            }
-            RunLoop.main.add(timer, forMode: .common)
-            flameTimer = timer
-        } else {
-            flameTimer?.invalidate()
-            flameTimer = nil
-            flameFrame = 0
-        }
+    private func updateFlameTicker() {
+        flameTicker.setRunning(state?.installed == true)
     }
 
     /// Refresh activation state from the engine.
@@ -153,7 +150,7 @@ final class StokerAppModel: ObservableObject {
             }
             hasOAuthToken = !((values["CLAUDE_CODE_OAUTH_TOKEN"] ?? "").isEmpty)
             updateKeepAwakeProcess()
-            updateFlameTimer()
+            updateFlameTicker()
         } catch {
             if !silent { showStatus(L10n.failedToReadStatus, isError: true) }
         }

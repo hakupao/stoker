@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.3.4 - 2026-07-03
+
+### Fixed
+- **The menu bar app pinned a CPU core at ~100% again once the main window had been opened while
+  the schedule was lit — and kept burning after the window was closed.** 0.3.3 silenced the flame
+  flicker's animated relayout on the menu-bar label, but the 0.45s frame counter still lived as a
+  `@Published` property on the shared app model, and `objectWillChange` invalidates *every* view
+  observing that object — including the main window's entire view tree, which macOS keeps alive
+  (offscreen) after the window closes. Each tick re-rendered the Activity tab's Swift Charts
+  history at a cost exceeding the tick interval, so the render loop never went idle (measured:
+  40+ hours of accumulated CPU and ~835 MB resident on a 0.3.3 bundle). The counter now lives in
+  a dedicated `FlameTicker` observable (StokerCore) observed only by the menu-bar label, so a
+  tick invalidates nothing but the 18 pt icon no matter which windows exist: measured on the same
+  machine, replaying the same open-window-then-close trigger, CPU is 0.1–1.6% with flat ~130 MB
+  memory and the flicker preserved. Ticks also apply synchronously in the timer callback
+  (`MainActor.assumeIsolated` rather than a `Task` hop), so stopping the schedule can no longer
+  race a stale tick back onto a freshly reset frame counter.
+
 ## 0.3.3 - 2026-06-22
 
 ### Fixed

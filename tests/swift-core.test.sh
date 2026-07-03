@@ -135,10 +135,30 @@ let installedRoot = ProjectLocator.findRoot(
 precondition(installedRoot.path == support.appendingPathComponent("Stoker/stoker").path)
 precondition(FileManager.default.fileExists(atPath: installedRoot.appendingPathComponent("bin/activate-ai-window.sh").path))
 precondition(FileManager.default.fileExists(atPath: installedRoot.appendingPathComponent("codex-probe/probe.py").path))
+
+// FlameTicker: the scoped flicker driver — ticks only while running, resets on stop.
+// Top-level code in this bare-swiftc build is nonisolated, so hop onto the main actor
+// explicitly (this driver runs on the main thread, so assumeIsolated always holds).
+// Spinning the main run loop pumps the Timer; ticks apply synchronously in its callback,
+// so once setRunning(false) returns no stale tick can resurrect the counter.
+MainActor.assumeIsolated {
+    let ticker = FlameTicker()
+    precondition(!ticker.isRunning && ticker.frame == 0, "fresh ticker must be idle at frame 0")
+    ticker.setRunning(true)
+    ticker.setRunning(true) // idempotent: must not install a second timer
+    precondition(ticker.isRunning)
+    RunLoop.main.run(until: Date().addingTimeInterval(1.2))
+    precondition(ticker.frame >= 1, "ticker never ticked")
+    ticker.setRunning(false)
+    precondition(!ticker.isRunning && ticker.frame == 0, "stopping must reset the ticker")
+    RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+    precondition(ticker.frame == 0, "stopped ticker kept ticking")
+}
 SWIFT
 
 swiftc \
   "$ROOT_DIR/app/StokerMenuBar/Sources/StokerCore/StokerCore.swift" \
+  "$ROOT_DIR/app/StokerMenuBar/Sources/StokerCore/FlameTicker.swift" \
   "$TMP_DIR/main.swift" \
   -o "$TMP_DIR/swift-core-test"
 
