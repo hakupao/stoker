@@ -36,6 +36,46 @@ precondition(ToolRequirements.requiredCLIs(activationTool: "all") == Set(["claud
 precondition(ToolRequirements.requiredCLIs(activationTool: nil) == Set(["claude", "codex"]))
 precondition(ToolRequirements.requiredCLIs(activationTool: "bogus") == Set(["claude", "codex"]))
 
+// ClaudeQuotaSource: mirrors the engine's cache-path precedence so the app can
+// recognize a plugin-installed oh-my-claudecode (no omc binary on PATH).
+precondition(ClaudeQuotaSource.usageCacheFile(env: [:], home: "/Users/u")
+    == "/Users/u/.claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json")
+precondition(ClaudeQuotaSource.usageCacheFile(env: ["CLAUDE_CONFIG_DIR": "/cfg"], home: "/Users/u")
+    == "/cfg/plugins/oh-my-claudecode/.usage-cache-anthropic.json")
+precondition(ClaudeQuotaSource.usageCacheFile(env: ["CLAUDE_CONFIG_DIR": "~/cfg"], home: "/Users/u")
+    == "/Users/u/cfg/plugins/oh-my-claudecode/.usage-cache-anthropic.json")
+precondition(ClaudeQuotaSource.usageCacheFile(
+    env: ["CLAUDE_USAGE_CACHE_FILE": "~/x.json", "CLAUDE_CONFIG_DIR": "/ignored"], home: "/Users/u")
+    == "/Users/u/x.json")
+precondition(ClaudeQuotaSource.usageCacheFile(env: ["CLAUDE_USAGE_CACHE_FILE": ""], home: "/Users/u")
+    == "/Users/u/.claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json")
+
+// $HOME spellings: .env.example's own template line uses "${HOME}/…", which bash
+// expands when sourcing but EnvParser hands over verbatim.
+precondition(ClaudeQuotaSource.usageCacheFile(env: ["CLAUDE_USAGE_CACHE_FILE": "${HOME}/x.json"], home: "/Users/u")
+    == "/Users/u/x.json")
+precondition(ClaudeQuotaSource.usageCacheFile(env: ["CLAUDE_USAGE_CACHE_FILE": "$HOME/x.json"], home: "/Users/u")
+    == "/Users/u/x.json")
+precondition(ClaudeQuotaSource.usageCacheFile(env: ["CLAUDE_CONFIG_DIR": "${HOME}/cfg"], home: "/Users/u")
+    == "/Users/u/cfg/plugins/oh-my-claudecode/.usage-cache-anthropic.json")
+// $HOME must only match at a path-component boundary.
+precondition(ClaudeQuotaSource.usageCacheFile(env: ["CLAUDE_USAGE_CACHE_FILE": "$HOMES/x.json"], home: "/Users/u")
+    == "$HOMES/x.json")
+
+// usageCacheSignalFile: the cache file only counts while the engine will read it
+// (CLAUDE_STATUS_SOURCE cache/unset/empty). Legacy `omc`, `native`, and casings the
+// engine's validator rejects must not produce a green "installed".
+precondition(ClaudeQuotaSource.usageCacheSignalFile(env: [:], home: "/Users/u")
+    == "/Users/u/.claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json")
+precondition(ClaudeQuotaSource.usageCacheSignalFile(env: ["CLAUDE_STATUS_SOURCE": ""], home: "/Users/u") != nil)
+precondition(ClaudeQuotaSource.usageCacheSignalFile(env: ["CLAUDE_STATUS_SOURCE": "cache"], home: "/Users/u") != nil)
+precondition(ClaudeQuotaSource.usageCacheSignalFile(env: ["CLAUDE_STATUS_SOURCE": "omc"], home: "/Users/u") == nil)
+precondition(ClaudeQuotaSource.usageCacheSignalFile(env: ["CLAUDE_STATUS_SOURCE": "native"], home: "/Users/u") == nil)
+precondition(ClaudeQuotaSource.usageCacheSignalFile(env: ["CLAUDE_STATUS_SOURCE": "Cache"], home: "/Users/u") == nil)
+// Inline comments survive EnvParser but bash strips them — only the first token counts.
+precondition(ClaudeQuotaSource.usageCacheSignalFile(env: ["CLAUDE_STATUS_SOURCE": "cache # plugin cache"], home: "/Users/u") != nil)
+precondition(ClaudeQuotaSource.usageCacheSignalFile(env: ["CLAUDE_STATUS_SOURCE": "omc # legacy"], home: "/Users/u") == nil)
+
 let schedule = ScheduleFormatter.times(from: "6:05, 13:05,21:05")
 precondition(schedule == ["06:05", "13:05", "21:05"])
 

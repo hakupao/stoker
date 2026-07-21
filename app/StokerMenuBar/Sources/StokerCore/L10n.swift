@@ -333,6 +333,9 @@ public enum L10n {
     public static var builtIn: String {
         AppLanguage.current == .zh ? "已内置" : "Built-in"
     }
+    public static var installedViaPlugin: String {
+        AppLanguage.current == .zh ? "已安装（插件）" : "Installed (plugin)"
+    }
     public static var notInstalled: String {
         AppLanguage.current == .zh ? "未安装" : "Not installed"
     }

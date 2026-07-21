@@ -616,6 +616,8 @@ enum ToolChecker {
         var name: String
         var found: Bool
         var builtIn: Bool
+        /// Satisfied by the Claude Code plugin install (usage cache present, no binary).
+        var viaPlugin: Bool
         var category: ToolCategory
         var installHint: String
         var descriptionEN: String
@@ -633,8 +635,9 @@ enum ToolChecker {
          "JSON processor for quota data", "JSON 处理工具，用于额度数据"),
         ("node", "brew install node", .optional,
          "Enables Codex quota snapshots", "启用 Codex 额度快照"),
-        ("omc", "npm i -g oh-my-claude-sisyphus", .optional,
-         "Claude quota snapshots (the oh-my-claudecode plugin)", "Claude 额度快照（oh-my-claudecode 插件）"),
+        ("omc", "/plugin marketplace add Yeachan-Heo/oh-my-claudecode, then /plugin install oh-my-claudecode@omc — or: npm i -g oh-my-claude-sisyphus", .optional,
+         "Claude quota snapshots (oh-my-claudecode, plugin or npm; a plugin install is detected once Claude Code use writes its usage cache)",
+         "Claude 额度快照（oh-my-claudecode，插件或 npm 均可；插件形态需 Claude Code 使用后写入缓存才会被识别）"),
     ]
 
     /// CLIs the schedule actually activates, per ACTIVATION_TOOL in the root's
@@ -668,15 +671,39 @@ enum ToolChecker {
         let clis = requiredCLIs(root: root)
         var results: [ToolInfo] = []
         for def in toolDefinitions {
-            let (found, builtIn) = await toolStatus(def.name, root: root)
+            let (binaryFound, builtIn) = await toolStatus(def.name, root: root)
+            let viaPlugin = def.name == "omc" && !binaryFound && hasOmcUsageCache(root: root)
+            let found = binaryFound || viaPlugin
             results.append(ToolInfo(
-                name: def.name, found: found, builtIn: builtIn,
+                name: def.name, found: found, builtIn: builtIn, viaPlugin: viaPlugin,
                 category: effectiveCategory(name: def.name, declared: def.cat, requiredCLIs: clis),
                 installHint: def.hint,
                 descriptionEN: def.en, descriptionZH: def.zh
             ))
         }
         return results
+    }
+
+    /// A plugin-only oh-my-claudecode install ships no `omc` binary, but both install
+    /// routes write the usage cache that CLAUDE_STATUS_SOURCE=cache actually reads —
+    /// so the cache file, resolved with the engine's own precedence, is the signal.
+    private static func hasOmcUsageCache(root: URL?) -> Bool {
+        var env: [String: String] = [:]
+        if let root,
+           let contents = try? String(contentsOf: root.appendingPathComponent(".env"), encoding: .utf8) {
+            env = EnvParser.parse(contents)
+        }
+        // Engine parity: the caller's exported environment wins over .env (the engine
+        // re-applies its snapshot after sourcing), and `launchctl setenv` values reach
+        // both launchd-scheduled runs and this app's Process() spawns.
+        let processEnv = ProcessInfo.processInfo.environment
+        for key in ["CLAUDE_STATUS_SOURCE", "CLAUDE_CONFIG_DIR", "CLAUDE_USAGE_CACHE_FILE"] {
+            if let value = processEnv[key] { env[key] = value }
+        }
+        guard let cacheFile = ClaudeQuotaSource.usageCacheSignalFile(env: env, home: NSHomeDirectory()) else {
+            return false
+        }
+        return FileManager.default.fileExists(atPath: cacheFile)
     }
 
     private static let searchPaths = [
@@ -841,6 +868,7 @@ struct ToolStatusRow: View {
 
     private var statusText: String {
         if tool.builtIn { return L10n.builtIn }
+        if tool.viaPlugin { return L10n.installedViaPlugin }
         if tool.found { return L10n.installed }
         if tool.category == .optional { return L10n.notInstalled }
         return L10n.notFound

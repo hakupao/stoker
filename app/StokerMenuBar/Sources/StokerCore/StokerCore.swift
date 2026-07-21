@@ -419,3 +419,53 @@ public enum ToolRequirements {
         }
     }
 }
+
+public enum ClaudeQuotaSource {
+    /// Resolves the oh-my-claudecode usage cache path exactly like the engine does
+    /// (bin/activate-ai-window.sh): CLAUDE_USAGE_CACHE_FILE wins, then
+    /// ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/oh-my-claudecode/.usage-cache-anthropic.json.
+    /// Both install routes (npm and Claude Code plugin) write this cache, so its
+    /// presence means quota snapshots work even with no `omc` binary on PATH.
+    public static func usageCacheFile(env: [String: String], home: String) -> String {
+        if let override = nonEmpty(env["CLAUDE_USAGE_CACHE_FILE"]) {
+            return expandHome(override, home: home)
+        }
+        let configDir = nonEmpty(env["CLAUDE_CONFIG_DIR"]).map { expandHome($0, home: home) }
+            ?? home + "/.claude"
+        return configDir + "/plugins/oh-my-claudecode/.usage-cache-anthropic.json"
+    }
+
+    /// The cache file proves quota snapshots will work only when the engine will
+    /// actually read it: CLAUDE_STATUS_SOURCE=cache, unset, or empty (the engine
+    /// defaults empty to cache via ${VAR:-cache}). Any other value — including
+    /// casings the engine's validator would reject — returns nil so a stale
+    /// legacy `omc` setting can't render a green "installed" over snapshots
+    /// that fail every run.
+    public static func usageCacheSignalFile(env: [String: String], home: String) -> String? {
+        // First whitespace-delimited token: bash reads `cache # comment` in an unquoted
+        // .env assignment as just `cache` (the rest is a comment), while EnvParser keeps
+        // the whole line — the token is what the engine actually sees.
+        let source = (env["CLAUDE_STATUS_SOURCE"] ?? "")
+            .split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
+        guard source.isEmpty || source == "cache" else { return nil }
+        return usageCacheFile(env: env, home: home)
+    }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        guard let value, !value.isEmpty else { return nil }
+        return value
+    }
+
+    /// Expands the HOME spellings .env files actually use: `~`, `$HOME`, `${HOME}`.
+    /// bash only tilde-expands unquoted values, but EnvParser strips quotes before
+    /// we see them — expanding unconditionally is a deliberate leniency (a detector
+    /// false-"installed" on a quoted `"~/…"` beats nagging every unquoted one).
+    /// Full shell expansion is out of scope.
+    private static func expandHome(_ path: String, home: String) -> String {
+        if path == "~" || path == "$HOME" || path == "${HOME}" { return home }
+        if path.hasPrefix("~/") { return home + String(path.dropFirst(1)) }
+        if path.hasPrefix("${HOME}/") { return home + String(path.dropFirst(7)) }
+        if path.hasPrefix("$HOME/") { return home + String(path.dropFirst(5)) }
+        return path
+    }
+}

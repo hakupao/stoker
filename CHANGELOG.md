@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.3.5 - 2026-07-21
+
+### Fixed
+- **The environment check now recognizes oh-my-claudecode however it is installed — npm binary
+  or Claude Code plugin.** The optional `omc` row only probed PATH for a binary, so a plugin-only
+  install (which ships no `omc` executable) showed "Not installed" even while quota snapshots
+  worked. Detection now mirrors the engine's own signal: the usage cache file that
+  `CLAUDE_STATUS_SOURCE=cache` actually reads, resolved with the engine's exact precedence
+  (`CLAUDE_USAGE_CACHE_FILE`, then `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/oh-my-claudecode/…`,
+  honoring `~`/`$HOME`/`${HOME}` spellings, caller-environment overrides, and bash's
+  inline-comment stripping). A plugin install shows as "Installed (plugin)", and the cache only
+  counts while the engine will actually read it (source `cache`/unset) — a legacy
+  `CLAUDE_STATUS_SOURCE=omc` config can no longer render a green row over snapshots that fail
+  every run. The install hint now gives the full working plugin route
+  (`/plugin marketplace add Yeachan-Heo/oh-my-claudecode`, then
+  `/plugin install oh-my-claudecode@omc`) alongside npm. Covered by new `ClaudeQuotaSource`
+  assertions in `tests/swift-core.test.sh`.
+
+### Docs
+- The landing page's cost figures now match measured reality (averages over the last 30 logged
+  runs): a Claude activation is ~1.6K input tokens ≈ $0.0025 (≈ $0.30/month at four runs a day;
+  the page still claimed "~170 tokens · $0.001"), and a Codex activation averages ~38K input
+  tokens (~55% cache reads, previously "~22K, −31% optimized").
+- AGENTS.md had drifted into a stale copy of CLAUDE.md corrupted by a blind Claude→Codex
+  find/replace ("guidance to Codex (Codex.ai/code)", "oh-my-Codex", a `--tool Codex` example the
+  engine rejects). Regenerated from the current CLAUDE.md; the two files now mirror each other.
+
 ## 0.3.4 - 2026-07-03
 
 ### Fixed

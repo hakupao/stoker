@@ -103,7 +103,7 @@
       <a class="btn btn--primary btn--lg magnetic" href="https://github.com/hakupao/stoker/releases" target="_blank" rel="noopener" data-i18n="hero.cta_primary">Download for macOS</a>
       <a class="btn btn--ghost btn--lg" href="https://github.com/hakupao/stoker" target="_blank" rel="noopener" data-i18n="hero.cta_secondary">View on GitHub</a>
     </div>
-    <p class="hero__meta reveal" data-i18n="hero.meta">v0.3.4 · macOS 14+ · Free &amp; open source (MIT)</p>
+    <p class="hero__meta reveal" data-i18n="hero.meta">v0.3.5 · macOS 14+ · Free &amp; open source (MIT)</p>
 
     <div class="schedule reveal">
       <span class="schedule__label" data-i18n="hero.schedule_label">Default schedule</span>
@@ -237,19 +237,19 @@
 <!-- ============ COST ============ -->
 <section class="section cost" id="cost">
   <div class="container container--narrow">
-    <h2 class="section__title reveal" data-i18n="cost.title">Honest about cost. About a tenth of a cent.</h2>
+    <h2 class="section__title reveal" data-i18n="cost.title">Honest about cost. About a quarter of a cent.</h2>
     <p class="section__sub reveal" data-i18n="cost.sub">Stoker sends real prompts, so it uses real quota. Here is exactly how much.</p>
     <div class="cost__rows reveal">
       <div class="cost__row">
         <span class="cost__tool"><b style="--series:var(--series-claude)"></b>Claude</span>
-        <span class="cost__val mono" data-i18n="cost.claude">~170 input tokens · ≈ $0.001 per activation</span>
+        <span class="cost__val mono" data-i18n="cost.claude">~1.6K input tokens · ≈ $0.0025 per activation</span>
       </div>
       <div class="cost__row">
         <span class="cost__tool"><b style="--series:var(--series-codex)"></b>Codex</span>
-        <span class="cost__val mono" data-i18n="cost.codex">~22K input tokens per activation (−31% optimized)</span>
+        <span class="cost__val mono" data-i18n="cost.codex">~38K input tokens per activation (~55% cache reads)</span>
       </div>
     </div>
-    <p class="cost__month reveal" data-i18n="cost.month">≈ $0.16 / month for Claude at 4 activations a day.</p>
+    <p class="cost__month reveal" data-i18n="cost.month">≈ $0.30 / month for Claude at 4 activations a day.</p>
     <details class="disclose reveal">
       <summary data-i18n="cost.note">The bottleneck is the system prompt each CLI injects — Stoker keeps its own prompt under ~300 tokens.</summary>
     </details>
@@ -290,7 +290,7 @@
   <div class="container container--narrow">
     <h2 class="section__title reveal" data-i18n="faq.title">Questions, answered plainly.</h2>
     <div class="faq__list reveal">
-      <details class="qa" open><summary data-i18n="faq.q1">How much does it cost to run?</summary><p data-i18n="faq.a1">About $0.001 per Claude activation (~170 tokens). Roughly $0.16/month at four runs a day. Codex uses your plan quota.</p></details>
+      <details class="qa" open><summary data-i18n="faq.q1">How much does it cost to run?</summary><p data-i18n="faq.a1">About $0.0025 per Claude activation (~1.6K tokens). Roughly $0.30/month at four runs a day. Codex uses your plan quota.</p></details>
       <details class="qa"><summary data-i18n="faq.q2">Does it consume my quota?</summary><p data-i18n="faq.a2">Yes — it sends real prompts. That is the point. Quota preflight skips a tool when its quota is already exhausted.</p></details>
       <details class="qa"><summary data-i18n="faq.q3">Is it safe? Does it touch my projects?</summary><p data-i18n="faq.a3">No. It runs in its own folder with a tiny read-only check-in, and never reads or modifies your real projects. dry-run and quota send nothing.</p></details>
       <details class="qa"><summary data-i18n="faq.q4">Is this official?</summary><p data-i18n="faq.a4">No. Stoker is an independent open-source project, not affiliated with Anthropic, OpenAI, or Apple. You are responsible for following their terms.</p></details>
