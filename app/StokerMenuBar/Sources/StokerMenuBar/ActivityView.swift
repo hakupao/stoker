@@ -15,7 +15,7 @@ struct ActivityTabContent: View {
         VStack(spacing: 10) {
             if health.anyAlert {
                 ToolAlertBanner(snapshot: health) { tool in
-                    showFailures(of: tool, lastRun: health.health(tool).lastRunAt)
+                    showRuns(of: tool, health: health.health(tool))
                 }
             }
 
@@ -48,12 +48,13 @@ struct ActivityTabContent: View {
         .padding(.vertical, 12)
     }
 
-    /// Banner "View": narrow the run list to this tool's failures, widening the date range
-    /// when the latest run is older than it (otherwise the list would come up empty).
-    private func showFailures(of tool: String, lastRun: Date?) {
+    /// Banner "View": narrow the run list to this tool — its failures when there's a failure
+    /// streak, else all its runs (a staleness alert has no failures to show) — widening the
+    /// date range when the latest run is older than it (otherwise the list would come up empty).
+    private func showRuns(of tool: String, health: ToolHealth) {
         logStore.toolFilter = tool == "codex" ? .codex : .claude
-        statusFilter = .error
-        if let lastRun, let cutoff = logStore.dateRange.cutoff, lastRun < cutoff {
+        statusFilter = health.consecutiveFailures > 0 ? .error : .all
+        if let lastRun = health.lastRunAt, let cutoff = logStore.dateRange.cutoff, lastRun < cutoff {
             logStore.dateRange = .all
         }
     }

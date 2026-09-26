@@ -34,15 +34,15 @@ struct TrendCard: View {
                 label: Self.label(series)
             )
             .id(series)  // fresh hover state per series
-            .frame(height: 72)
+            .frame(height: 64)
         }
-        .padding(14)
+        .padding(DS.cardPadding)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous)
                 .fill(theme.card)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous)
                 .strokeBorder(theme.hairline, lineWidth: 1)
         )
     }

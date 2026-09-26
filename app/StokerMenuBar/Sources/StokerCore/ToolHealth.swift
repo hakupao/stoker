@@ -1,6 +1,6 @@
 import Foundation
 
-public enum ToolHealthState: String, Sendable { case ok, warning, alert, unknown, anchored, pending, exhausted }
+public enum ToolHealthState: String, Sendable { case ok, warning, alert, unknown, anchored, pending, exhausted, disabled }
 
 public struct ToolHealth: Equatable, Sendable {
     public var state: ToolHealthState
@@ -104,25 +104,41 @@ public struct ToolHealthSnapshot: Sendable {
     public var alertTools: [String]
     public var anyAlert: Bool { !alertTools.isEmpty }
 
-    public func health(_ tool: String) -> ToolHealth { tool == "codex" ? codex : claude }
+    public func health(_ tool: String) -> ToolHealth {
+        switch tool {
+        case "claude": claude
+        case "codex": codex
+        default: ToolHealth(state: .unknown, consecutiveFailures: 0, lastRunAt: nil, lastRunOK: nil,
+                            lastError: nil, nextActivation: nil)
+        }
+    }
 }
 
 extension ToolHealthEvaluator {
-    /// A tool excluded by `ACTIVATION_TOOL` isn't scheduled: it gets no next activation and
-    /// never raises an alert (its old failures would otherwise alarm forever).
+    /// A tool excluded by `ACTIVATION_TOOL` isn't scheduled: it becomes `.disabled` (last-run info
+    /// kept, no next activation) and so never alerts — card, banner and menu always agree.
     public static func snapshot(records: [UsageRecord], quota: [String: ActivationState.ToolQuota],
                                 installed: Bool, times: [String], activationTool: String,
                                 now: Date = Date(), calendar: Calendar = .current) -> ToolHealthSnapshot {
         let enabled = ToolRequirements.requiredCLIs(activationTool: activationTool)
+        func gated(_ h: ToolHealth, _ tool: String) -> ToolHealth {
+            guard !enabled.contains(tool) else { return h }
+            var d = h
+            d.state = .disabled
+            d.nextActivation = nil
+            return d
+        }
         let claudeHealth = Self.claude(records: records, scheduleOn: installed && enabled.contains("claude"),
                                        times: times, now: now, calendar: calendar)
         let codexHealth = Self.codex(records: records, weekly: quota["codex"]?.weekly,
                                      scheduleOn: installed && enabled.contains("codex"),
                                      times: times, now: now, calendar: calendar)
-        let alertTools = [("claude", claudeHealth), ("codex", codexHealth)]
-            .filter { enabled.contains($0.0) && $0.1.isAlert }
+        let claudeFinal = gated(claudeHealth, "claude")
+        let codexFinal = gated(codexHealth, "codex")
+        let alertTools = [("claude", claudeFinal), ("codex", codexFinal)]
+            .filter { $0.1.isAlert }
             .map(\.0)
-        return ToolHealthSnapshot(claude: claudeHealth, codex: codexHealth, alertTools: alertTools)
+        return ToolHealthSnapshot(claude: claudeFinal, codex: codexFinal, alertTools: alertTools)
     }
 
     /// Convenience over the app's decoded state; the schedule counts as on exactly when the

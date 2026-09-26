@@ -395,11 +395,22 @@ public struct ActivationState: Decodable {
         public var remainingPercent: Double?
         public var usedPercent: Double?
         public var resetsAt: String?
+        /// Set by activation-state.sh when `resets_at` had already passed (percents blanked).
+        public var resetPassed: Bool?
 
         private enum CodingKeys: String, CodingKey {
             case remainingPercent = "remaining_percent"
             case usedPercent = "used_percent"
             case resetsAt = "resets_at"
+            case resetPassed = "reset_passed"
+        }
+
+        /// The window rolled over since its snapshot: the engine flag, or (for data the engine
+        /// didn't normalize) a blank percent whose reset time is already behind `now`.
+        public func hasResetPassed(now: Date = Date()) -> Bool {
+            if resetPassed == true { return true }
+            guard remainingPercent == nil, let reset = ResetTime.parse(resetsAt) else { return false }
+            return reset <= now
         }
     }
 

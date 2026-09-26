@@ -96,7 +96,8 @@ struct ClaudeCard: View {
                     remaining: weekly?.remainingPercent,
                     used: weekly?.usedPercent,
                     resetText: weeklyReset.flatMap { L10n.resetsIn($0, now: now) },
-                    color: theme.seriesClaude
+                    color: theme.seriesClaude,
+                    resetPassed: weekly?.hasResetPassed(now: now) == true
                 )
             }
             // Index ids: bucket ids aren't guaranteed unique.
@@ -191,14 +192,14 @@ private struct ToolCardFrame<Content: View>: View {
             Rectangle().fill(theme.hairline).frame(height: 1)
             HealthLine(health: health)
         }
-        .padding(14)
+        .padding(DS.cardPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous)
                 .fill(theme.card)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous)
                 .strokeBorder(theme.hairline, lineWidth: 1)
         )
     }
@@ -247,11 +248,6 @@ private struct PrimaryQuota: View {
     let now: Date
     @Environment(\.stokerTheme) private var theme
 
-    private var resetPassed: Bool {
-        guard window?.remainingPercent == nil, let r = ResetTime.parse(window?.resetsAt) else { return false }
-        return r <= now
-    }
-
     var body: some View {
         let pct = window?.remainingPercent
         VStack(alignment: .leading, spacing: 4) {
@@ -268,7 +264,7 @@ private struct PrimaryQuota: View {
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(theme.textMuted)
                 } else {
-                    Text(resetPassed ? L10n.resetAwaitingRefresh : L10n.quotaUnknownShort)
+                    Text(window?.hasResetPassed(now: now) == true ? L10n.resetAwaitingRefresh : L10n.quotaUnknownShort)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(theme.textMuted)
                 }
@@ -296,6 +292,8 @@ private struct SecondaryQuotaRow: View {
     let resetText: String?
     let color: Color
     var inactive: Bool = false
+    /// The window rolled over since the snapshot: say so instead of a blank percent + bar.
+    var resetPassed: Bool = false
     var help: String? = nil
     @Environment(\.stokerTheme) private var theme
 
@@ -307,20 +305,29 @@ private struct SecondaryQuotaRow: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(width: 84, alignment: .leading)
-            Group {
-                if let pct = remaining {
-                    Text("\(Int(pct.rounded()))%")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                        .foregroundStyle(inactive ? theme.textMuted : DS.quotaColor(pct, theme: theme))
-                        .monospacedDigit()
-                } else {
-                    Text(L10n.na)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(theme.textMuted)
+            if resetPassed {
+                Text(L10n.resetAwaitingRefresh)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(theme.textMuted)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Group {
+                    if let pct = remaining {
+                        Text("\(Int(pct.rounded()))%")
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .foregroundStyle(inactive ? theme.textMuted : DS.quotaColor(pct, theme: theme))
+                            .monospacedDigit()
+                    } else {
+                        Text(L10n.na)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(theme.textMuted)
+                    }
                 }
+                .frame(width: 36, alignment: .leading)
+                QuotaBar(percent: remaining, color: color.opacity(inactive ? 0.35 : 0.8), height: 4)
             }
-            .frame(width: 36, alignment: .leading)
-            QuotaBar(percent: remaining, color: color.opacity(inactive ? 0.35 : 0.8), height: 4)
             Text(inactive ? L10n.scopedInactive : (resetText ?? ""))
                 .font(.system(size: 9, weight: .medium))
                 .foregroundStyle(theme.textMuted)
@@ -387,7 +394,7 @@ struct HealthLine: View {
         case .pending: theme.textSecondary
         case .warning, .exhausted: theme.warning
         case .alert: theme.danger
-        case .unknown: theme.textMuted
+        case .unknown, .disabled: theme.textMuted
         }
     }
 
@@ -400,6 +407,7 @@ struct HealthLine: View {
         case .anchored: L10n.healthAnchored
         case .pending: L10n.healthPending
         case .exhausted: L10n.healthExhausted
+        case .disabled: L10n.healthDisabled
         }
     }
 
@@ -408,7 +416,9 @@ struct HealthLine: View {
         if let last = health.lastRunAt {
             parts.append(L10n.lastRun(last, ok: health.lastRunOK == true))
         }
-        parts.append(health.nextActivation.map(L10n.nextRun) ?? L10n.scheduleOffShort)
+        if health.state != .disabled {
+            parts.append(health.nextActivation.map(L10n.nextRun) ?? L10n.scheduleOffShort)
+        }
         return parts.joined(separator: " · ")
     }
 

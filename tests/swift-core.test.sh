@@ -318,12 +318,10 @@ AppLanguage.current = .en
 precondition(L10n.skipReasonText("window_already_active") == "Weekly window already running")
 precondition(L10n.skipReasonText("quota_exhausted") == "Quota exhausted")
 precondition(L10n.skipReasonText("preflight_status_missing") == "Quota unknown")
-precondition(L10n.weeklyWindowHint == "Weekly window")
 precondition(L10n.quotaMiniHelp(remaining: 92, used: 8, weekly: true) == "Weekly window: 92% remaining (8% used)")
 precondition(L10n.quotaMiniHelp(remaining: 40, used: nil) == "5-hour window: 40% remaining")
 AppLanguage.current = .zh
 precondition(L10n.skipReasonText("window_already_active") == "周窗口已在计时")
-precondition(L10n.weeklyWindowHint == "周窗口")
 // Usage rows (LogStore decodes with convertFromSnakeCase): a failed attempt superseded by
 // a model-fallback retry counts as skipped, not as an error; ids differ by model.
 let usageDecoder = JSONDecoder()
@@ -509,6 +507,14 @@ precondition(snap.alertTools == ["claude"] && snap.anyAlert)
 let snapCodexOnly = ToolHealthEvaluator.snapshot(records: snapRecords, quota: snapQuota, installed: true,
     times: slots, activationTool: "codex", now: toolHealthNow, calendar: utc)
 precondition(snapCodexOnly.claude.nextActivation == nil && snapCodexOnly.alertTools.isEmpty && !snapCodexOnly.anyAlert)
+// Fix round 1: a disabled tool is .disabled (never .alert), so the card and banner agree;
+// its last-run info is kept.
+precondition(snapCodexOnly.claude.state == .disabled && !snapCodexOnly.claude.isAlert)
+precondition(snapCodexOnly.claude.lastRunAt != nil && snapCodexOnly.claude.lastRunOK == false)
+precondition(snapCodexOnly.codex.state == .anchored)
+precondition(snapCodexOnly.health("claude").state == .disabled && snapCodexOnly.health("codex").state == .anchored)
+precondition(snapCodexOnly.health("bogus").state == .unknown)
+precondition(snap.health("claude").isAlert == snap.anyAlert)
 // Schedule off → no next activation for either tool.
 let snapOff = ToolHealthEvaluator.snapshot(records: snapRecords, quota: snapQuota, installed: false,
     times: slots, activationTool: "all", now: toolHealthNow, calendar: utc)
@@ -523,7 +529,21 @@ precondition(L10n.resetCredits(count: 2, expiry: nil) == "2 reset credits")
 precondition(L10n.resetCredits(count: 1, expiry: iso("2026-10-05T12:00:00Z")).hasPrefix("1 reset credit · expires "))
 precondition(L10n.alertBanner(tool: "Codex", failures: 3, error: "boom").contains("3"))
 precondition(L10n.alertBanner(tool: "Codex", failures: 3, error: "boom").contains("boom"))
-precondition(!L10n.alertBanner(tool: "Codex", failures: 1, error: nil).contains("1"))
+precondition(L10n.alertBanner(tool: "Codex", failures: 1, error: nil) == "Codex activation is failing")
+precondition(L10n.alertBanner(tool: "Codex", failures: 0, error: "x") == "Codex activation is failing · last error: x")
+precondition(L10n.healthDisabled == "Disabled")
+precondition(L10n.resetsInDays(0) == "today" && L10n.resetsInDays(1) == "in 1 day")
+// Fixed-format stamps: noon UTC is the same calendar day in every zone from -11 to +11;
+// expected parts come from the (current-zone) calendar so the check is zone-independent.
+let stampDate = iso("2026-10-03T12:00:00Z")
+let stampParts = Calendar.current.dateComponents([.month, .day, .hour, .minute, .weekday], from: stampDate)
+let stampClock = String(format: "%02d:%02d", stampParts.hour!, stampParts.minute!)
+let stampMD = String(format: "%02d-%02d", stampParts.month!, stampParts.day!)
+let enWeekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+let zhWeekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
+precondition(L10n.weekdayStamp(stampDate) == "\(stampMD) \(enWeekdays[stampParts.weekday! - 1]) \(stampClock)")
+precondition(L10n.resetAtClock(stampDate) == "resets \(stampClock)")
+precondition(L10n.resetCredits(count: 1, expiry: stampDate) == "1 reset credit · expires \(stampMD)")
 precondition(L10n.windowRunning == "Weekly window running")
 precondition(L10n.resetsIn(toolHealthNow.addingTimeInterval(3 * 3600 + 60), now: toolHealthNow) == "resets in 3h")
 AppLanguage.current = .zh
@@ -532,6 +552,18 @@ precondition(L10n.resetsInDays(4) == "4 天后")
 precondition(L10n.resetCredits(count: 1, expiry: nil) == "重置券 ×1")
 precondition(L10n.resetCredits(count: 1, expiry: iso("2026-10-05T12:00:00Z")).hasSuffix(" 过期"))
 precondition(L10n.plannedSkip == "按计划跳过" && L10n.quotaSkip == "额度跳过")
+precondition(L10n.healthDisabled == "未启用")
+precondition(L10n.resetsInDays(0) == "今天" && L10n.resetsInDays(1) == "1 天后")
+precondition(L10n.weekdayStamp(stampDate) == "\(stampMD) \(zhWeekdays[stampParts.weekday! - 1]) \(stampClock)")
+precondition(L10n.resetAtClock(stampDate) == "\(stampClock) 重置")
+precondition(L10n.resetCredits(count: 2, expiry: stampDate) == "重置券 ×2 · \(stampMD) 过期")
+// resetPassed: the engine flag wins; otherwise a blank window whose reset is in the past.
+let flagged = try! JSONDecoder().decode(ActivationState.QuotaWindow.self,
+    from: Data(#"{"used_percent":null,"remaining_percent":null,"resets_at":"2099-01-01T00:00:00Z","reset_passed":true}"#.utf8))
+precondition(flagged.resetPassed == true && flagged.hasResetPassed(now: toolHealthNow))
+precondition(win(nil, "2026-09-26T00:00:00Z").hasResetPassed(now: toolHealthNow))
+precondition(!win(40, "2026-09-26T00:00:00Z").hasResetPassed(now: toolHealthNow), "a live percent is not a passed reset")
+precondition(!win(nil, "2026-10-26T00:00:00Z").hasResetPassed(now: toolHealthNow))
 precondition(L10n.resetsIn(toolHealthNow.addingTimeInterval(3 * 3600 + 60), now: toolHealthNow) == "3 小时后重置")
 precondition(L10n.resetsInShort(toolHealthNow.addingTimeInterval(3 * 3600 + 60), now: toolHealthNow) == "3 小时后")
 if let savedLanguage4 {

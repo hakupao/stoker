@@ -41,19 +41,9 @@ public enum L10n {
     public static var weekly: String {
         AppLanguage.current == .zh ? "周" : "Weekly"
     }
-    /// Constant tag on a weekly-only tool's quota row (Codex has only a 7-day window).
-    public static var weeklyWindowHint: String {
-        AppLanguage.current == .zh ? "周窗口" : "Weekly window"
-    }
     /// Short window tag for compact labels ("Codex 92% 周").
     public static var weeklyShort: String {
         AppLanguage.current == .zh ? "周" : "wk"
-    }
-    /// Tooltip on the 5h/weekly picker: it only switches Claude.
-    public static var windowPickerHelp: String {
-        AppLanguage.current == .zh
-            ? "切换 Claude 的 5 小时 / 周窗口；Codex 只有 7 天周窗口，始终显示周额度"
-            : "Switches Claude between its 5-hour and weekly windows; Codex has only a 7-day window and always shows weekly"
     }
     public static var noData: String {
         AppLanguage.current == .zh ? "暂无数据" : "No data"
@@ -374,9 +364,6 @@ public enum L10n {
     public static var quotaTrend: String {
         AppLanguage.current == .zh ? "额度趋势" : "Quota Trend"
     }
-    public static var quotaOverview: String {
-        AppLanguage.current == .zh ? "额度概览" : "Quota Overview"
-    }
     /// Shown in a gauge row when a tool is configured but its latest snapshot has no readable quota.
     public static var quotaUnknownShort: String {
         AppLanguage.current == .zh ? "额度未知" : "Quota unknown"
@@ -565,10 +552,33 @@ public enum L10n {
     public static var scheduleOffShort: String {
         AppLanguage.current == .zh ? "定时未开启" : "Schedule off"
     }
-    private static func monthDay(_ date: Date) -> String {
+    public static var healthDisabled: String {
+        AppLanguage.current == .zh ? "未启用" : "Disabled"
+    }
+    // Fixed-format parts use en_US_POSIX (immune to user locale/calendar settings); only the
+    // weekday name is localized, per AppLanguage.
+    private static func fixedFormatter(_ format: String) -> DateFormatter {
         let f = DateFormatter()
-        f.dateFormat = "MM-dd"
-        return f.string(from: date)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = format
+        return f
+    }
+    private static let monthDayFormatter = fixedFormatter("MM-dd")
+    private static let clockFormatter = fixedFormatter("HH:mm")
+    private static let weekdayFormatterZH: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "EEE"
+        return f
+    }()
+    private static let weekdayFormatterEN: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US")
+        f.dateFormat = "EEE"
+        return f
+    }()
+    private static func monthDay(_ date: Date) -> String {
+        monthDayFormatter.string(from: date)
     }
     /// Codex free rate-limit resets; the expiry is omitted when the source doesn't give one.
     public static func resetCredits(count: Int, expiry: Date?) -> String {
@@ -624,16 +634,12 @@ public enum L10n {
     }
     /// "10-03 周六 22:49" / "10-03 Sat 22:49" — Codex weekly reset stamp.
     public static func weekdayStamp(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: AppLanguage.current == .zh ? "zh_CN" : "en_US")
-        f.dateFormat = "MM-dd EEE HH:mm"
-        return f.string(from: date)
+        let weekday = (AppLanguage.current == .zh ? weekdayFormatterZH : weekdayFormatterEN).string(from: date)
+        return "\(monthDay(date)) \(weekday) \(clockFormatter.string(from: date))"
     }
     /// "00:10 重置" / "resets 00:10" — the 5h window's absolute reset clock.
     public static func resetAtClock(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        let t = f.string(from: date)
+        let t = clockFormatter.string(from: date)
         return AppLanguage.current == .zh ? "\(t) 重置" : "resets \(t)"
     }
     public static var resetsLabel: String {
