@@ -380,8 +380,15 @@ struct SettingsTabContent: View {
             ScrollView {
                 VStack(spacing: 12) {
                     ScheduleCard(model: model)
-                    ToolCard(model: model)
-                    BackgroundAuthCard(model: model)
+
+                    HStack(alignment: .top, spacing: 12) {
+                        ClaudeSettingsCard(model: model)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        CodexSettingsCard(model: model)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+
                     AdvancedSection(model: model)
                 }
                 .padding(.horizontal, 18)

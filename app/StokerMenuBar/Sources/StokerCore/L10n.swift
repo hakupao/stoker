@@ -113,12 +113,44 @@ public enum L10n {
         }
     }
 
-    // MARK: - Tools
-    public static var tools: String {
-        AppLanguage.current == .zh ? "工具" : "Tools"
+    // MARK: - Tool Settings Cards
+    public static var claudeSettingsTitle: String {
+        AppLanguage.current == .zh ? "Claude 设置" : "Claude Settings"
     }
-    public static var toolsDescription: String {
-        AppLanguage.current == .zh ? "选择要定时激活的 AI 工具。" : "Select AI tools to activate on schedule."
+    public static var codexSettingsTitle: String {
+        AppLanguage.current == .zh ? "Codex 设置" : "Codex Settings"
+    }
+    public static var codexModelLabel: String {
+        AppLanguage.current == .zh ? "模型" : "Model"
+    }
+    public static var codexModelHelp: String {
+        AppLanguage.current == .zh
+            ? "默认 gpt-5.6-luna；设为 default 交给 Codex CLI"
+            : "Defaults to gpt-5.6-luna; set to default to let the Codex CLI choose"
+    }
+    public static var codexAutoUpdateLabel: String {
+        AppLanguage.current == .zh ? "自动更新 CLI" : "Auto-update CLI"
+    }
+    public static var codexAutoUpdateHelp: String {
+        AppLanguage.current == .zh
+            ? "在真正运行 Codex 前自动 codex update，每 24 小时最多一次"
+            : "Runs codex update automatically before a real Codex activation, at most once every 24 hours"
+    }
+    public static var codexFallbackLabel: String {
+        AppLanguage.current == .zh ? "模型自动回退" : "Model auto-fallback"
+    }
+    public static var codexFallbackHelp: String {
+        AppLanguage.current == .zh
+            ? "模型被下架时自动换可用模型重试"
+            : "Automatically retries with an available model if the configured one is retired"
+    }
+    public static var codexIdleOnlyLabel: String {
+        AppLanguage.current == .zh ? "仅空闲时激活" : "Activate only when idle"
+    }
+    public static var codexIdleOnlyHelp: String {
+        AppLanguage.current == .zh
+            ? "周窗口已在计时时跳过，约每周只激活一次"
+            : "Skips a run while the weekly window is already ticking, so it activates roughly once a week"
     }
 
     // MARK: - Advanced
@@ -130,9 +162,6 @@ public enum L10n {
     }
     public static var recordSnapshotAfter: String {
         AppLanguage.current == .zh ? "运行后记录额度快照" : "Record quota snapshot after running"
-    }
-    public static var codexModel: String {
-        AppLanguage.current == .zh ? "Codex 模型" : "Codex model"
     }
     public static var whenQuotaUnavailable: String {
         AppLanguage.current == .zh ? "查不到额度时" : "When quota unavailable"

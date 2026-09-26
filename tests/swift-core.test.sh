@@ -636,6 +636,34 @@ if let savedLanguage5 {
     UserDefaults.standard.removeObject(forKey: "appLanguage")
 }
 
+// ---- Task 6: Claude/Codex settings card L10n strings ----
+let savedLanguage6 = UserDefaults.standard.string(forKey: "appLanguage")
+AppLanguage.current = .en
+let enStrings6 = [
+    L10n.claudeSettingsTitle, L10n.codexSettingsTitle, L10n.codexModelLabel, L10n.codexModelHelp,
+    L10n.codexAutoUpdateLabel, L10n.codexAutoUpdateHelp, L10n.codexFallbackLabel, L10n.codexFallbackHelp,
+    L10n.codexIdleOnlyLabel, L10n.codexIdleOnlyHelp
+]
+precondition(enStrings6.allSatisfy { !$0.isEmpty }, "every new settings-card string must be non-empty in EN")
+AppLanguage.current = .zh
+let zhStrings6 = [
+    L10n.claudeSettingsTitle, L10n.codexSettingsTitle, L10n.codexModelLabel, L10n.codexModelHelp,
+    L10n.codexAutoUpdateLabel, L10n.codexAutoUpdateHelp, L10n.codexFallbackLabel, L10n.codexFallbackHelp,
+    L10n.codexIdleOnlyLabel, L10n.codexIdleOnlyHelp
+]
+precondition(zhStrings6.allSatisfy { !$0.isEmpty }, "every new settings-card string must be non-empty in ZH")
+precondition(zip(enStrings6, zhStrings6).allSatisfy { $0 != $1 }, "every new settings-card string must differ between EN and ZH")
+// Exact ZH copy from the brief.
+precondition(L10n.codexModelHelp == "默认 gpt-5.6-luna；设为 default 交给 Codex CLI")
+precondition(L10n.codexAutoUpdateHelp == "在真正运行 Codex 前自动 codex update，每 24 小时最多一次")
+precondition(L10n.codexFallbackHelp == "模型被下架时自动换可用模型重试")
+precondition(L10n.codexIdleOnlyHelp == "周窗口已在计时时跳过，约每周只激活一次")
+if let savedLanguage6 {
+    UserDefaults.standard.set(savedLanguage6, forKey: "appLanguage")
+} else {
+    UserDefaults.standard.removeObject(forKey: "appLanguage")
+}
+
 SWIFT
 
 swiftc \
