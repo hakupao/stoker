@@ -107,10 +107,15 @@ tool run), `status.jsonl` (one row per quota snapshot); raw CLI output goes to `
 
 **SwiftUI menu bar app** (`app/StokerMenuBar/`, Swift 6.0 tools, macOS 14+), two targets:
 - `StokerCore` — logic/models with no UI: `EnvFile`, `ScheduleFormatter`, `ProjectLocator`,
-  `LogStore` (parses `usage.jsonl`/`status.jsonl`), `L10n` (EN/中 bilingual). This is what
-  `swift-core.test.sh` compiles and tests.
+  `LogStore` (parses `usage.jsonl`/`status.jsonl`; owned by `StokerAppModel` as a single instance
+  shared by the main window and the menu, so both derive health from the same records),
+  `ToolHealth` (per-tool health state + next-activation, pure functions over `UsageRecord` +
+  `ToolQuota`), `L10n` (EN/中 bilingual). This is what `swift-core.test.sh` compiles and tests.
 - `StokerMenuBar` — the SwiftUI UI (`MenuBarExtra` + `Window`, `LSUIElement`, no Dock icon);
-  links `ServiceManagement` for launch-at-login.
+  links `ServiceManagement` for launch-at-login. `ToolCards.swift` (Claude/Codex tool cards, the
+  alert banner, the health line), `TrendCard.swift` (the Claude 5h / Claude weekly / Codex weekly
+  trend switcher), and `ToolSettingsCards.swift` (the per-tool settings cards) hold what used to
+  be one generic `ActivityView`/`ToolCard`.
 
 The app drives the engine through `Process()`: it runs `install.sh app-status` (status),
 `install.sh install`/`uninstall` (toggle schedule, after writing `.env`), and `install.sh run-now`,

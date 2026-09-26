@@ -17,8 +17,34 @@ All notable changes to this project will be documented in this file.
   Codex row, header bar, menu summary and trend always show the weekly window — the 5h/weekly
   picker now switches Claude only. Codex plan pills are humanized and single-line
   (`self_serve_business_prolite` → "Business Pro Lite"; `unknown` hides the pill).
+- **Activity tab redesigned around two tool cards.** Claude and Codex each get an
+  identity-colored card (Claude: 5-hour window headline, weekly and per-model weekly buckets
+  below; Codex: weekly window headline, plus reset credits when available) ending in a health
+  line, replacing the old single shared gauge. The quota-trend chart is now a three-way switcher
+  (`Claude 5h` / `Claude weekly` / `Codex weekly`) instead of a window picker + tool picker. The
+  stats strip splits skips into a neutral "planned skip" (`window_already_active`) count and a
+  warning-colored "quota skip" count.
+- **Settings split into a Claude card and a Codex card.** The old generic two-switch tool card
+  and the standalone background-auth card are replaced by a Claude settings card (enable +
+  background auth) and a Codex settings card (enable, model, auto-update CLI, model fallback,
+  activate-only-when-idle).
 
 ### Added
+- **Per-tool health (`ToolHealth`, new `StokerCore` module) drives an alert banner, a menu-bar
+  red dot, and header/menu health dots.** Claude states: `ok` / `warning` (last run failed) /
+  `alert` (≥2 consecutive real-run failures, or the schedule is on with no success in 24h) /
+  `unknown` (no runs yet). Codex states: `anchored` / `pending` / `exhausted` (weekly quota at
+  0%) / `warning` / `alert`; a tool `ACTIVATION_TOOL` excludes reports `disabled`. The Activity
+  tab shows an alert banner only while a tool is alerting — its "View" button filters the run
+  list to that tool's failures — and the menu-bar flame icon overlays a small red dot under the
+  same condition, rechecked every 10 minutes and again shortly after each scheduled activation
+  even while the window is closed.
+- **Codex status rows carry `reset_credits`** (`{available_count, earliest_expires_at}`). The
+  app-server source derives it from `rateLimitResetCredits`, counting only entries with
+  `status == "available"`; the native source passes through `rate_limit_reset_credits` as
+  reported by the usage API. `activation-state.sh` passes the field through to
+  `quota.codex.reset_credits`, and the Codex card shows it as "N reset credits" (`重置券 ×N` in
+  Chinese) when available.
 - **Codex idle-window policy (`CODEX_ACTIVATE_ONLY_WHEN_IDLE`, default `1`).** Codex (now only
   a 7-day window) no longer burns a prompt while that
   window is already running: the quota preflight skips Codex with the new reason

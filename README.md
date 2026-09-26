@@ -312,17 +312,44 @@ is on.
 
 Highlights:
 
-- **Activity dashboard** — per-tool quota-trend chart (5-hour / weekly for Claude; Codex always weekly), a run-history timeline
-  with expandable per-run details (tokens, cost, duration, session), and summary stats with
-  date-range / status / tool filters.
-- **Settings** — edit independent schedule times, toggle Claude/Codex, and configure advanced
-  options (quota preflight, post-run snapshots, keep-awake, launch at login).
-- **Background auth** — at-a-glance status of how scheduled runs authenticate, plus one-click setup
-  of a long-lived `CLAUDE_CODE_OAUTH_TOKEN` so they never fall back to the rotating Keychain login
-  (with a manual paste fallback).
+- **Activity dashboard** — an alert banner (shown only while a tool needs attention; "View" filters
+  the run list to it) above two identity-colored tool cards: Claude (5-hour window as the headline,
+  weekly and any per-model weekly buckets below) and Codex (weekly window as the headline with its
+  reset date and day countdown, plus reset credits when available), each ending in a health line
+  (state, last run, next activation). Below the cards: a quota-trend switcher (`Claude 5h` /
+  `Claude weekly` / `Codex weekly`), a run-history timeline with expandable per-run details
+  (tokens, cost, duration, session), and summary stats — including a neutral "planned skip" vs.
+  warning "quota skip" split — with date-range / status / tool filters.
+- **Header & menu** — mini quota bars labeled `Claude 5h` / `Codex wk` with a health dot each; the
+  menu-bar dropdown shows one summary line per tool; the menu-bar flame icon gets a small red dot
+  while either tool is alerting, rechecked every 10 minutes and again shortly after each scheduled
+  activation, even while the window is closed.
+- **Settings** — a Claude card (enable + background auth) and a Codex card (enable, model,
+  auto-update CLI, model fallback, activate-only-when-idle), plus shared advanced options (quota
+  preflight, post-run snapshots, keep-awake, launch at login).
+- **Background auth** (in the Claude settings card) — at-a-glance status of how scheduled runs
+  authenticate, plus one-click setup of a long-lived `CLAUDE_CODE_OAUTH_TOKEN` so they never fall
+  back to the rotating Keychain login (with a manual paste fallback).
 - **Bilingual UI** with an EN / 中 switch; the appearance follows the system Light/Dark setting.
 - **Environment Check** that detects required and optional CLI tools.
 - **Export run history to CSV.**
+
+**Health states:**
+
+| Tool | State | Shown as | Meaning |
+| :--- | :--- | :--- | :--- |
+| Claude | `unknown` | "No runs yet" | No real (non-skipped) run recorded yet. |
+| Claude | `alert` | "N failures in a row" / "Activation failing" | ≥2 consecutive real-run failures, or the schedule is on and no run has succeeded in the last 24h. |
+| Claude | `warning` | "Last run failed" | Most recent real run failed. |
+| Claude | `ok` | "Activating normally" | Most recent real run succeeded. |
+| Codex | `alert` | "N failures in a row" / "Activation failing" | ≥2 consecutive real-run failures (checked before window state). |
+| Codex | `warning` | "Last run failed" | Most recent real run failed. |
+| Codex | `exhausted` | "Weekly quota used up" | The anchored weekly window is at 0% remaining. |
+| Codex | `anchored` | "Anchored this week" | The weekly window's reset is still in the future and already in use (used% > 0, or a success landed this cycle). |
+| Codex | `pending` | "Will anchor next slot" | The window is idle, its reset already passed, or quota data is missing. |
+| Either | `disabled` | "Disabled" | The tool is excluded by `ACTIVATION_TOOL` — no next activation, never alerts. |
+
+States are checked in the order shown per tool (a failure streak overrides window state for Codex).
 
 <div align="center">
 <table>
