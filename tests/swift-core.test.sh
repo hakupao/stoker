@@ -301,6 +301,16 @@ precondition(AppSettings(values: ["CODEX_MODEL": "default"]).codexModel == "defa
 precondition(AppSettings(values: ["CODEX_MODEL": "gpt-9-custom"]).codexModel == "gpt-9-custom")
 precondition(AppSettings(values: ["CODEX_MODEL": "gpt-5.4-mini"]).envValues["CODEX_MODEL"] == "gpt-5.6-luna")
 
+// Codex settings: auto-update, model-fallback, activate-only-when-idle (default true when key absent, false only when value is "0")
+let s0 = AppSettings(values: [:])
+precondition(s0.codexAutoUpdate && s0.codexModelFallback && s0.codexActivateOnlyWhenIdle)
+var s1 = AppSettings(values: ["CODEX_AUTO_UPDATE": "0", "CODEX_MODEL_FALLBACK": "1", "CODEX_ACTIVATE_ONLY_WHEN_IDLE": "0"])
+precondition(!s1.codexAutoUpdate && s1.codexModelFallback && !s1.codexActivateOnlyWhenIdle)
+s1.codexAutoUpdate = true
+precondition(s1.envValues["CODEX_AUTO_UPDATE"] == "1")
+precondition(s1.envValues["CODEX_ACTIVATE_ONLY_WHEN_IDLE"] == "0")
+precondition(s1.envValues["CODEX_MODEL_FALLBACK"] == "1")
+
 // Skip-reason labels: the Codex idle-window policy has its own label, distinct from
 // both "exhausted" and the "quota unknown" catch-all.
 let savedLanguage = UserDefaults.standard.string(forKey: "appLanguage")

@@ -486,6 +486,9 @@ public struct AppSettings {
     public var quotaPreflightOnUnknown: String
     public var keepAwakeMode: String
     public var keepAwakeSeconds: String
+    public var codexAutoUpdate: Bool
+    public var codexModelFallback: Bool
+    public var codexActivateOnlyWhenIdle: Bool
 
     public var enableClaude: Bool {
         get { activationTool == "all" || activationTool == "claude" }
@@ -517,6 +520,9 @@ public struct AppSettings {
         quotaPreflightOnUnknown = values["QUOTA_PREFLIGHT_ON_UNKNOWN"] ?? "allow"
         keepAwakeMode = values["KEEP_AWAKE_MODE"] ?? "off"
         keepAwakeSeconds = values["KEEP_AWAKE_SECONDS"] ?? "900"
+        codexAutoUpdate = values["CODEX_AUTO_UPDATE"] != "0"
+        codexModelFallback = values["CODEX_MODEL_FALLBACK"] != "0"
+        codexActivateOnlyWhenIdle = values["CODEX_ACTIVATE_ONLY_WHEN_IDLE"] != "0"
     }
 
     /// Current default Codex activation model (mirrors the engine's CODEX_DEFAULT_MODEL).
@@ -539,7 +545,10 @@ public struct AppSettings {
             "ENABLE_QUOTA_PREFLIGHT": enableQuotaPreflight ? "1" : "0",
             "QUOTA_PREFLIGHT_ON_UNKNOWN": quotaPreflightOnUnknown,
             "KEEP_AWAKE_MODE": keepAwakeMode,
-            "KEEP_AWAKE_SECONDS": keepAwakeSeconds
+            "KEEP_AWAKE_SECONDS": keepAwakeSeconds,
+            "CODEX_AUTO_UPDATE": codexAutoUpdate ? "1" : "0",
+            "CODEX_MODEL_FALLBACK": codexModelFallback ? "1" : "0",
+            "CODEX_ACTIVATE_ONLY_WHEN_IDLE": codexActivateOnlyWhenIdle ? "1" : "0"
         ]
     }
 }
