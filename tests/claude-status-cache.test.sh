@@ -175,7 +175,7 @@ cat >"$TMP_DIR/bin/security-fake" <<'SH'
 printf '%s\n' "$*" >>"${SENTINEL_DIR}/security-args"
 [[ "${SECURITY_FAIL:-0}" == "1" ]] && exit 44
 if [[ "$*" == *" -w"* ]]; then
-  printf '{"claudeAiOauth":{"accessToken":"sk-ant-oat-TESTTOKENCANARY","expiresAt":%s,"refreshToken":"rt-TESTTOKENCANARY"}}' "${CRED_EXPIRES_AT}"
+  printf '{"claudeAiOauth":{"accessToken":"sk-ant-oat-TESTTOKENCANARY","expiresAt":%s,"refreshToken":"rt-TESTTOKENCANARY","subscriptionType":"max"}}' "${CRED_EXPIRES_AT}"
 fi
 SH
 cat >"$TMP_DIR/bin/curl-fake" <<'SH'
@@ -183,7 +183,7 @@ cat >"$TMP_DIR/bin/curl-fake" <<'SH'
 cat >/dev/null   # consume the stdin header block (-H @-)
 printf '%s\n' "$*" >>"${SENTINEL_DIR}/curl-args"
 touch "${SENTINEL_DIR}/curl-invoked"
-printf '{"five_hour":{"utilization":41,"resets_at":"2099-01-01T00:00:00Z"},"seven_day":{"utilization":7,"resets_at":"2099-01-02T00:00:00Z"}}'
+printf '{"five_hour":{"utilization":41,"resets_at":"2099-01-01T00:00:00Z"},"seven_day":{"utilization":7,"resets_at":"2099-01-02T00:00:00Z"},"extra_usage":{"is_enabled":true,"monthly_limit":100,"used_credits":25,"utilization":25}}'
 SH
 chmod +x "$TMP_DIR/bin/security-fake" "$TMP_DIR/bin/curl-fake"
 
@@ -210,10 +210,18 @@ jq -e '
     and .five_hour.used_percent == 41
     and .five_hour.remaining_percent == 59
     and .weekly.used_percent == 7
+    and .subscription_type == "max"
+    and .credits.is_enabled == true
+    and .credits.used_credits == 25
+    and .credits.monthly_limit == 100
   ' <<<"$row" >/dev/null \
   || { echo "unexpected native status row: $row" >&2; exit 1; }
 [[ -e "$SENTINEL_DIR/curl-invoked" ]] \
   || { echo "expected native mode to query the usage API" >&2; exit 1; }
+# The native GET must send a claude-code-shaped User-Agent (the endpoint routes
+# UA-less requests into an aggressively rate-limited 429 bucket).
+grep -q 'User-Agent: claude-code/' "$SENTINEL_DIR/curl-args" \
+  || { echo "expected a claude-code User-Agent header on the native usage request" >&2; exit 1; }
 if grep -rq 'TESTTOKENCANARY' "$TMP_DIR/logs"; then
   echo "token value leaked into logs" >&2
   exit 1

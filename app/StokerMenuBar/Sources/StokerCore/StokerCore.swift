@@ -274,12 +274,62 @@ public struct ActivationState: Decodable {
         public var fiveHour: QuotaWindow?
         public var weekly: QuotaWindow?
         public var sonnetWeekly: QuotaWindow?
+        /// Codex plan tier (free/plus/pro/team). Claude carries its tier in `subscriptionType`.
+        public var planType: String?
+        /// Claude subscription tier (pro/max). Codex carries its tier in `planType`.
+        public var subscriptionType: String?
+        /// Overage/credit balance. Shape differs by tool (Codex balance vs Claude
+        /// extra_usage), so every field is optional; nil when the source has none.
+        public var credits: Credits?
+
+        /// The plan/tier to display, whichever tool populated it.
+        public var displayPlan: String? { planType ?? subscriptionType }
 
         private enum CodingKeys: String, CodingKey {
             case ok, timestamp
             case fiveHour = "five_hour"
             case weekly
             case sonnetWeekly = "sonnet_weekly"
+            case planType = "plan_type"
+            case subscriptionType = "subscription_type"
+            case credits
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            ok = try c.decodeIfPresent(Bool.self, forKey: .ok)
+            timestamp = try c.decodeIfPresent(String.self, forKey: .timestamp)
+            fiveHour = try c.decodeIfPresent(QuotaWindow.self, forKey: .fiveHour)
+            weekly = try c.decodeIfPresent(QuotaWindow.self, forKey: .weekly)
+            sonnetWeekly = try c.decodeIfPresent(QuotaWindow.self, forKey: .sonnetWeekly)
+            planType = try c.decodeIfPresent(String.self, forKey: .planType)
+            subscriptionType = try c.decodeIfPresent(String.self, forKey: .subscriptionType)
+            // Defensive: a surprise `credits` shape (e.g. a bare string carried by an
+            // older snapshot row) must not fail the whole ActivationState decode.
+            credits = (try? c.decodeIfPresent(Credits.self, forKey: .credits)) ?? nil
+        }
+    }
+
+    /// Credit/overage balance. Populated differently per tool — Codex fills
+    /// balance/hasCredits/unlimited; Claude fills the extra_usage fields — so all
+    /// are optional and the UI shows whichever are present.
+    public struct Credits: Decodable {
+        public var balance: String?
+        public var hasCredits: Bool?
+        public var unlimited: Bool?
+        public var isEnabled: Bool?
+        public var monthlyLimit: Double?
+        public var usedCredits: Double?
+        public var utilization: Double?
+
+        private enum CodingKeys: String, CodingKey {
+            case balance
+            case hasCredits = "has_credits"
+            case unlimited
+            case isEnabled = "is_enabled"
+            case monthlyLimit = "monthly_limit"
+            case usedCredits = "used_credits"
+            case utilization
         }
     }
 

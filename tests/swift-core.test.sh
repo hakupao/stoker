@@ -194,6 +194,35 @@ MainActor.assumeIsolated {
     RunLoop.main.run(until: Date().addingTimeInterval(0.6))
     precondition(ticker.frame == 0, "stopped ticker kept ticking")
 }
+
+// ToolQuota: plan/subscription/credits decode with a PLAIN JSONDecoder (the app
+// uses no convertFromSnakeCase, so the snake_case CodingKeys must carry the fields).
+let quotaDecoder = JSONDecoder()
+func decodeQuota(_ json: String) -> ActivationState.ToolQuota {
+    try! quotaDecoder.decode(ActivationState.ToolQuota.self, from: Data(json.utf8))
+}
+// Codex row: top-level plan_type + a balance-style credits object.
+let codexQ = decodeQuota(#"{"ok":true,"plan_type":"pro","credits":{"has_credits":true,"balance":"12.50"},"five_hour":{"used_percent":42,"remaining_percent":58}}"#)
+precondition(codexQ.planType == "pro")
+precondition(codexQ.displayPlan == "pro")
+precondition(codexQ.credits?.balance == "12.50")
+precondition(codexQ.credits?.hasCredits == true)
+precondition(codexQ.fiveHour?.remainingPercent == 58)
+// Claude row: subscription_type + extra_usage-style credits; displayPlan falls back to it.
+let claudeQ = decodeQuota(#"{"ok":true,"subscription_type":"max","credits":{"is_enabled":true,"used_credits":25,"monthly_limit":100},"five_hour":{"used_percent":10,"remaining_percent":90}}"#)
+precondition(claudeQ.subscriptionType == "max")
+precondition(claudeQ.displayPlan == "max")
+precondition(claudeQ.credits?.usedCredits == 25)
+precondition(claudeQ.credits?.monthlyLimit == 100)
+// Defensive: a surprise `credits` shape (bare string from an older snapshot row)
+// must degrade to nil, never fail the whole decode.
+let legacyQ = decodeQuota(#"{"ok":true,"plan_type":"plus","credits":"legacy-string"}"#)
+precondition(legacyQ.planType == "plus")
+precondition(legacyQ.credits == nil)
+// No plan/credits at all → all nil, displayPlan nil (Claude cache-source default).
+let bareQ = decodeQuota(#"{"ok":true,"five_hour":{"used_percent":5,"remaining_percent":95}}"#)
+precondition(bareQ.displayPlan == nil)
+precondition(bareQ.credits == nil)
 SWIFT
 
 swiftc \

@@ -198,6 +198,11 @@ codex job skipped by quota preflight reason=quota_exhausted
 | `QUOTA_EXHAUSTED_THRESHOLD_PERCENT` | 剩余额度低于或等于该百分比时跳过 | `0` |
 | `CLAUDE_STATUS_SOURCE` | `cache` 直接读 oh-my-claudecode 插件的本地用量缓存（不触碰任何凭证）；`native` 用钥匙串 token 只读查询用量接口——无需 omc，token 过期即跳过、绝不刷新；`omc` 强制 `omc wait status` 实时查询，无头运行时可能轮换钥匙串登录凭证 | `cache` |
 | `CLAUDE_USAGE_CACHE_FILE` | 用量缓存路径覆盖（可选） | `~/.claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json` |
+| `CLAUDE_USAGE_USER_AGENT` | `native` 用量请求的 User-Agent；claude-code 形态的 UA 可避开该接口激进的 429 限流桶 | `claude-code/0.3.5` |
+| `CODEX_STATUS_SOURCE` | `app-server`（默认）经 JSON-RPC 拉起 `codex app-server`（需 node + codex）；`native` 只读 HTTP 查询 ChatGPT 用量接口——读 `~/.codex/auth.json` 里的 token、绝不刷新、无需 app-server，并在支持的套餐上显示套餐档位与额度余额 | `app-server` |
+| `CODEX_AUTH_FILE` | `native` 用的 Codex OAuth 凭证路径（识别 `$CODEX_HOME`） | `~/.codex/auth.json` |
+| `CODEX_USAGE_API_URL` | Codex `native` 用量接口地址覆盖 | `https://chatgpt.com/backend-api/wham/usage` |
+| `CODEX_USAGE_USER_AGENT` | Codex `native` 请求发送的 User-Agent | `codex_cli_rs/<ver> (darwin)` |
 | `KEEP_AWAKE_MODE` | `off`、`during` 或 `always`；非 `off` 时真实定时触发会用 `caffeinate` 防止睡眠 | `off` |
 | `KEEP_AWAKE_SECONDS` | 每次真实触发的防睡眠时长上限 | `900` |
 | `CLAUDE_BIN` | Claude 路径覆盖 | 自动发现 |

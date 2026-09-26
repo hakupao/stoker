@@ -213,6 +213,11 @@ Copy `.env.example` to `.env` and adjust values:
 | `QUOTA_EXHAUSTED_THRESHOLD_PERCENT` | Skip when remaining quota is at or below this percent | `0` |
 | `CLAUDE_STATUS_SOURCE` | `cache` reads the oh-my-claudecode plugin's local usage cache (no credentials touched); `native` queries the usage API read-only with the Keychain token — no omc needed, skips when the token is expired, never refreshes; `omc` forces a live `omc wait status` query, which can rotate the shared Keychain OAuth login in headless runs | `cache` |
 | `CLAUDE_USAGE_CACHE_FILE` | Optional usage-cache path override | `~/.claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json` |
+| `CLAUDE_USAGE_USER_AGENT` | User-Agent for the `native` usage request; a claude-code-shaped UA avoids the endpoint's aggressive 429 bucket | `claude-code/0.3.5` |
+| `CODEX_STATUS_SOURCE` | `app-server` (default) spawns `codex app-server` over JSON-RPC (needs node + codex); `native` reads the ChatGPT usage endpoint over HTTP read-only — reads the token from `~/.codex/auth.json`, never refreshes it, needs no app-server, and surfaces plan tier + credit balance where available | `app-server` |
+| `CODEX_AUTH_FILE` | Codex OAuth credential path for `native` (honors `$CODEX_HOME`) | `~/.codex/auth.json` |
+| `CODEX_USAGE_API_URL` | Codex `native` usage endpoint override | `https://chatgpt.com/backend-api/wham/usage` |
+| `CODEX_USAGE_USER_AGENT` | User-Agent sent by Codex `native` requests | `codex_cli_rs/<ver> (darwin)` |
 | `KEEP_AWAKE_MODE` | `off`, `during`, or `always`; scheduled CLI runs use `caffeinate` when not `off` | `off` |
 | `KEEP_AWAKE_SECONDS` | Bounded keep-awake duration for each real activation run | `900` |
 | `CLAUDE_BIN` | Optional Claude binary override | auto-discovered |

@@ -378,6 +378,14 @@ public enum L10n {
     public static var remaining: String {
         AppLanguage.current == .zh ? "剩余" : "Remaining"
     }
+    /// Leading label for a tool's credit/overage balance on its gauge row.
+    public static var creditsLabel: String {
+        AppLanguage.current == .zh ? "额度" : "Credits"
+    }
+    /// Shown when a plan's credits are unmetered.
+    public static var creditsUnlimited: String {
+        AppLanguage.current == .zh ? "额度 无限" : "Credits ∞"
+    }
     /// Reset countdown from the snapshot's absolute reset time (accurate even when the remaining%
     /// reading is stale). Returns nil once the reset is in the past. Scales the unit to the
     /// distance — minutes < 1h, hours < 1 day, else days — so the weekly window (resets up to

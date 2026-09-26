@@ -132,7 +132,8 @@ bundled engine (shipped in `Contents/Resources/stoker`) into
   2. `app/StokerMenuBar/build-app.sh` (~:123) — `CFBundleShortVersionString` in the inline Info.plist
      (the `CFBundleVersion` build number just below, ~:125, is a *separate* integer — bump it too).
   3. `app/StokerMenuBar/Sources/StokerMenuBar/MainView.swift` (~:302) — the `?? "…"` UI version fallback.
-  4. `bin/activate-ai-window.sh` (~:484) — the MCP `clientInfo` `version:` sent to the model.
+  4. `bin/activate-ai-window.sh` — **two** occurrences: the MCP `clientInfo` `version:` sent to the
+     model (~:624), and the `CLAUDE_USAGE_USER_AGENT` default `claude-code/<ver>` (~:59). Bump both.
   5. `README.md:17` — the `version-…` shields.io badge.
   6. `README_CN.md:17` — the same version badge.
   7. `CHANGELOG.md` — add the new release header.

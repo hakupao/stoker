@@ -53,6 +53,19 @@ CLAUDE_USAGE_CACHE_FILE="${CLAUDE_USAGE_CACHE_FILE:-${CLAUDE_CONFIG_DIR:-${HOME}
 SECURITY_BIN="${SECURITY_BIN:-/usr/bin/security}"
 CURL_BIN="${CURL_BIN:-$(command -v curl 2>/dev/null || true)}"
 CLAUDE_USAGE_API_URL="${CLAUDE_USAGE_API_URL:-https://api.anthropic.com/api/oauth/usage}"
+# User-Agent for the native Claude usage GET. The endpoint routes requests without
+# a claude-code-shaped UA into an aggressively rate-limited bucket (persistent 429),
+# so default to one; override to change or to send an honest Stoker UA. NOTE: the
+# default carries this build's version — it is a version-bump sync site (see CLAUDE.md).
+CLAUDE_USAGE_USER_AGENT="${CLAUDE_USAGE_USER_AGENT:-claude-code/0.3.5}"
+# Codex quota source: "app-server" (default) spawns `codex app-server` over JSON-RPC;
+# "native" GETs the ChatGPT usage endpoint read-only (no app-server, no token refresh).
+CODEX_STATUS_SOURCE="${CODEX_STATUS_SOURCE:-app-server}"
+CODEX_AUTH_FILE="${CODEX_AUTH_FILE:-${CODEX_HOME:-${HOME}/.codex}/auth.json}"
+CODEX_USAGE_API_URL="${CODEX_USAGE_API_URL:-https://chatgpt.com/backend-api/wham/usage}"
+# Codex sends originator=codex_cli_rs + a codex_cli_rs/<ver> UA; the usage GET does not
+# strictly enforce them today, but we send them as harmless future-proofing.
+CODEX_USAGE_USER_AGENT="${CODEX_USAGE_USER_AGENT:-codex_cli_rs/0.144.6 (darwin)}"
 KEEP_AWAKE_MODE="${KEEP_AWAKE_MODE:-off}"
 KEEP_AWAKE_SECONDS="${KEEP_AWAKE_SECONDS:-900}"
 RUN_ID="${RUN_ID:-$(date '+%Y%m%d-%H%M%S')-$$}"
@@ -161,6 +174,14 @@ case "$CLAUDE_STATUS_SOURCE" in
   cache|native|omc) ;;
   *)
     echo "CLAUDE_STATUS_SOURCE must be cache, native, or omc" >&2
+    exit 2
+    ;;
+esac
+
+case "$CODEX_STATUS_SOURCE" in
+  app-server|native) ;;
+  *)
+    echo "CODEX_STATUS_SOURCE must be app-server or native" >&2
     exit 2
     ;;
 esac
@@ -364,7 +385,7 @@ claude_keychain_service() {
 # the cache/omc sources; the raw API response lands in $1.
 fetch_claude_usage_native() {
   local raw_file="$1"
-  local service cred_json access_token expires_at now_ms
+  local service cred_json access_token expires_at subscription_type now_ms
 
   if [[ -z "$CURL_BIN" || ! -x "$CURL_BIN" ]]; then
     log "WARNING: curl not found; Claude native quota snapshot was not recorded" >&2
@@ -379,6 +400,9 @@ fetch_claude_usage_native() {
 
   access_token="$(printf '%s' "$cred_json" | "$JQ_BIN" -r '.claudeAiOauth.accessToken // empty' 2>/dev/null)"
   expires_at="$(printf '%s' "$cred_json" | "$JQ_BIN" -r '.claudeAiOauth.expiresAt // 0' 2>/dev/null)"
+  # Subscription tier (pro/max/…) rides alongside the token in the same credential;
+  # read it while cred_json is still populated. Never logged (it stays a local var).
+  subscription_type="$(printf '%s' "$cred_json" | "$JQ_BIN" -r '.claudeAiOauth.subscriptionType // empty' 2>/dev/null)"
   cred_json=""
   [[ "$expires_at" =~ ^[0-9]+$ ]] || expires_at=0
 
@@ -396,6 +420,7 @@ fetch_claude_usage_native() {
   # The token rides stdin (-H @-) so it never appears in argv, ps output, or logs.
   if ! printf 'Authorization: Bearer %s\n' "$access_token" \
     | "$CURL_BIN" -sf --max-time 10 -H @- -H 'anthropic-beta: oauth-2025-04-20' \
+        -H "User-Agent: ${CLAUDE_USAGE_USER_AGENT}" \
         "$CLAUDE_USAGE_API_URL" >"$raw_file" 2>/dev/null; then
     access_token=""
     log "WARNING: Claude usage API request failed; native quota snapshot was not recorded" >&2
@@ -404,7 +429,7 @@ fetch_claude_usage_native() {
   access_token=""
 
   # shellcheck disable=SC2016 # jq variables are intentionally evaluated by jq.
-  "$JQ_BIN" -c --argjson now_ms "$now_ms" '
+  "$JQ_BIN" -c --argjson now_ms "$now_ms" --arg subscription_type "$subscription_type" '
     {
       timestamp: $now_ms,
       data: {
@@ -415,6 +440,13 @@ fetch_claude_usage_native() {
         sonnetWeeklyPercent: (.seven_day_sonnet.utilization // null),
         sonnetWeeklyResetsAt: (.seven_day_sonnet.resets_at // null)
       },
+      subscriptionType: (if $subscription_type == "" then null else $subscription_type end),
+      credits: (if (.extra_usage.is_enabled // false) then {
+        is_enabled: true,
+        monthly_limit: (.extra_usage.monthly_limit // null),
+        used_credits: (.extra_usage.used_credits // null),
+        utilization: (.extra_usage.utilization // null)
+      } else null end),
       error: false,
       source: "anthropic",
       lastSuccessAt: $now_ms
@@ -489,7 +521,8 @@ record_claude_status() {
           query_exit_code: $query_exit_code,
           status_source: $status_source,
           source: ($cache.source // null),
-          subscription_type: null,
+          subscription_type: ($cache.subscriptionType // null),
+          credits: ($cache.credits // null),
           cache_age_seconds: (if $cache.timestamp == null then null else ((now - ($cache.timestamp / 1000)) | round) end),
           cache_timestamp_ms: ($cache.timestamp // null),
           last_success_at_ms: ($cache.lastSuccessAt // null),
@@ -518,6 +551,69 @@ record_claude_status() {
   log "Claude status snapshot recorded source=${CLAUDE_STATUS_SOURCE} status_log=${STATUS_LOG}"
 }
 
+# Read-only Codex quota fetch for CODEX_STATUS_SOURCE=native. Reads the ChatGPT
+# OAuth access token + account id from ~/.codex/auth.json and GETs the usage
+# endpoint. It NEVER refreshes the token (a plain GET can't) and NEVER decodes the
+# JWT — plan/credits come from the response body, not the token. The raw response
+# carries PII (email/user_id/account_id); only the quota-relevant fields are kept,
+# so no PII lands on disk. Emits the redacted quota JSON on stdout (warnings to
+# stderr); the redacted raw artifact lands in $1.
+fetch_codex_usage_native() {
+  local raw_file="$1"
+  local auth_file="$CODEX_AUTH_FILE" access_token account_id response redacted
+
+  if [[ -z "$CURL_BIN" || ! -x "$CURL_BIN" ]]; then
+    log "WARNING: curl not found; Codex native quota snapshot was not recorded" >&2
+    return 1
+  fi
+  if [[ ! -f "$auth_file" ]]; then
+    log "WARNING: Codex auth file not found at ${auth_file}; native quota snapshot skipped (log in with: codex login)" >&2
+    return 1
+  fi
+
+  access_token="$("$JQ_BIN" -r '.tokens.access_token // empty' "$auth_file" 2>/dev/null)"
+  account_id="$("$JQ_BIN" -r '.tokens.account_id // empty' "$auth_file" 2>/dev/null)"
+  if [[ -z "$access_token" ]]; then
+    log "WARNING: Codex auth file has no access token; native quota snapshot skipped" >&2
+    return 1
+  fi
+
+  # Both sensitive headers ride stdin (-H @-) so neither the token nor the account
+  # id appears in argv, ps output, or logs. Plain GET → no refresh → no logout side
+  # effect. A non-2xx (e.g. 401 from an expired token) makes curl -f fail → the
+  # snapshot is skipped, never refreshed.
+  if ! response="$( { printf 'Authorization: Bearer %s\n' "$access_token"; \
+                      printf 'ChatGPT-Account-Id: %s\n' "$account_id"; } \
+      | "$CURL_BIN" -sf --max-time 10 -H @- \
+          -H 'originator: codex_cli_rs' \
+          -H "User-Agent: ${CODEX_USAGE_USER_AGENT}" \
+          -H 'Accept: application/json' \
+          "$CODEX_USAGE_API_URL" 2>/dev/null )"; then
+    access_token=""
+    account_id=""
+    log "WARNING: Codex usage API request failed; native quota snapshot was not recorded" >&2
+    return 1
+  fi
+  access_token=""
+  account_id=""
+
+  # Redact PII before anything touches disk: keep only the quota-relevant fields.
+  redacted="$(printf '%s' "$response" | "$JQ_BIN" -c '{plan_type, rate_limit, credits, rate_limit_reset_credits}' 2>/dev/null)"
+  response=""
+  if [[ -z "$redacted" ]]; then
+    log "WARNING: failed to parse Codex usage API response" >&2
+    return 1
+  fi
+  # A 200 with no quota fields at all (unexpected/garbage body) must not be recorded
+  # as an ok snapshot full of nulls — treat it as a failed read instead.
+  if [[ "$(printf '%s' "$redacted" | "$JQ_BIN" -r '(.rate_limit != null) or (.credits != null) or (.plan_type != null)' 2>/dev/null)" != "true" ]]; then
+    log "WARNING: Codex usage response carried no quota fields; native snapshot skipped" >&2
+    return 1
+  fi
+  printf '%s\n' "$redacted" >"$raw_file" 2>/dev/null || true
+  printf '%s' "$redacted"
+}
+
 record_codex_status() {
   local output_file
   output_file="${RAW_LOG_DIR}/$(stamp_for_file)-codex-status.log"
@@ -527,6 +623,77 @@ record_codex_status() {
     return 0
   fi
 
+  # ── native source: read-only HTTP GET, no app-server / node / codex binary ──
+  if [[ "$CODEX_STATUS_SOURCE" == "native" ]]; then
+    local redacted
+    redacted="$(fetch_codex_usage_native "$output_file")" || return 1
+    # shellcheck disable=SC2016 # jq variables are intentionally evaluated by jq.
+    printf '%s' "$redacted" | "$JQ_BIN" -c \
+      --arg timestamp "$(timestamp)" \
+      --arg run_id "$RUN_ID" \
+      --arg tool "codex" \
+      --arg raw_log "$output_file" '
+        # Normalize one HTTP window (used_percent / limit_window_seconds / reset_at,
+        # epoch seconds or ms) into the snapshot window shape. reset_at is unit
+        # detected by digit count so a ms epoch never yields a year-55000 date.
+        def win($w):
+          if ($w == null) then null
+          else
+            ($w.used_percent) as $p
+            | ($w.reset_at) as $ra
+            | (if $ra == null then null
+               elif (($ra | tostring | length) >= 13) then (($ra / 1000) | floor)
+               else $ra end) as $rs
+            | {
+                used_percent: $p,
+                remaining_percent: (if $p == null then null else (100 - $p) end),
+                window_minutes: (if ($w.limit_window_seconds // null) == null then null else (($w.limit_window_seconds / 60) | floor) end),
+                resets_at_epoch: $rs,
+                resets_at: (if $rs == null then null else ($rs | todateiso8601) end)
+              }
+          end;
+        . as $r
+        | ($r.rate_limit.primary_window // null) as $pw
+        | ($r.rate_limit.secondary_window // null) as $sw
+        # Route each present window by length, not by name: <=1 day → 5h lane,
+        # >1 day → weekly lane. Never assume primary is the 5-hour window.
+        | ([$pw, $sw] | map(select(. != null))) as $wins
+        | (($wins | map(select((.limit_window_seconds // 0) <= 86400)) | .[0]) // null) as $five_src
+        | (($wins | map(select((.limit_window_seconds // 0) > 86400)) | .[0]) // null) as $weekly_src
+        | {
+            timestamp: $timestamp,
+            run_id: $run_id,
+            tool: $tool,
+            ok: true,
+            plan_type: ($r.plan_type // null),
+            limit_id: null,
+            limit_name: null,
+            rate_limit_reached_type: (
+              if ($r.rate_limit.allowed == false) then
+                (if (($five_src.used_percent) // 0) >= 100 then "primary"
+                 elif (($weekly_src.used_percent) // 0) >= 100 then "secondary"
+                 else "reached" end)
+              else null end
+            ),
+            credits: (if ($r.credits // null) == null then null else {
+              has_credits: (if ($r.credits.balance // null) == null then null else true end),
+              unlimited: ($r.credits.unlimited // null),
+              balance: (if ($r.credits.balance // null) == null then null else ($r.credits.balance | tostring) end)
+            } end),
+            five_hour: win($five_src),
+            weekly: win($weekly_src),
+            error: null,
+            raw_log: $raw_log
+          }
+      ' >>"$STATUS_LOG" 2>/dev/null || {
+        log "WARNING: failed to parse Codex native status snapshot"
+        return 1
+      }
+    log "Codex status snapshot recorded source=native status_log=${STATUS_LOG}"
+    return 0
+  fi
+
+  # ── app-server source (default) ─────────────────────────────────────────────
   if [[ -z "$NODE_BIN" || ! -x "$NODE_BIN" ]]; then
     log "WARNING: node not found; Codex status snapshot was not recorded"
     return 1
@@ -637,8 +804,13 @@ NODE
       | ($events | map(select(.kind == "codex_rate_limits")) | last) as $record
       | ($events | map(select(.kind == "codex_rate_limits_error")) | last // null) as $error
       | ($record.result.rateLimitsByLimitId.codex // $record.result.rateLimits // {}) as $snapshot
-      | ($snapshot.primary // {}) as $primary
-      | ($snapshot.secondary // {}) as $secondary
+      # Route each window by its own length (window_minutes), not by primary/secondary
+      # position: <=1 day → 5h lane, >1 day → weekly lane. Codex sometimes reports the
+      # weekly window as `primary`, which the old positional mapping mislabeled as 5h.
+      | ([$snapshot.primary, $snapshot.secondary]
+          | map(select(. != null and ((.usedPercent // .windowDurationMins) != null)))) as $wins
+      | (($wins | map(select((.windowDurationMins // 0) <= 1440)) | .[0]) // null) as $primary
+      | (($wins | map(select((.windowDurationMins // 0) > 1440)) | .[0]) // null) as $secondary
       | {
           timestamp: $timestamp,
           run_id: $run_id,
@@ -648,21 +820,25 @@ NODE
           limit_id: ($snapshot.limitId // null),
           limit_name: ($snapshot.limitName // null),
           rate_limit_reached_type: ($snapshot.rateLimitReachedType // null),
-          credits: ($snapshot.credits // null),
-          five_hour: {
+          credits: (if ($snapshot.credits // null) == null then null else {
+            has_credits: ($snapshot.credits.hasCredits // $snapshot.credits.has_credits // null),
+            unlimited: ($snapshot.credits.unlimited // null),
+            balance: (if ($snapshot.credits.balance // null) == null then null else ($snapshot.credits.balance | tostring) end)
+          } end),
+          five_hour: (if $primary == null then null else {
             used_percent: ($primary.usedPercent // null),
-            remaining_percent: (if $primary.usedPercent == null then null else (100 - $primary.usedPercent) end),
+            remaining_percent: (if ($primary.usedPercent // null) == null then null else (100 - $primary.usedPercent) end),
             window_minutes: ($primary.windowDurationMins // null),
             resets_at_epoch: ($primary.resetsAt // null),
-            resets_at: (if $primary.resetsAt == null then null else ($primary.resetsAt | todateiso8601) end)
-          },
-          weekly: {
+            resets_at: (if ($primary.resetsAt // null) == null then null else ($primary.resetsAt | todateiso8601) end)
+          } end),
+          weekly: (if $secondary == null then null else {
             used_percent: ($secondary.usedPercent // null),
-            remaining_percent: (if $secondary.usedPercent == null then null else (100 - $secondary.usedPercent) end),
+            remaining_percent: (if ($secondary.usedPercent // null) == null then null else (100 - $secondary.usedPercent) end),
             window_minutes: ($secondary.windowDurationMins // null),
             resets_at_epoch: ($secondary.resetsAt // null),
-            resets_at: (if $secondary.resetsAt == null then null else ($secondary.resetsAt | todateiso8601) end)
-          },
+            resets_at: (if ($secondary.resetsAt // null) == null then null else ($secondary.resetsAt | todateiso8601) end)
+          } end),
           error: $error,
           raw_log: $raw_log
         }
@@ -981,8 +1157,17 @@ run_check() {
   fi
   if [[ -n "$NODE_BIN" && -x "$NODE_BIN" ]]; then
     log "node binary: $NODE_BIN ($("$NODE_BIN" --version 2>&1 | tr '\n' ' '))"
+  elif [[ "$CODEX_STATUS_SOURCE" == "native" ]]; then
+    log "node not found (ok: CODEX_STATUS_SOURCE=native reads Codex quota over HTTP, no app-server)"
   else
-    log "WARNING: node not found; Codex status snapshots will be disabled"
+    log "WARNING: node not found; Codex status snapshots will be disabled (set CODEX_STATUS_SOURCE=native to read quota over HTTP instead)"
+  fi
+  if [[ "$CODEX_STATUS_SOURCE" == "native" ]]; then
+    if [[ -f "$CODEX_AUTH_FILE" ]]; then
+      log "Codex quota source: native (auth file present: $CODEX_AUTH_FILE)"
+    else
+      log "WARNING: Codex quota source is native but auth file not found at $CODEX_AUTH_FILE; native snapshots will be skipped until you run: codex login"
+    fi
   fi
   if [[ "$CLAUDE_STATUS_SOURCE" == "cache" ]]; then
     if [[ -f "$CLAUDE_USAGE_CACHE_FILE" ]]; then

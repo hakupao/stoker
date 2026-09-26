@@ -107,7 +107,9 @@ private struct QuotaOverviewCard: View {
                         GaugeRow(
                             tool: tool,
                             window: window(for: tool),
-                            asOf: model.state?.quota[tool]?.timestamp.flatMap(LogTimestamp.parse)
+                            asOf: model.state?.quota[tool]?.timestamp.flatMap(LogTimestamp.parse),
+                            planType: model.state?.quota[tool]?.displayPlan,
+                            credits: model.state?.quota[tool]?.credits
                         )
                     }
                 }
@@ -139,6 +141,10 @@ private struct GaugeRow: View {
     let tool: String
     let window: ActivationState.QuotaWindow?
     let asOf: Date?
+    /// Tool-level plan tier (Codex plan_type / Claude subscription_type); nil hides the badge.
+    var planType: String? = nil
+    /// Tool-level credit balance; nil (or empty) hides the credits line.
+    var credits: ActivationState.Credits? = nil
     @Environment(\.stokerTheme) private var theme
 
     private var color: Color {
@@ -148,6 +154,16 @@ private struct GaugeRow: View {
         tool == "claude" ? "Claude" : "Codex"
     }
     private var remaining: Double? { window?.remainingPercent }
+    /// A short credit-balance string, or nil when there is nothing meaningful to show.
+    private var creditsText: String? {
+        guard let c = credits else { return nil }
+        if c.unlimited == true { return L10n.creditsUnlimited }
+        if let bal = c.balance, !bal.isEmpty { return "\(L10n.creditsLabel) \(bal)" }
+        if let used = c.usedCredits, let limit = c.monthlyLimit, limit > 0 {
+            return "\(L10n.creditsLabel) \(Int(used.rounded()))/\(Int(limit.rounded()))"
+        }
+        return nil
+    }
     private var resetDate: Date? {
         guard let iso = window?.resetsAt else { return nil }
         return ISO8601DateFormatter().date(from: iso)
@@ -160,10 +176,20 @@ private struct GaugeRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Text(name)
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(color)
-                .frame(width: 52, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(color)
+                if let plan = planType, !plan.isEmpty {
+                    Text(plan.capitalized)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(theme.textSecondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(theme.fillSubtle))
+                }
+            }
+            .frame(width: 64, alignment: .leading)
 
             // Explicit "剩余 N%" so the bar is never misread as "used"; the % is health-colored.
             HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -195,11 +221,19 @@ private struct GaugeRow: View {
             }
             .frame(height: 8)
 
-            Text(trailingText)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(theme.textMuted)
-                .frame(width: 96, alignment: .trailing)
-                .lineLimit(1)
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(trailingText)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(theme.textMuted)
+                    .lineLimit(1)
+                if let ct = creditsText {
+                    Text(ct)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(theme.textMuted)
+                        .lineLimit(1)
+                }
+            }
+            .frame(width: 96, alignment: .trailing)
         }
         // Spell out remaining vs used on hover so the single bar's meaning is unambiguous.
         .help(L10n.quotaMiniHelp(remaining: window?.remainingPercent, used: window?.usedPercent))

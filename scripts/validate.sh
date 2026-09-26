@@ -32,6 +32,8 @@ tests/keep-awake-config.test.sh
 tests/claude-oauth-token.test.sh
 tests/claude-status-cache.test.sh
 tests/codex-probe-command.test.sh
+tests/codex-native-source.test.sh
+tests/codex-appserver-source.test.sh
 tests/swift-core.test.sh
 tests/release-packaging.test.sh
 tests/app-bundle-assets.test.sh
