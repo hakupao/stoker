@@ -93,3 +93,44 @@ public enum ToolHealthEvaluator {
         return build(state: state, summary: s, nextActivation: next)
     }
 }
+
+/// Both tools' health from one evaluation, so every surface (Activity cards, alert banner,
+/// header, menu) shows the same verdict. Recomputed from the latest logs + state on refresh —
+/// never ticker-driven.
+public struct ToolHealthSnapshot: Sendable {
+    public var claude: ToolHealth
+    public var codex: ToolHealth
+    /// Enabled tools currently in `.alert`, Claude first.
+    public var alertTools: [String]
+    public var anyAlert: Bool { !alertTools.isEmpty }
+
+    public func health(_ tool: String) -> ToolHealth { tool == "codex" ? codex : claude }
+}
+
+extension ToolHealthEvaluator {
+    /// A tool excluded by `ACTIVATION_TOOL` isn't scheduled: it gets no next activation and
+    /// never raises an alert (its old failures would otherwise alarm forever).
+    public static func snapshot(records: [UsageRecord], quota: [String: ActivationState.ToolQuota],
+                                installed: Bool, times: [String], activationTool: String,
+                                now: Date = Date(), calendar: Calendar = .current) -> ToolHealthSnapshot {
+        let enabled = ToolRequirements.requiredCLIs(activationTool: activationTool)
+        let claudeHealth = Self.claude(records: records, scheduleOn: installed && enabled.contains("claude"),
+                                       times: times, now: now, calendar: calendar)
+        let codexHealth = Self.codex(records: records, weekly: quota["codex"]?.weekly,
+                                     scheduleOn: installed && enabled.contains("codex"),
+                                     times: times, now: now, calendar: calendar)
+        let alertTools = [("claude", claudeHealth), ("codex", codexHealth)]
+            .filter { enabled.contains($0.0) && $0.1.isAlert }
+            .map(\.0)
+        return ToolHealthSnapshot(claude: claudeHealth, codex: codexHealth, alertTools: alertTools)
+    }
+
+    /// Convenience over the app's decoded state; the schedule counts as on exactly when the
+    /// header toggle does (`state.installed`).
+    public static func snapshot(records: [UsageRecord], state: ActivationState?,
+                                now: Date = Date()) -> ToolHealthSnapshot {
+        snapshot(records: records, quota: state?.quota ?? [:], installed: state?.installed == true,
+                 times: state?.schedule.times ?? [], activationTool: state?.config.activationTool ?? "all",
+                 now: now)
+    }
+}

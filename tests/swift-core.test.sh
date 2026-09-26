@@ -449,6 +449,97 @@ precondition(ToolHealthEvaluator.codex(records: [rec("2026-09-26 22:00:00 UTC", 
 // empty times → nextActivation nil
 precondition(ToolHealthEvaluator.codex(records: [], weekly: nil, scheduleOn: true, times: [], now: toolHealthNow, calendar: utc).nextActivation == nil)
 
+// ---- Task 4: LogStore split skip counts + per-series trend points ----
+MainActor.assumeIsolated {
+    let logRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("stoker-logstore-\(UUID().uuidString)")
+    try! FileManager.default.createDirectory(at: logRoot.appendingPathComponent("logs"),
+                                             withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: logRoot) }
+    let usageLines = [
+        #"{"timestamp":"2026-09-26 07:00:05 UTC","run_id":"a","tool":"claude","ok":true,"exit_code":0}"#,
+        #"{"timestamp":"2026-09-26 07:00:06 UTC","run_id":"a","tool":"codex","skipped":true,"skip_reason":"window_already_active"}"#,
+        #"{"timestamp":"2026-09-26 12:00:06 UTC","run_id":"b","tool":"claude","skipped":true,"skip_reason":"quota_exhausted"}"#,
+        #"{"timestamp":"2026-09-26 17:00:06 UTC","run_id":"c","tool":"codex","ok":false,"exit_code":1,"model":"old","superseded_by_fallback":true}"#,
+    ]
+    let statusLines = [
+        #"{"timestamp":"2026-09-26 07:00:10 UTC","tool":"claude","ok":true,"five_hour":{"remaining_percent":90},"weekly":{"remaining_percent":70}}"#,
+        #"{"timestamp":"2026-09-26 07:00:11 UTC","tool":"codex","ok":true,"weekly":{"remaining_percent":99}}"#,
+        #"{"timestamp":"2026-09-26 12:00:10 UTC","tool":"claude","ok":true,"five_hour":{"remaining_percent":60},"weekly":{"remaining_percent":65}}"#,
+        #"{"timestamp":"2026-09-26 12:00:11 UTC","tool":"codex","ok":true,"weekly":{"remaining_percent":95}}"#,
+    ]
+    try! usageLines.joined(separator: "\n").write(to: logRoot.appendingPathComponent("logs/usage.jsonl"), atomically: true, encoding: .utf8)
+    try! statusLines.joined(separator: "\n").write(to: logRoot.appendingPathComponent("logs/status.jsonl"), atomically: true, encoding: .utf8)
+    let store = LogStore(root: logRoot)
+    store.dateRange = .all
+    store.load()
+    precondition(store.totalRuns == 4)
+    precondition(store.plannedSkipCount == 1, "window_already_active is a planned skip")
+    precondition(store.quotaSkipCount == 1, "quota skips exclude planned + superseded rows")
+    precondition(store.errorCount == 0, "a superseded attempt is not an error")
+    let codexPts = store.chartPoints(series: .codexWeekly)
+    precondition(codexPts.count == 2 && codexPts.allSatisfy { $0.tool == "codex" })
+    precondition(codexPts.map(\.remainingPercent) == [99, 95])
+    let c5 = store.chartPoints(series: .claudeFiveHour)
+    precondition(c5.count == 2 && c5.allSatisfy { $0.tool == "claude" })
+    precondition(c5.map(\.remainingPercent) == [90, 60])
+    precondition(store.chartPoints(series: .claudeWeekly).map(\.remainingPercent) == [70, 65])
+    // The run-list tool filter must not empty the trend (the trend picks its own tool).
+    store.toolFilter = .claude
+    precondition(store.chartPoints(series: .codexWeekly).count == 2)
+    precondition(TrendSeries.allCases == [.claudeFiveHour, .claudeWeekly, .codexWeekly])
+    precondition(TrendSeries.codexWeekly.tool == "codex" && TrendSeries.claudeWeekly.tool == "claude")
+}
+
+// ---- Task 4: shared health snapshot (one evaluation for Activity tab + header/menu) ----
+let snapQuota: [String: ActivationState.ToolQuota] = [
+    "codex": decodeQuota(#"{"ok":true,"weekly":{"used_percent":8,"remaining_percent":92,"resets_at":"2026-10-03T22:49:45Z"}}"#)
+]
+let snapRecords = [
+    rec("2026-09-26 17:00:00 UTC", "claude", ok: false),
+    rec("2026-09-26 22:00:00 UTC", "claude", ok: false, result: "HTTP 401"),
+    rec("2026-09-26 22:56:00 UTC", "codex", ok: true),
+]
+let snap = ToolHealthEvaluator.snapshot(records: snapRecords, quota: snapQuota, installed: true,
+    times: slots, activationTool: "all", now: toolHealthNow, calendar: utc)
+precondition(snap.claude.state == .alert && snap.codex.state == .anchored)
+precondition(snap.codex.nextActivation == iso("2026-10-04T07:00:00Z"), "codex uses the weekly window")
+precondition(snap.alertTools == ["claude"] && snap.anyAlert)
+// A tool excluded by ACTIVATION_TOOL is not scheduled: no next activation, never alerts.
+let snapCodexOnly = ToolHealthEvaluator.snapshot(records: snapRecords, quota: snapQuota, installed: true,
+    times: slots, activationTool: "codex", now: toolHealthNow, calendar: utc)
+precondition(snapCodexOnly.claude.nextActivation == nil && snapCodexOnly.alertTools.isEmpty && !snapCodexOnly.anyAlert)
+// Schedule off → no next activation for either tool.
+let snapOff = ToolHealthEvaluator.snapshot(records: snapRecords, quota: snapQuota, installed: false,
+    times: slots, activationTool: "all", now: toolHealthNow, calendar: utc)
+precondition(snapOff.claude.nextActivation == nil && snapOff.codex.nextActivation == nil)
+
+// ---- Task 4: L10n strings ----
+let savedLanguage4 = UserDefaults.standard.string(forKey: "appLanguage")
+AppLanguage.current = .en
+precondition(L10n.healthAlert(3).contains("3"))
+precondition(L10n.resetsInDays(4) == "in 4 days")
+precondition(L10n.resetCredits(count: 2, expiry: nil) == "2 reset credits")
+precondition(L10n.resetCredits(count: 1, expiry: iso("2026-10-05T12:00:00Z")).hasPrefix("1 reset credit · expires "))
+precondition(L10n.alertBanner(tool: "Codex", failures: 3, error: "boom").contains("3"))
+precondition(L10n.alertBanner(tool: "Codex", failures: 3, error: "boom").contains("boom"))
+precondition(!L10n.alertBanner(tool: "Codex", failures: 1, error: nil).contains("1"))
+precondition(L10n.windowRunning == "Weekly window running")
+precondition(L10n.resetsIn(toolHealthNow.addingTimeInterval(3 * 3600 + 60), now: toolHealthNow) == "resets in 3h")
+AppLanguage.current = .zh
+precondition(L10n.healthAlert(3).contains("3"))
+precondition(L10n.resetsInDays(4) == "4 天后")
+precondition(L10n.resetCredits(count: 1, expiry: nil) == "重置券 ×1")
+precondition(L10n.resetCredits(count: 1, expiry: iso("2026-10-05T12:00:00Z")).hasSuffix(" 过期"))
+precondition(L10n.plannedSkip == "按计划跳过" && L10n.quotaSkip == "额度跳过")
+precondition(L10n.resetsIn(toolHealthNow.addingTimeInterval(3 * 3600 + 60), now: toolHealthNow) == "3 小时后重置")
+precondition(L10n.resetsInShort(toolHealthNow.addingTimeInterval(3 * 3600 + 60), now: toolHealthNow) == "3 小时后")
+if let savedLanguage4 {
+    UserDefaults.standard.set(savedLanguage4, forKey: "appLanguage")
+} else {
+    UserDefaults.standard.removeObject(forKey: "appLanguage")
+}
+
 SWIFT
 
 swiftc \

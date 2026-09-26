@@ -419,6 +419,11 @@ public enum L10n {
     /// distance — minutes < 1h, hours < 1 day, else days — so the weekly window (resets up to
     /// ~7 days out) reads "3 天后重置" instead of "71 小时后重置".
     public static func resetsIn(_ resetAt: Date, now: Date) -> String? {
+        guard let short = resetsInShort(resetAt, now: now) else { return nil }
+        return AppLanguage.current == .zh ? "\(short)重置" : "resets \(short)"
+    }
+    /// The bare countdown ("3 小时后" / "in 3h") for labels that already say "重置".
+    public static func resetsInShort(_ resetAt: Date, now: Date) -> String? {
         let secs = resetAt.timeIntervalSince(now)
         guard secs > 0 else { return nil }
         let totalMin = Int(secs / 60)
@@ -426,13 +431,13 @@ public enum L10n {
         let m = totalMin % 60
         let d = Int((Double(h) / 24).rounded())
         if AppLanguage.current == .zh {
-            if h >= 24 { return "\(d) 天后重置" }
-            if h >= 1 { return "\(h) 小时后重置" }
-            return "\(max(1, m)) 分钟后重置"
+            if h >= 24 { return "\(d) 天后" }
+            if h >= 1 { return "\(h) 小时后" }
+            return "\(max(1, m)) 分钟后"
         } else {
-            if h >= 24 { return "resets in \(d)d" }
-            if h >= 1 { return "resets in \(h)h" }
-            return "resets in \(max(1, m))m"
+            if h >= 24 { return "in \(d)d" }
+            if h >= 1 { return "in \(h)h" }
+            return "in \(max(1, m))m"
         }
     }
     /// Honest "as of" label for the gauge — the remaining% is the last snapshot's value, not live.
@@ -519,6 +524,127 @@ public enum L10n {
         default:
             return AppLanguage.current == .zh ? "额度未知" : "Quota unknown"
         }
+    }
+
+    // MARK: - Tool cards & health
+    public static var healthOK: String {
+        AppLanguage.current == .zh ? "激活正常" : "Activating normally"
+    }
+    public static var healthWarning: String {
+        AppLanguage.current == .zh ? "最近一次失败" : "Last run failed"
+    }
+    public static func healthAlert(_ n: Int) -> String {
+        AppLanguage.current == .zh ? "连续 \(n) 次失败" : "\(n) failures in a row"
+    }
+    /// Alert without a failure streak (e.g. no success within 24h while scheduled).
+    public static var healthAlertGeneric: String {
+        AppLanguage.current == .zh ? "激活异常" : "Activation failing"
+    }
+    public static var healthUnknown: String {
+        AppLanguage.current == .zh ? "暂无运行" : "No runs yet"
+    }
+    public static var healthAnchored: String {
+        AppLanguage.current == .zh ? "本周已锚定" : "Anchored this week"
+    }
+    public static var healthPending: String {
+        AppLanguage.current == .zh ? "待锚定" : "Will anchor next slot"
+    }
+    public static var healthExhausted: String {
+        AppLanguage.current == .zh ? "本周额度用尽" : "Weekly quota used up"
+    }
+    /// "上次 07:00 ✓" — the last real run and its outcome.
+    public static func lastRun(_ date: Date, ok: Bool) -> String {
+        let t = LogTimestamp.display(date)
+        let mark = ok ? "✓" : "✕"
+        return AppLanguage.current == .zh ? "上次 \(t) \(mark)" : "Last \(t) \(mark)"
+    }
+    public static func nextRun(_ date: Date) -> String {
+        let t = LogTimestamp.display(date)
+        return AppLanguage.current == .zh ? "下次 \(t)" : "Next \(t)"
+    }
+    public static var scheduleOffShort: String {
+        AppLanguage.current == .zh ? "定时未开启" : "Schedule off"
+    }
+    private static func monthDay(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "MM-dd"
+        return f.string(from: date)
+    }
+    /// Codex free rate-limit resets; the expiry is omitted when the source doesn't give one.
+    public static func resetCredits(count: Int, expiry: Date?) -> String {
+        if AppLanguage.current == .zh {
+            let base = "重置券 ×\(count)"
+            return expiry.map { "\(base) · \(monthDay($0)) 过期" } ?? base
+        }
+        let base = "\(count) reset credit\(count == 1 ? "" : "s")"
+        return expiry.map { "\(base) · expires \(monthDay($0))" } ?? base
+    }
+    /// Banner shown when a tool is in `.alert`. A streak of ≥2 failures names the count;
+    /// otherwise (e.g. never succeeded / stale) it's a generic "activation failing".
+    public static func alertBanner(tool: String, failures: Int, error: String?) -> String {
+        var s: String
+        if AppLanguage.current == .zh {
+            s = failures >= 2 ? "\(tool) 已连续 \(failures) 次失败" : "\(tool) 激活异常"
+            if let error, !error.isEmpty { s += " · 最近错误：\(error)" }
+        } else {
+            s = failures >= 2 ? "\(tool) failed \(failures) times in a row" : "\(tool) activation is failing"
+            if let error, !error.isEmpty { s += " · last error: \(error)" }
+        }
+        return s
+    }
+    public static var viewDetails: String {
+        AppLanguage.current == .zh ? "查看" : "View"
+    }
+    public static var plannedSkip: String {
+        AppLanguage.current == .zh ? "按计划跳过" : "Planned skip"
+    }
+    public static var quotaSkip: String {
+        AppLanguage.current == .zh ? "额度跳过" : "Quota skip"
+    }
+    public static var windowRunning: String {
+        AppLanguage.current == .zh ? "周窗口计时中" : "Weekly window running"
+    }
+    public static var supersededByFallback: String {
+        AppLanguage.current == .zh ? "已被模型回退取代" : "Superseded by fallback"
+    }
+    public static var trendClaude5h: String {
+        AppLanguage.current == .zh ? "Claude 5h" : "Claude 5h"
+    }
+    public static var trendClaudeWeekly: String {
+        AppLanguage.current == .zh ? "Claude 周" : "Claude weekly"
+    }
+    public static var trendCodexWeekly: String {
+        AppLanguage.current == .zh ? "Codex 周" : "Codex weekly"
+    }
+    /// Whole calendar days until a reset (0 → today).
+    public static func resetsInDays(_ n: Int) -> String {
+        if AppLanguage.current == .zh { return n <= 0 ? "今天" : "\(n) 天后" }
+        if n <= 0 { return "today" }
+        return n == 1 ? "in 1 day" : "in \(n) days"
+    }
+    /// "10-03 周六 22:49" / "10-03 Sat 22:49" — Codex weekly reset stamp.
+    public static func weekdayStamp(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: AppLanguage.current == .zh ? "zh_CN" : "en_US")
+        f.dateFormat = "MM-dd EEE HH:mm"
+        return f.string(from: date)
+    }
+    /// "00:10 重置" / "resets 00:10" — the 5h window's absolute reset clock.
+    public static func resetAtClock(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        let t = f.string(from: date)
+        return AppLanguage.current == .zh ? "\(t) 重置" : "resets \(t)"
+    }
+    public static var resetsLabel: String {
+        AppLanguage.current == .zh ? "重置" : "resets"
+    }
+    /// A window whose reset time has passed since the last snapshot (percent blanked).
+    public static var resetAwaitingRefresh: String {
+        AppLanguage.current == .zh ? "已重置，待刷新" : "Reset — awaiting refresh"
+    }
+    public static var thisWeek: String {
+        AppLanguage.current == .zh ? "本周" : "This week"
     }
 
     // MARK: - Misc

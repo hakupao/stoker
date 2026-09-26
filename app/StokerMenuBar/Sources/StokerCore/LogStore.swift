@@ -188,8 +188,12 @@ public enum DateRangeFilter: String, CaseIterable, Sendable {
     }
 }
 
-public enum QuotaWindowType: String, CaseIterable, Sendable {
-    case fiveHour, weekly
+/// One quota line the Activity trend can show. Each series belongs to exactly one tool and
+/// window, so the trend never mixes Claude's 5h window with Codex's weekly one.
+public enum TrendSeries: String, CaseIterable, Sendable {
+    case claudeFiveHour, claudeWeekly, codexWeekly
+
+    public var tool: String { self == .codexWeekly ? "codex" : "claude" }
 }
 
 // MARK: - Chart Data
@@ -250,38 +254,29 @@ public final class LogStore: ObservableObject {
         .sorted { ($0.date ?? .distantPast) < ($1.date ?? .distantPast) }
     }
 
-    /// Build chart points for the selected window, tagging each with a `segment` that bumps
-    /// whenever remaining% jumps *up* (a quota reset). filteredStatus is already sorted ascending
-    /// by date, so one pass — keyed per tool — assigns segments correctly even though Claude and
-    /// Codex rows are interleaved.
-    public func chartPoints(window: QuotaWindowType) -> [QuotaChartPoint] {
+    /// Build chart points for one series, tagging each with a `segment` that bumps whenever
+    /// remaining% jumps *up* (a quota reset) so the line breaks per window instead of drawing a
+    /// fake "refill" ramp. Honors the date range but not `toolFilter` — the series already picks
+    /// its tool, and the run-list tool filter must not blank the trend.
+    public func chartPoints(series: TrendSeries) -> [QuotaChartPoint] {
         let resetJump = 2.0  // above this, a rise reads as a reset rather than snapshot noise
-        var lastPct: [String: Double] = [:]
-        var segmentOf: [String: Int] = [:]
+        let cutoff = dateRange.cutoff
+        var lastPct: Double?
+        var segment = 0
         var out: [QuotaChartPoint] = []
-        for record in filteredStatus {
-            guard let date = record.date else { continue }
-            let pct: Double?
-            switch window {
-            // Weekly-only tools (Codex) always chart their weekly window.
-            case .fiveHour:
-                pct = ActivationState.ToolQuota.isWeeklyOnly(tool: record.tool)
-                    ? record.weekly?.remainingPercent
-                    : record.fiveHour?.remainingPercent
-            case .weekly: pct = record.weekly?.remainingPercent
-            }
+        let rows = statusRecords
+            .filter { $0.tool == series.tool }
+            .compactMap { r in r.date.map { (r, $0) } }
+            .filter { row in cutoff.map { row.1 >= $0 } ?? true }
+            .sorted { $0.1 < $1.1 }
+        for (record, date) in rows {
+            let pct: Double? = series == .claudeFiveHour
+                ? record.fiveHour?.remainingPercent
+                : record.weekly?.remainingPercent
             guard let pct else { continue }
-            let key = record.tool
-            if let prev = lastPct[key], pct > prev + resetJump {
-                segmentOf[key, default: 0] += 1
-            }
-            lastPct[key] = pct
-            out.append(QuotaChartPoint(
-                date: date,
-                tool: record.tool.capitalized,
-                remainingPercent: pct,
-                segment: segmentOf[key, default: 0]
-            ))
+            if let prev = lastPct, pct > prev + resetJump { segment += 1 }
+            lastPct = pct
+            out.append(QuotaChartPoint(date: date, tool: record.tool, remainingPercent: pct, segment: segment))
         }
         return out
     }
@@ -290,6 +285,15 @@ public final class LogStore: ObservableObject {
     public var successCount: Int { filteredUsage.filter { $0.status == .success }.count }
     public var skippedCount: Int { filteredUsage.filter { $0.status == .skipped }.count }
     public var errorCount: Int { filteredUsage.filter { $0.status == .error }.count }
+    /// Skips the engine made on purpose (Codex's weekly window is already anchored) — neutral.
+    public var plannedSkipCount: Int {
+        filteredUsage.filter { $0.skipped == true && $0.skipReason == "window_already_active" }.count
+    }
+    /// Quota-preflight skips (exhausted / unknown) — worth a warning. Excludes planned skips and
+    /// fallback-superseded attempts (those also report `.skipped` status but aren't skips).
+    public var quotaSkipCount: Int {
+        filteredUsage.filter { $0.skipped == true && $0.skipReason != "window_already_active" }.count
+    }
 
     public var averageCost: Double? {
         let costs = filteredUsage.compactMap(\.totalCostUsd).filter { $0 > 0 }
