@@ -13,7 +13,8 @@ public struct ToolHealth: Equatable, Sendable {
 }
 
 /// Health of each tool's scheduled activation, derived only from usage rows + the latest
-/// quota window. "Real runs" exclude preflight skips and fallback-superseded attempts.
+/// quota window. "Real runs" exclude preflight skips and fallback-superseded attempts
+/// (Claude's staleness check still counts skips as proof the schedule is running).
 public enum ToolHealthEvaluator {
     static let staleAfter: TimeInterval = 24 * 3600
 
@@ -42,10 +43,15 @@ public enum ToolHealthEvaluator {
         let s = summary(runs)
         let next = scheduleOn ? ScheduleFormatter.nextFire(times: times, now: now, calendar: calendar) : nil
 
-        // "No success ever" counts as stale too, so this is written as an explicit
-        // lastOK lookup rather than folded into the branch condition.
+        // Stale = no real success AND no preflight skip (any reason) within 24h. A skip proves the
+        // scheduler ran (e.g. weekly quota exhausted), so it isn't a stalled schedule. "No
+        // success ever" counts as stale too, hence the explicit lookups.
         let lastOK = runs.first(where: { $0.ok == true })?.date
-        let stale = lastOK == nil || now.timeIntervalSince(lastOK!) > staleAfter
+        let lastSkip = records
+            .filter { $0.tool == "claude" && $0.skipped == true }
+            .compactMap(\.date).max()
+        let lastProof = [lastOK, lastSkip].compactMap { $0 }.max()
+        let stale = lastProof.map { now.timeIntervalSince($0) > staleAfter } ?? true
 
         let state: ToolHealthState
         if runs.isEmpty {
@@ -62,8 +68,11 @@ public enum ToolHealthEvaluator {
         return build(state: state, summary: s, nextActivation: next)
     }
 
+    /// `preflight` / `idleOnly` / `exhaustedThreshold` mirror the engine's ENABLE_QUOTA_PREFLIGHT,
+    /// CODEX_ACTIVATE_ONLY_WHEN_IDLE and QUOTA_EXHAUSTED_THRESHOLD_PERCENT (engine defaults: on, on, 0).
     public static func codex(records: [UsageRecord], weekly: ActivationState.QuotaWindow?,
                              windowMinutes: Int = 10080, scheduleOn: Bool, times: [String],
+                             preflight: Bool = true, idleOnly: Bool = true, exhaustedThreshold: Double = 0,
                              now: Date = Date(), calendar: Calendar = .current) -> ToolHealth {
         let runs = realRuns(records, tool: "codex")
         let s = summary(runs)
@@ -72,10 +81,10 @@ public enum ToolHealthEvaluator {
         let cycleStart = resetAt?.addingTimeInterval(-Double(windowMinutes) * 60)
         let ranThisCycle = cycleStart.map { start in runs.contains { $0.ok == true && $0.date! >= start } } ?? false
         let used = weekly?.usedPercent ?? 0
-        let exhaustedByPercent = (weekly?.remainingPercent ?? 100) <= 0
+        let exhaustedByPercent = (weekly?.remainingPercent ?? 100) <= exhaustedThreshold
         // The engine anchors on the *window*, independent of a later failure overriding the
-        // displayed state to warning/alert — it still skips runs while the window is anchored.
-        // This drives both the state chain below and `from` for nextActivation.
+        // displayed state to warning/alert. This drives both the state chain below and, when the
+        // engine would actually skip, `from` for nextActivation.
         let anchoredWindow = active && (exhaustedByPercent || used > 0 || ranThisCycle)
 
         let state: ToolHealthState
@@ -85,9 +94,12 @@ public enum ToolHealthEvaluator {
         else if anchoredWindow { state = .anchored }
         else { state = .pending }
 
+        // The engine only skips inside the quota preflight: an exhausted window always, an
+        // anchored one only under the idle-only policy. Otherwise the next slot runs.
+        let engineSkips = preflight && anchoredWindow && (exhaustedByPercent || idleOnly)
         var next: Date? = nil
         if scheduleOn {
-            let from = anchoredWindow ? max(now, resetAt ?? now) : now
+            let from = engineSkips ? max(now, resetAt ?? now) : now
             next = ScheduleFormatter.nextFire(times: times, now: from, calendar: calendar)
         }
         return build(state: state, summary: s, nextActivation: next)
@@ -119,6 +131,7 @@ extension ToolHealthEvaluator {
     /// kept, no next activation) and so never alerts — card, banner and menu always agree.
     public static func snapshot(records: [UsageRecord], quota: [String: ActivationState.ToolQuota],
                                 installed: Bool, times: [String], activationTool: String,
+                                preflight: Bool = true, idleOnly: Bool = true, exhaustedThreshold: Double = 0,
                                 now: Date = Date(), calendar: Calendar = .current) -> ToolHealthSnapshot {
         let enabled = ToolRequirements.requiredCLIs(activationTool: activationTool)
         func gated(_ h: ToolHealth, _ tool: String) -> ToolHealth {
@@ -132,7 +145,8 @@ extension ToolHealthEvaluator {
                                        times: times, now: now, calendar: calendar)
         let codexHealth = Self.codex(records: records, weekly: quota["codex"]?.weekly,
                                      scheduleOn: installed && enabled.contains("codex"),
-                                     times: times, now: now, calendar: calendar)
+                                     times: times, preflight: preflight, idleOnly: idleOnly,
+                                     exhaustedThreshold: exhaustedThreshold, now: now, calendar: calendar)
         let claudeFinal = gated(claudeHealth, "claude")
         let codexFinal = gated(codexHealth, "codex")
         let alertTools = [("claude", claudeFinal), ("codex", codexFinal)]
@@ -147,6 +161,9 @@ extension ToolHealthEvaluator {
                                 now: Date = Date()) -> ToolHealthSnapshot {
         snapshot(records: records, quota: state?.quota ?? [:], installed: state?.installed == true,
                  times: state?.schedule.times ?? [], activationTool: state?.config.activationTool ?? "all",
+                 preflight: state?.config.enableQuotaPreflight ?? true,
+                 idleOnly: state?.config.codexActivateOnlyWhenIdle ?? true,
+                 exhaustedThreshold: state?.config.quotaExhaustedThresholdPercent ?? 0,
                  now: now)
     }
 }

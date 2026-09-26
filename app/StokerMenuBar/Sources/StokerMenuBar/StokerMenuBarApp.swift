@@ -95,7 +95,8 @@ final class StokerAppModel: ObservableObject {
     /// row (switch to Settings, expand Advanced, scroll + highlight). SettingsTabContent resets it.
     @Published var focusBackgroundAuth = false
     /// Any enabled tool's scheduled activation is in `.alert` — drives the menu-bar red dot.
-    /// Assigned only when the value flips (the label observes the model), on refresh only.
+    /// Assigned only when the value flips (the label observes the model) — by `refresh` and by the
+    /// background re-checks (periodic + post-activation), which route a flip through `refresh`.
     @Published var hasActivationAlert = false
     /// Drives the menu-bar flame flicker (see `StokerFlameIcon`). Deliberately a plain `let`
     /// holding a separate ObservableObject observed only by `MenuBarLabel` — never a
@@ -184,7 +185,7 @@ final class StokerAppModel: ObservableObject {
             let output = try await runExecutable(root.appendingPathComponent("bin/activation-state.sh"), arguments: ["--json"])
             let decoded = try JSONDecoder().decode(ActivationState.self, from: Data(output.utf8))
             // No suspension between these two, so observers never see a mismatched pair.
-            if let snapshot = await logs.value { logStore.apply(snapshot) }
+            if let snapshot = await logs.value { logStore.apply(snapshot) } else { logStore.refilter() }
             state = decoded
             // Read `.env` once: refresh the auth indicator every tick (cheap, and reading
             // raw values never clobbers unsaved edits the user is typing into `settings`),
@@ -199,17 +200,25 @@ final class StokerAppModel: ObservableObject {
             updateFlameTicker()
             applyAlert(healthSnapshot)
         } catch {
-            if let snapshot = await logs.value { logStore.apply(snapshot) }
+            if let snapshot = await logs.value { logStore.apply(snapshot) } else { logStore.refilter() }
             if !silent { showStatus(L10n.failedToReadStatus, isError: true) }
         }
     }
 
     /// Re-evaluate only the alert: usage.jsonl parsed off the main actor, against the current
-    /// `state`. Never touches `logStore` or `state`, so nothing publishes unless the alert flips.
+    /// `state`. Nothing publishes unless the alert flips; a flip goes through a silent `refresh`
+    /// instead, so the menu, cards and banner update together with the dot (one publish per
+    /// flip — `refresh` applies the alert itself). If that refresh fails, the dot stays as is
+    /// and the next re-check retries.
     private func recheckAlert() async {
         let root = root
         let records = await Task.detached(priority: .utility) { LogStore.readUsage(root: root) }.value
-        applyAlert(ToolHealthEvaluator.snapshot(records: records, state: state))
+        let snapshot = ToolHealthEvaluator.snapshot(records: records, state: state)
+        guard snapshot.anyAlert != hasActivationAlert else {
+            applyAlert(snapshot)
+            return
+        }
+        await refresh(silent: true, reloadSettings: false)
     }
 
     /// Publish `hasActivationAlert` only on a flip, then (re)arm the post-activation re-check.
@@ -230,7 +239,8 @@ final class StokerAppModel: ObservableObject {
             guard !Task.isCancelled, let self else { return }
             self.activationRecheckAt = nil
             // Re-arming cancels this (already finishing) task: keep recheckAlert free of any
-            // suspension or cancellation check after its read, or the re-arm could cut it short.
+            // cancellation check after its read, or the re-arm could cut it short. (Its flip path
+            // awaits `refresh`, which re-arms only at its very end and never checks cancellation.)
             await self.recheckAlert()
         }
     }

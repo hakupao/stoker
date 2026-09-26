@@ -56,6 +56,22 @@ jq -e '
   and .last_usage.result == "READY"
 ' <<<"$json" >/dev/null
 
+# The app's Codex next-activation mirrors the engine's skip toggles, so both must reach
+# the config block (caller env wins over .env).
+json="$(
+  STOKER_ROOT="$TMP_DIR" \
+  STOKER_SKIP_LAUNCHCTL=1 \
+  CODEX_ACTIVATE_ONLY_WHEN_IDLE=0 \
+  ENABLE_QUOTA_PREFLIGHT=0 \
+  QUOTA_EXHAUSTED_THRESHOLD_PERCENT=5 \
+  "$ROOT_DIR/bin/activation-state.sh" --json
+)"
+jq -e '
+  .config.codex_activate_only_when_idle == false
+  and .config.enable_quota_preflight == false
+  and .config.quota_exhausted_threshold_percent == 5
+' <<<"$json" >/dev/null
+
 mkdir -p "$TMP_DIR/bin" "$TMP_DIR/home/Library/LaunchAgents"
 
 cat >"$TMP_DIR/bin/launchctl" <<'SH'

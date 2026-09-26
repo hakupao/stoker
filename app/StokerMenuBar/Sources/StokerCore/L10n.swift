@@ -125,8 +125,8 @@ public enum L10n {
     }
     public static var codexModelHelp: String {
         AppLanguage.current == .zh
-            ? "默认 gpt-5.6-luna；设为 default 交给 Codex CLI"
-            : "Defaults to gpt-5.6-luna; set to default to let the Codex CLI choose"
+            ? "默认 \(AppSettings.defaultCodexModel)；设为 default 交给 Codex CLI"
+            : "Defaults to \(AppSettings.defaultCodexModel); set to default to let the Codex CLI choose"
     }
     public static var codexAutoUpdateLabel: String {
         AppLanguage.current == .zh ? "自动更新 CLI" : "Auto-update CLI"
@@ -657,7 +657,7 @@ public enum L10n {
         AppLanguage.current == .zh ? "已被模型回退取代" : "Superseded by fallback"
     }
     public static var trendClaude5h: String {
-        AppLanguage.current == .zh ? "Claude 5h" : "Claude 5h"
+        "Claude 5h"   // same in both languages
     }
     public static var trendClaudeWeekly: String {
         AppLanguage.current == .zh ? "Claude 周" : "Claude weekly"

@@ -654,7 +654,7 @@ let zhStrings6 = [
 precondition(zhStrings6.allSatisfy { !$0.isEmpty }, "every new settings-card string must be non-empty in ZH")
 precondition(zip(enStrings6, zhStrings6).allSatisfy { $0 != $1 }, "every new settings-card string must differ between EN and ZH")
 // Exact ZH copy from the brief.
-precondition(L10n.codexModelHelp == "默认 gpt-5.6-luna；设为 default 交给 Codex CLI")
+precondition(L10n.codexModelHelp == "默认 \(AppSettings.defaultCodexModel)；设为 default 交给 Codex CLI")
 precondition(L10n.codexAutoUpdateHelp == "在真正运行 Codex 前自动 codex update，每 24 小时最多一次")
 precondition(L10n.codexFallbackHelp == "模型被下架时自动换可用模型重试")
 precondition(L10n.codexIdleOnlyHelp == "周窗口已在计时时跳过，约每周只激活一次")
@@ -662,6 +662,120 @@ if let savedLanguage6 {
     UserDefaults.standard.set(savedLanguage6, forKey: "appLanguage")
 } else {
     UserDefaults.standard.removeObject(forKey: "appLanguage")
+}
+
+// ---- Final fix wave ----
+// I-1: Codex nextActivation follows the toggles that actually make the engine skip.
+// Anchored window, preflight on + idle-only off → the engine runs at the next slot.
+let xIdleOff = ToolHealthEvaluator.codex(records: [rec("2026-09-26 22:56:00 UTC", "codex", ok: true)],
+    weekly: win(8, "2026-10-03T22:49:45Z"), scheduleOn: true, times: slots,
+    preflight: true, idleOnly: false, now: toolHealthNow, calendar: utc)
+precondition(xIdleOff.state == .anchored, "window state is informational, independent of the toggles")
+precondition(xIdleOff.nextActivation == iso("2026-09-27T07:00:00Z"), "idle-only off → no postponement")
+// Anchored window, preflight off → nothing skips.
+precondition(ToolHealthEvaluator.codex(records: [rec("2026-09-26 22:56:00 UTC", "codex", ok: true)],
+    weekly: win(8, "2026-10-03T22:49:45Z"), scheduleOn: true, times: slots,
+    preflight: false, idleOnly: true, now: toolHealthNow, calendar: utc).nextActivation == iso("2026-09-27T07:00:00Z"))
+// Exhausted window: postponed past the reset whenever preflight is on (idle-only irrelevant)...
+let xExh = ToolHealthEvaluator.codex(records: [rec("2026-09-26 22:56:00 UTC", "codex", ok: true)],
+    weekly: win(100, "2026-10-03T22:49:45Z"), scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc)
+precondition(xExh.state == .exhausted && xExh.nextActivation == iso("2026-10-04T07:00:00Z"))
+precondition(ToolHealthEvaluator.codex(records: [], weekly: win(100, "2026-10-03T22:49:45Z"),
+    scheduleOn: true, times: slots, preflight: true, idleOnly: false,
+    now: toolHealthNow, calendar: utc).nextActivation == iso("2026-10-04T07:00:00Z"))
+// ...and not at all with preflight off.
+let xExhNoPre = ToolHealthEvaluator.codex(records: [], weekly: win(100, "2026-10-03T22:49:45Z"),
+    scheduleOn: true, times: slots, preflight: false, idleOnly: false, now: toolHealthNow, calendar: utc)
+precondition(xExhNoPre.state == .exhausted && xExhNoPre.nextActivation == iso("2026-09-27T07:00:00Z"))
+// M-8: exhausted uses the engine threshold (remaining <= QUOTA_EXHAUSTED_THRESHOLD_PERCENT).
+precondition(ToolHealthEvaluator.codex(records: [], weekly: win(97, "2026-10-03T22:49:45Z"),
+    scheduleOn: true, times: slots, exhaustedThreshold: 5, now: toolHealthNow, calendar: utc).state == .exhausted)
+precondition(ToolHealthEvaluator.codex(records: [], weekly: win(97, "2026-10-03T22:49:45Z"),
+    scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc).state == .anchored)
+// Config decode: idle-only defaults to true and the threshold to 0 when absent.
+func decodeConfig(_ json: String) -> ActivationState.Config {
+    try! JSONDecoder().decode(ActivationState.Config.self, from: Data(json.utf8))
+}
+let cfgBase = #""activation_tool":"all","codex_model":"m","enable_status_snapshots":true,"enable_quota_preflight":true,"quota_preflight_on_unknown":"allow""#
+let cfgDefault = decodeConfig("{\(cfgBase)}")
+precondition(cfgDefault.codexActivateOnlyWhenIdle && cfgDefault.quotaExhaustedThresholdPercent == 0)
+let cfgSet = decodeConfig("{\(cfgBase),\"codex_activate_only_when_idle\":false,\"quota_exhausted_threshold_percent\":5}")
+precondition(!cfgSet.codexActivateOnlyWhenIdle && cfgSet.quotaExhaustedThresholdPercent == 5)
+// The state-driven snapshot wires the config toggles through.
+func stateJSON(idle: Bool, preflight: Bool) -> ActivationState {
+    let json = """
+    {"root":"/r","label":"l","installed":true,"running":false,"schedule":{"times":["07:00","12:00","17:00","22:00"]},
+     "config":{"activation_tool":"codex","codex_model":"m","enable_status_snapshots":true,
+       "enable_quota_preflight":\(preflight),"quota_preflight_on_unknown":"allow",
+       "quota_exhausted_threshold_percent":0,"codex_activate_only_when_idle":\(idle)},
+     "keep_awake":{"mode":"off","seconds":0},
+     "quota":{"codex":{"ok":true,"weekly":{"used_percent":8,"remaining_percent":92,"resets_at":"2099-10-03T22:49:45Z"}}}}
+    """
+    return try! JSONDecoder().decode(ActivationState.self, from: Data(json.utf8))
+}
+let stateNow = Date()
+let plainNext = ScheduleFormatter.nextFire(times: slots, now: stateNow)
+precondition(ToolHealthEvaluator.snapshot(records: [], state: stateJSON(idle: false, preflight: true), now: stateNow)
+    .codex.nextActivation == plainNext)
+precondition(ToolHealthEvaluator.snapshot(records: [], state: stateJSON(idle: true, preflight: false), now: stateNow)
+    .codex.nextActivation == plainNext)
+precondition(ToolHealthEvaluator.snapshot(records: [], state: stateJSON(idle: true, preflight: true), now: stateNow)
+    .codex.nextActivation! > iso("2099-10-03T22:49:45Z"))
+
+// I-2: a preflight skip proves the scheduler is running, so it counts against staleness.
+// Weekly exhausted: last real success 4 days ago, then only quota skips every slot → not alert.
+var skipDays: [UsageRecord] = [rec("2026-09-23 22:00:05 UTC", "claude", ok: true)]
+for day in ["24", "25", "26"] {
+    for slot in ["07", "12", "17", "22"] {
+        skipDays.append(rec("2026-09-\(day) \(slot):00:05 UTC", "claude", skipped: true))
+    }
+}
+let cSkipOnly = ToolHealthEvaluator.claude(records: skipDays, scheduleOn: true, times: slots,
+                                           now: toolHealthNow, calendar: utc)
+precondition(cSkipOnly.state == .ok && !cSkipOnly.isAlert, "skips within 24h keep Claude out of alert")
+// No success and no skip in the last 24h (both older), schedule on → alert.
+precondition(ToolHealthEvaluator.claude(records: [
+    rec("2026-09-25 12:00:00 UTC", "claude", ok: true),
+    rec("2026-09-25 17:00:05 UTC", "claude", skipped: true)],
+    scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc).state == .alert)
+// M-10: a single failure with no success in 24h → alert (staleness outranks warning).
+precondition(ToolHealthEvaluator.claude(records: [
+    rec("2026-09-25 17:00:00 UTC", "claude", ok: true),
+    rec("2026-09-26 22:00:00 UTC", "claude", ok: false)],
+    scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc).state == .alert)
+// ...but the same failure right after a recent skip is only a warning.
+precondition(ToolHealthEvaluator.claude(records: [
+    rec("2026-09-25 17:00:00 UTC", "claude", ok: true),
+    rec("2026-09-26 17:00:05 UTC", "claude", skipped: true),
+    rec("2026-09-26 22:00:00 UTC", "claude", ok: false)],
+    scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc).state == .warning)
+// Schedule on with no times → no slot is due, so no staleness alert and no next activation.
+let cNoTimes = ToolHealthEvaluator.claude(records: [rec("2026-09-20 12:00:00 UTC", "claude", ok: true)],
+    scheduleOn: true, times: [], now: toolHealthNow, calendar: utc)
+precondition(cNoTimes.state == .ok && cNoTimes.nextActivation == nil)
+
+// M-3: Codex bools parse like the engine — absent (or empty) → on, otherwise only "1" is on.
+let s2 = AppSettings(values: ["CODEX_AUTO_UPDATE": "yes", "CODEX_MODEL_FALLBACK": "true", "CODEX_ACTIVATE_ONLY_WHEN_IDLE": ""])
+precondition(!s2.codexAutoUpdate && !s2.codexModelFallback && s2.codexActivateOnlyWhenIdle)
+precondition(AppSettings(values: ["CODEX_AUTO_UPDATE": "1"]).codexAutoUpdate)
+
+// M-2: a short-circuited reload (files unchanged) still re-applies the date cutoff, so the
+// "today" filter rolls over at midnight.
+MainActor.assumeIsolated {
+    let rollRoot = FileManager.default.temporaryDirectory.appendingPathComponent("stoker-roll-\(UUID().uuidString)")
+    try! FileManager.default.createDirectory(at: rollRoot.appendingPathComponent("logs"), withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: rollRoot) }
+    let fmt = DateFormatter()
+    fmt.dateFormat = "yyyy-MM-dd HH:mm:ss zzz"
+    let rollNow = Date()
+    try! #"{"timestamp":"\#(fmt.string(from: rollNow))","tool":"claude","ok":true}"#
+        .write(to: rollRoot.appendingPathComponent("logs/usage.jsonl"), atomically: true, encoding: .utf8)
+    let rollStore = LogStore(root: rollRoot)
+    rollStore.dateRange = .today
+    rollStore.load(now: rollNow)
+    precondition(rollStore.totalRuns == 1)
+    rollStore.load(now: rollNow.addingTimeInterval(2 * 86400))   // files unchanged, two days later
+    precondition(rollStore.totalRuns == 0, "the today cutoff must roll over without a file change")
 }
 
 SWIFT

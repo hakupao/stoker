@@ -193,13 +193,19 @@ struct CodexSettingsCard: View {
     }
 
     private var modelField: some View {
-        HStack {
-            Text(L10n.codexModelLabel)
-            Spacer()
-            TextField(AppSettings.defaultCodexModel, text: $model.settings.codexModel)
-                .multilineTextAlignment(.trailing)
-                .frame(maxWidth: 160)
-                .textFieldStyle(.roundedBorder)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(L10n.codexModelLabel)
+                Spacer()
+                TextField(AppSettings.defaultCodexModel, text: $model.settings.codexModel)
+                    .multilineTextAlignment(.trailing)
+                    .frame(maxWidth: 160)
+                    .textFieldStyle(.roundedBorder)
+            }
+            Text(L10n.codexModelHelp)
+                .font(.system(size: 11))
+                .foregroundStyle(theme.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

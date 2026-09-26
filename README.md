@@ -339,17 +339,20 @@ Highlights:
 | Tool | State | Shown as | Meaning |
 | :--- | :--- | :--- | :--- |
 | Claude | `unknown` | "No runs yet" | No real (non-skipped) run recorded yet. |
-| Claude | `alert` | "N failures in a row" / "Activation failing" | ≥2 consecutive real-run failures, or the schedule is on and no run has succeeded in the last 24h. |
+| Claude | `alert` | "N failures in a row" / "Activation failing" | ≥2 consecutive real-run failures, or the schedule is on and the last 24h had neither a successful run nor a quota-preflight skip (a skip proves the scheduler is running). |
 | Claude | `warning` | "Last run failed" | Most recent real run failed. |
 | Claude | `ok` | "Activating normally" | Most recent real run succeeded. |
 | Codex | `alert` | "N failures in a row" / "Activation failing" | ≥2 consecutive real-run failures (checked before window state). |
 | Codex | `warning` | "Last run failed" | Most recent real run failed. |
-| Codex | `exhausted` | "Weekly quota used up" | The anchored weekly window has no quota remaining. |
+| Codex | `exhausted` | "Weekly quota used up" | The weekly window's remaining quota is at or below `QUOTA_EXHAUSTED_THRESHOLD_PERCENT` (default 0) and its reset is still in the future. |
 | Codex | `anchored` | "Anchored this week" | The weekly window's reset is still in the future and already in use (used% > 0, or a success landed this cycle). |
 | Codex | `pending` | "Will anchor next slot" | The window is idle, its reset already passed, or quota data is missing. |
 | Either | `disabled` | "Disabled" | The tool is excluded by `ACTIVATION_TOOL` — no next activation, never alerts. |
 
 States are checked in the order shown per tool (a failure streak overrides window state for Codex).
+Codex's next activation moves past the weekly reset only when the engine would actually skip:
+an exhausted window with `ENABLE_QUOTA_PREFLIGHT=1`, or an anchored one when
+`CODEX_ACTIVATE_ONLY_WHEN_IDLE=1` as well; otherwise it is simply the next scheduled slot.
 
 <div align="center">
 <table>

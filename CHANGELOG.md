@@ -32,17 +32,21 @@ All notable changes to this project will be documented in this file.
 ### Added
 - **Per-tool health (`ToolHealth`, new `StokerCore` module) drives an alert banner, a menu-bar
   red dot, and header/menu health dots.** Claude states: `ok` / `warning` (last run failed) /
-  `alert` (≥2 consecutive real-run failures, or the schedule is on with no success in 24h) /
-  `unknown` (no runs yet). Codex states: `anchored` / `pending` / `exhausted` (no weekly quota
-  remaining) / `warning` / `alert`; a tool `ACTIVATION_TOOL` excludes reports `disabled`. The
+  `alert` (≥2 consecutive real-run failures, or the schedule is on with neither a success nor a
+  quota-preflight skip in 24h — a skip proves the scheduler is running) / `unknown` (no runs yet).
+  Codex states: `anchored` / `pending` / `exhausted` (weekly remaining at or below
+  `QUOTA_EXHAUSTED_THRESHOLD_PERCENT`) / `warning` / `alert`; a tool `ACTIVATION_TOOL` excludes
+  reports `disabled`. Codex's "next activation" moves past the weekly reset only when the engine
+  would really skip: an exhausted window with `ENABLE_QUOTA_PREFLIGHT=1`, or an anchored one when
+  `CODEX_ACTIVATE_ONLY_WHEN_IDLE=1` as well. The
   Activity tab shows an alert banner only while a tool is alerting — its "View" button filters
   the run list to that tool (its failures when there's a failure streak) — and the menu-bar
   flame icon overlays a small red dot under the same condition, rechecked every 10 minutes and
   again shortly after each scheduled activation even while the window is closed.
 - **Codex status rows carry `reset_credits`** (`{available_count, earliest_expires_at}`). The
   app-server source derives it from `rateLimitResetCredits`, counting only entries with
-  `status == "available"`; the native source passes through `rate_limit_reset_credits` as
-  reported by the usage API. `activation-state.sh` passes the field through to
+  `status == "available"`; the native source passes through `rate_limit_reset_credits` if
+  present. `activation-state.sh` passes the field through to
   `quota.codex.reset_credits`, and the Codex card shows it as "N reset credit(s)" (`重置券 ×N` in
   Chinese) when available.
 - **Codex idle-window policy (`CODEX_ACTIVATE_ONLY_WHEN_IDLE`, default `1`).** Codex (now only

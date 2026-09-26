@@ -178,11 +178,13 @@ public enum ToolFilter: String, CaseIterable, Sendable {
 public enum DateRangeFilter: String, CaseIterable, Sendable {
     case today, week, month, all
 
-    public var cutoff: Date? {
+    public var cutoff: Date? { cutoff(now: Date()) }
+
+    public func cutoff(now: Date) -> Date? {
         switch self {
-        case .today: Calendar.current.startOfDay(for: Date())
-        case .week: Calendar.current.date(byAdding: .day, value: -7, to: Date())
-        case .month: Calendar.current.date(byAdding: .day, value: -30, to: Date())
+        case .today: Calendar.current.startOfDay(for: now)
+        case .week: Calendar.current.date(byAdding: .day, value: -7, to: now)
+        case .month: Calendar.current.date(byAdding: .day, value: -30, to: now)
         case .all: nil
         }
     }
@@ -252,9 +254,20 @@ public final class LogStore: ObservableObject {
         self.root = root
     }
 
-    /// Reload both logs; a no-op (nothing publishes) when neither file changed.
-    public func load() {
-        if let snapshot = Self.read(root: root, unlessUnchangedFrom: signatures) { apply(snapshot) }
+    /// Reload both logs. When neither file changed only the date cutoff is re-applied (so
+    /// "today" rolls over at midnight), publishing only if the filtered list actually changes.
+    public func load(now: Date = Date()) {
+        if let snapshot = Self.read(root: root, unlessUnchangedFrom: signatures) {
+            apply(snapshot)
+        } else {
+            refilter(now: now)
+        }
+    }
+
+    /// Re-apply the filters against `now` without re-reading the logs; publishes only on change.
+    public func refilter(now: Date = Date()) {
+        let refreshed = filtered(now: now)
+        if refreshed.map(\.id) != filteredUsage.map(\.id) { filteredUsage = refreshed }
     }
 
     /// Install records read elsewhere (e.g. parsed on a background task by `read`).
@@ -288,9 +301,14 @@ public final class LogStore: ObservableObject {
     }
 
     private func recomputeFiltered() {
-        filteredUsage = usageRecords.filter { record in
+        filteredUsage = filtered(now: Date())
+    }
+
+    private func filtered(now: Date) -> [UsageRecord] {
+        let cutoff = dateRange.cutoff(now: now)
+        return usageRecords.filter { record in
             if toolFilter != .all, record.tool != toolFilter.rawValue { return false }
-            if let cutoff = dateRange.cutoff, let date = record.date, date < cutoff { return false }
+            if let cutoff, let date = record.date, date < cutoff { return false }
             return true
         }
         .sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }

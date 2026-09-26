@@ -209,11 +209,19 @@ public enum ProjectLocator {
 /// Parses the quota `resets_at` strings the engine emits. Claude's carry fractional
 /// seconds ("…:59.914Z"), which a default ISO8601DateFormatter rejects.
 public enum ResetTime {
+    // Built once: parse runs per window on every refresh. ISO8601DateFormatter is thread-safe
+    // for parsing (Apple's thread-safety notes), and these are never mutated after init, so
+    // sharing them across isolation domains is safe despite the missing Sendable conformance.
+    nonisolated(unsafe) private static let fractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    nonisolated(unsafe) private static let plain = ISO8601DateFormatter()
+
     public static func parse(_ iso: String?) -> Date? {
         guard let iso, !iso.isEmpty else { return nil }
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
+        return fractional.date(from: iso) ?? plain.date(from: iso)
     }
 }
 
@@ -261,6 +269,8 @@ public struct ActivationState: Decodable {
         public var enableQuotaPreflight: Bool
         public var quotaPreflightOnUnknown: String
         public var quotaExhaustedThresholdPercent: Double
+        /// CODEX_ACTIVATE_ONLY_WHEN_IDLE; the engine default (on) when an older engine omits it.
+        public var codexActivateOnlyWhenIdle: Bool
 
         private enum CodingKeys: String, CodingKey {
             case activationTool = "activation_tool"
@@ -269,6 +279,18 @@ public struct ActivationState: Decodable {
             case enableQuotaPreflight = "enable_quota_preflight"
             case quotaPreflightOnUnknown = "quota_preflight_on_unknown"
             case quotaExhaustedThresholdPercent = "quota_exhausted_threshold_percent"
+            case codexActivateOnlyWhenIdle = "codex_activate_only_when_idle"
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            activationTool = try c.decode(String.self, forKey: .activationTool)
+            codexModel = try c.decode(String.self, forKey: .codexModel)
+            enableStatusSnapshots = try c.decode(Bool.self, forKey: .enableStatusSnapshots)
+            enableQuotaPreflight = try c.decode(Bool.self, forKey: .enableQuotaPreflight)
+            quotaPreflightOnUnknown = try c.decode(String.self, forKey: .quotaPreflightOnUnknown)
+            quotaExhaustedThresholdPercent = try c.decodeIfPresent(Double.self, forKey: .quotaExhaustedThresholdPercent) ?? 0
+            codexActivateOnlyWhenIdle = try c.decodeIfPresent(Bool.self, forKey: .codexActivateOnlyWhenIdle) ?? true
         }
     }
 
@@ -531,9 +553,16 @@ public struct AppSettings {
         quotaPreflightOnUnknown = values["QUOTA_PREFLIGHT_ON_UNKNOWN"] ?? "allow"
         keepAwakeMode = values["KEEP_AWAKE_MODE"] ?? "off"
         keepAwakeSeconds = values["KEEP_AWAKE_SECONDS"] ?? "900"
-        codexAutoUpdate = values["CODEX_AUTO_UPDATE"] != "0"
-        codexModelFallback = values["CODEX_MODEL_FALLBACK"] != "0"
-        codexActivateOnlyWhenIdle = values["CODEX_ACTIVATE_ONLY_WHEN_IDLE"] != "0"
+        codexAutoUpdate = Self.engineFlag(values["CODEX_AUTO_UPDATE"])
+        codexModelFallback = Self.engineFlag(values["CODEX_MODEL_FALLBACK"])
+        codexActivateOnlyWhenIdle = Self.engineFlag(values["CODEX_ACTIVATE_ONLY_WHEN_IDLE"])
+    }
+
+    /// A default-on engine flag read the way the engine does (`${VAR:-1}` then `== "1"`):
+    /// unset or empty → on; otherwise on only for "1".
+    static func engineFlag(_ raw: String?) -> Bool {
+        guard let raw, !raw.isEmpty else { return true }
+        return raw == "1"
     }
 
     /// Current default Codex activation model (mirrors the engine's CODEX_DEFAULT_MODEL).
