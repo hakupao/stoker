@@ -344,7 +344,7 @@ Highlights:
 | Claude | `ok` | "Activating normally" | Most recent real run succeeded. |
 | Codex | `alert` | "N failures in a row" / "Activation failing" | ≥2 consecutive real-run failures (checked before window state). |
 | Codex | `warning` | "Last run failed" | Most recent real run failed. |
-| Codex | `exhausted` | "Weekly quota used up" | The anchored weekly window is at 0% remaining. |
+| Codex | `exhausted` | "Weekly quota used up" | The anchored weekly window has no quota remaining. |
 | Codex | `anchored` | "Anchored this week" | The weekly window's reset is still in the future and already in use (used% > 0, or a success landed this cycle). |
 | Codex | `pending` | "Will anchor next slot" | The window is idle, its reset already passed, or quota data is missing. |
 | Either | `disabled` | "Disabled" | The tool is excluded by `ACTIVATION_TOOL` — no next activation, never alerts. |
