@@ -1,0 +1,126 @@
+name: Build app
+
+# Builds the menu bar app and the three release artifacts on a runner with full
+# Xcode, so no local Xcode install is needed.
+# - Manual run (Actions → Build app → Run workflow): artifacts are attached to the run.
+# - Pushing a v* tag: the same build, plus a DRAFT GitHub release with the artifacts,
+#   to be reviewed and published by hand. The tag must match the version baked into
+#   the sources (bump all version sites first — see CLAUDE.md).
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version label for the artifact filenames (defaults to package-release.sh's VERSION)"
+        required: false
+        type: string
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install shellcheck
+        run: command -v shellcheck >/dev/null 2>&1 || brew install shellcheck
+
+      - name: Select default Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+          swift --version
+
+      - name: Validate
+        run: ./scripts/validate.sh
+
+      - name: Resolve version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          source_version="$(sed -n 's/^VERSION="\${VERSION:-\(.*\)}"$/\1/p' scripts/package-release.sh)"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          elif [[ -n "$INPUT_VERSION" ]]; then
+            version="$INPUT_VERSION"
+          else
+            version="$source_version"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
+            echo "Invalid version: '${version}'" >&2
+            exit 1
+          fi
+          # A tagged release must ship an app whose baked-in version matches the tag.
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            if [[ "$source_version" != "$version" ]]; then
+              echo "Tag ${GITHUB_REF_NAME} != package-release.sh VERSION ${source_version}; bump the version sites first" >&2
+              exit 1
+            fi
+            if ! grep -q "<string>${version}</string>" app/StokerMenuBar/build-app.sh; then
+              echo "build-app.sh CFBundleShortVersionString is not ${version}; bump the version sites first" >&2
+              exit 1
+            fi
+          fi
+          echo "version=${version}" >>"$GITHUB_OUTPUT"
+          echo "Building version ${version}"
+
+      - name: Package release artifacts
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          STOKER_PLAIN_DMG: 1
+        run: |
+          ./scripts/package-release.sh
+          ls -la dist
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: stoker-${{ steps.version.outputs.version }}
+          path: |
+            dist/*.tar.gz
+            dist/*.dmg
+            dist/*.zip
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: stoker-${{ needs.build.outputs.version }}
+          path: dist
+
+      - name: Create or update draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          shopt -s nullglob
+          files=(dist/*.tar.gz dist/*.dmg dist/*.zip)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" --clobber "${files[@]}"
+          else
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+              --title "$VERSION" --notes "Draft built by CI. Edit the notes, then publish." \
+              "${files[@]}"
+          fi

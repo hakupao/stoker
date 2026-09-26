@@ -21,7 +21,7 @@ shells out to the same scripts. The app contains no scheduler or activation logi
 # Validate / test — THE canonical gate. CONTRIBUTING.md mandates it pre-PR; CI runs it verbatim.
 ./scripts/validate.sh
 
-# Run a single test (all 12 are standalone executables; self-locate ROOT_DIR, run from anywhere; examples:)
+# Run a single test (all 13 are standalone executables; self-locate ROOT_DIR, run from anywhere; examples:)
 tests/swift-core.test.sh          # swiftc-compiles StokerCore (+L10n/LogStore) + a driver, asserts via precondition()
 tests/activation-state.test.sh    # bin/activation-state.sh --json output (needs jq)
 tests/keep-awake-config.test.sh   # rejects invalid KEEP_AWAKE_MODE / KEEP_AWAKE_SECONDS
@@ -47,7 +47,7 @@ bin/activate-ai-window.sh --once --tool claude   # single real run, one tool (--
 
 There is **no Makefile / npm / `swift test`**. `scripts/validate.sh` *is* the test runner: it
 runs `bash -n` + `shellcheck` on 7 scripts, `plutil -lint`s the plist, runs `dry-run` + `app-status`
-smoke checks, runs the 12 `tests/*.test.sh` in order, then `swift build`s the app. `shellcheck`,
+smoke checks, runs the 13 `tests/*.test.sh` in order, then `swift build`s the app. `shellcheck`,
 `plutil`, and `swift` are skipped if absent; `jq`, `swiftc`, and `file` are **not** guarded and will
 hard-fail their test if missing.
 
@@ -79,8 +79,12 @@ The full `.env` variable surface is documented in `README.md` (don't duplicate i
 **Runtime flow** of a real `--once` run: `cd ROOT_DIR` → optional `caffeinate` re-exec → acquire
 lock via `mkdir run/activation.lock` (atomic; a concurrent trigger logs and exits 0) → trap
 `rmdir LOCK_DIR` on EXIT → quota preflight (if enabled) → per-tool `run_claude`/`run_codex` →
-post-run quota snapshot → release lock. Per-tool calls use `run_with_timeout()` (poll → SIGTERM →
-2s → SIGKILL, exit 124 on timeout, default `TIMEOUT_SECONDS=120`).
+post-run quota snapshot → release lock. `run_codex` (real, preflight-allowed runs only) first runs a
+throttled `codex update` (`CODEX_AUTO_UPDATE`, stamp `run/codex-update.last`, non-fatal), and on a
+"model is not supported" failure retries the next cached candidate, up to
+`CODEX_MODEL_FALLBACK_MAX_TRIES` (`CODEX_MODEL_FALLBACK`; one usage row per attempt, never rewrites
+`.env`). Per-tool calls use `run_with_timeout()` (own process group via perl `setpgrp`; poll →
+SIGTERM to the group → 2s → SIGKILL, exit 124 on timeout, default `TIMEOUT_SECONDS=120`).
 
 **Quota preflight** writes a status snapshot, then reads back only the row matching this tool *and*
 `RUN_ID` before deciding. A tool whose quota is exhausted is skipped and recorded to
@@ -150,7 +154,8 @@ bundled engine (shipped in `Contents/Resources/stoker`) into
 - **Rename migration:** `install-launchd.sh` defaults `LEGACY_LABELS=com.activation-timer.ai-window`
   and boots out/removes those agents at install/uninstall.
 - **Release:** `scripts/package-release.sh` builds three artifacts into `dist/`
-  (`stoker-cli-<v>.tar.gz`, `stoker-gui-<v>.dmg`, `stoker-gui-<v>.zip`; DMG only if `hdiutil` exists).
+  (`stoker-cli-<v>.tar.gz`, `stoker-gui-<v>.dmg`, `stoker-gui-<v>.zip`; DMG only if `hdiutil` exists;
+  `STOKER_PLAIN_DMG=1` skips Finder styling, as CI does).
   The GUI build (`build-app.sh`) bundles the full CLI engine + an ad-hoc-codesigned `jq` into the
   `.app` — if `jq` is missing on the build host it only warns and ships a degraded app.
 - **Don't commit** generated artifacts: `.env`, `logs/*.log`, `logs/*.jsonl`, `logs/raw/`, `run/`,

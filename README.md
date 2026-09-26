@@ -211,6 +211,12 @@ Copy `.env.example` to `.env` and adjust values:
 | `ENABLE_QUOTA_PREFLIGHT` | Check quota before sending prompts | `1` |
 | `QUOTA_PREFLIGHT_ON_UNKNOWN` | `allow` or `skip` when quota cannot be checked | `allow` |
 | `QUOTA_EXHAUSTED_THRESHOLD_PERCENT` | Skip when remaining quota is at or below this percent | `0` |
+| `CODEX_AUTO_UPDATE` | **`1` upgrades your Codex CLI unattended** — set `0` to manage Codex versions yourself. Runs `codex update` right before a real Codex prompt (never on skipped, dry-run, check, or status runs), throttled per interval; failures/timeouts only warn | `1` |
+| `CODEX_AUTO_UPDATE_INTERVAL_HOURS` | Minimum hours between update attempts (stamped in `run/codex-update.last`, even on failure) | `24` |
+| `CODEX_UPDATE_TIMEOUT_SECONDS` | Timeout for `codex update` | `180` |
+| `CODEX_MODEL_FALLBACK` | `1` retries with the next candidate from the Codex model cache when the model is rejected ("model is not supported"); never on other errors, never rewrites `.env` | `1` |
+| `CODEX_MODEL_FALLBACK_MAX_TRIES` | Maximum fallback retries per run (each rejected model is excluded) | `3` |
+| `CODEX_MODELS_CACHE` | Codex model cache used to pick the fallback (honors `$CODEX_HOME`) | `~/.codex/models_cache.json` |
 | `CODEX_ACTIVATE_ONLY_WHEN_IDLE` | `1` or `0`. On weekly-only Codex accounts (no 5-hour window), `1` skips the Codex prompt with reason `window_already_active` while the 7-day window is already running, and sends it only once the window is idle again; no effect when a 5-hour window is reported. Needs `ENABLE_QUOTA_PREFLIGHT=1` | `1` |
 | `CLAUDE_STATUS_SOURCE` | `cache` reads the oh-my-claudecode plugin's local usage cache (no credentials touched); `native` queries the usage API read-only with the Keychain token — no omc needed, skips when the token is expired, never refreshes; `omc` forces a live `omc wait status` query, which can rotate the shared Keychain OAuth login in headless runs | `cache` |
 | `CLAUDE_USAGE_CACHE_FILE` | Optional usage-cache path override | `~/.claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json` |
@@ -355,6 +361,10 @@ The output under `dist/` is split by audience:
 
 - `stoker-cli-<version>.tar.gz`: lightweight CLI/launchd package.
 - `stoker-gui-<version>.dmg`: GUI app package for beginner users.
+
+`STOKER_PLAIN_DMG=1 ./scripts/package-release.sh` skips the Finder-styled installer window and
+builds a plain DMG (for CI and other headless hosts). The styled layout is also bounded to 60
+seconds of Finder automation and falls back to a plain DMG on failure.
 - `stoker-gui-<version>.zip`: fallback GUI app archive.
 
 ## How It Works
@@ -515,7 +525,7 @@ optimization).
 | `-c 'features.memories=false'` | Disable memories |
 | `-c 'features.multi_agent=false'` | Disable multi-agent |
 | `-c 'features.goals=false'` | Disable goals |
-| `-c 'features.codex_hooks=false'` | Disable hooks |
+| `-c 'features.hooks=false'` | Disable hooks |
 | `-c 'features.child_agents_md=false'` | Disable AGENTS.md loading |
 | `-c 'model_reasoning_effort="low"'` | Minimal reasoning effort |
 
@@ -528,6 +538,21 @@ you prefer the Codex CLI default.
 > **Upgrading from ≤ 0.3.5:** your `.env` most likely still pins `CODEX_MODEL=gpt-5.4-mini`. The
 > engine now warns and uses `gpt-5.6-luna` instead, and the menu bar app migrates the value on
 > load (click Save to persist it). If you only use the CLI, change `CODEX_MODEL` in `.env`.
+
+**Keeping Codex working across plan changes.** By default (`CODEX_AUTO_UPDATE=1`) Stoker
+**upgrades your Codex CLI unattended**; set `CODEX_AUTO_UPDATE=0` in `.env` to opt out. Before a
+real Codex prompt the engine runs `codex update` (at most once per `CODEX_AUTO_UPDATE_INTERVAL_HOURS`, bounded by
+`CODEX_UPDATE_TIMEOUT_SECONDS`) and records `cli_update: {attempted, from, to, exit}` in the usage
+row; a failed update never blocks the activation. If Codex then rejects the configured model
+("model is not supported"), it retries with the next candidate from `~/.codex/models_cache.json`:
+the rejected model's own `upgrade.model` first, then slugs containing `luna`, `terra`, `sol`,
+anything else (ascending `priority` within each tier). Only listed models that support `low`
+reasoning effort and aren't past their `retirement_at` qualify; every rejected model is excluded.
+It stops on success, on any other error, or after `CODEX_MODEL_FALLBACK_MAX_TRIES` retries. Each
+attempt gets its own usage row (retries carry `model_fallback: {from, to, attempt}`; rejected
+attempts that were retried carry `superseded_by_fallback: true` and aren't counted as errors in
+the app), and a WARNING asks you to set `CODEX_MODEL` to the model that worked. `.env` is never
+rewritten.
 
 ### Monthly cost estimate (4 activations/day)
 

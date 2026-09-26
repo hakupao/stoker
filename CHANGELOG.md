@@ -32,7 +32,34 @@ All notable changes to this project will be documented in this file.
   sub-row under the Claude gauge, dimmed and marked "inactive" when it doesn't gate runs.
   `sonnet_weekly` is kept for back-compat.
 
+- **Codex CLI auto-update (`CODEX_AUTO_UPDATE`, default `1`).** **With the default, Stoker
+  upgrades your Codex CLI unattended** — set `CODEX_AUTO_UPDATE=0` to opt out. Right before a real Codex
+  prompt — never on a preflight skip, dry-run, check, or status — the engine runs `codex update`
+  at most once per `CODEX_AUTO_UPDATE_INTERVAL_HOURS` (default 24; attempt stamped in
+  `run/codex-update.last` even on failure) with `CODEX_UPDATE_TIMEOUT_SECONDS` (default 180).
+  Versions before/after are logged and recorded as `cli_update` in the usage row; a failed or
+  timed-out update only warns. If `codex --version` answered before the update but fails after
+  it, an ERROR is logged and the stamp is dropped so the next slot retries.
+- **Automatic Codex model fallback (`CODEX_MODEL_FALLBACK`, default `1`).** When Codex rejects
+  the model ("model is not supported when using Codex with a ChatGPT account"), the run retries
+  with the next candidate from the CLI's `~/.codex/models_cache.json` (`CODEX_MODELS_CACHE`): the
+  rejected model's `upgrade.model` first, then `luna` > `terra` > `sol` > other by ascending
+  `priority`; only listed models that support `low` effort and aren't retired; every rejected
+  model is excluded. Up to `CODEX_MODEL_FALLBACK_MAX_TRIES` (default 3) retries, stopping on
+  success or any other error. One usage row per attempt: retries record
+  `model_fallback: {from, to, attempt}` and the model actually used; retried failures carry
+  `superseded_by_fallback: true` and the app counts them as skipped, not errors. A loud WARNING
+  asks you to set `CODEX_MODEL`; `.env` is never rewritten.
+- **`STOKER_PLAIN_DMG=1`** makes `package-release.sh` build a plain DMG without Finder styling
+  (for CI); the styled layout's Finder AppleScript is now bounded by a 60-second timeout.
+
 ### Fixed
+- **Timed-out commands no longer leave orphans.** `run_with_timeout` now runs each command as its
+  own process group (via perl `setpgrp`) and kills the whole group on timeout, so a CLI's helper
+  processes can't outlive the run.
+- **Codex no longer warns about a deprecated feature flag.** The probe passed
+  `-c features.codex_hooks=false`, deprecated in current Codex CLIs; it now passes
+  `-c features.hooks=false` (verified against codex-cli 0.157.1).
 - **`--tool` (and every other flag) now survives the keep-awake re-exec.** With
   `KEEP_AWAKE_MODE` on, the engine re-execs itself under `caffeinate`, but the argument parser had
   already shifted `"$@"` away — so `--once --tool codex` silently became a run of `.env`'s

@@ -36,6 +36,7 @@ tests/codex-probe-command.test.sh
 tests/codex-native-source.test.sh
 tests/codex-appserver-source.test.sh
 tests/codex-idle-window.test.sh
+tests/codex-update-fallback.test.sh
 tests/swift-core.test.sh
 tests/release-packaging.test.sh
 tests/app-bundle-assets.test.sh

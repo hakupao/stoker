@@ -268,6 +268,19 @@ precondition(L10n.skipReasonText("quota_exhausted") == "Quota exhausted")
 precondition(L10n.skipReasonText("preflight_status_missing") == "Quota unknown")
 AppLanguage.current = .zh
 precondition(L10n.skipReasonText("window_already_active") == "周窗口已在计时")
+// Usage rows (LogStore decodes with convertFromSnakeCase): a failed attempt superseded by
+// a model-fallback retry counts as skipped, not as an error; ids differ by model.
+let usageDecoder = JSONDecoder()
+usageDecoder.keyDecodingStrategy = .convertFromSnakeCase
+let supersededRow = try! usageDecoder.decode(UsageRecord.self, from: Data(#"{"timestamp":"2026-09-27 07:00:05 JST","run_id":"r","tool":"codex","ok":false,"exit_code":1,"model":"gpt-old","superseded_by_fallback":true}"#.utf8))
+let retryRow = try! usageDecoder.decode(UsageRecord.self, from: Data(#"{"timestamp":"2026-09-27 07:00:05 JST","run_id":"r","tool":"codex","ok":true,"exit_code":0,"model":"gpt-new","model_fallback":{"from":"gpt-old","to":"gpt-new","attempt":1}}"#.utf8))
+let plainErrorRow = try! usageDecoder.decode(UsageRecord.self, from: Data(#"{"timestamp":"2026-09-27 07:00:06 JST","run_id":"r","tool":"codex","ok":false,"exit_code":1}"#.utf8))
+precondition(supersededRow.supersededByFallback == true)
+precondition(supersededRow.status == .skipped, "a superseded attempt must not count as an error")
+precondition(retryRow.status == .success)
+precondition(plainErrorRow.status == .error)
+precondition(supersededRow.id != retryRow.id, "same-second rows must not share an id")
+
 if let savedLanguage {
     UserDefaults.standard.set(savedLanguage, forKey: "appLanguage")
 } else {

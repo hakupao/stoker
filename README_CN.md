@@ -196,6 +196,12 @@ codex job skipped by quota preflight reason=quota_exhausted
 | `ENABLE_QUOTA_PREFLIGHT` | 发送 prompt 前是否先检查额度 | `1` |
 | `QUOTA_PREFLIGHT_ON_UNKNOWN` | 无法确认额度时 `allow` 继续或 `skip` 跳过 | `allow` |
 | `QUOTA_EXHAUSTED_THRESHOLD_PERCENT` | 剩余额度低于或等于该百分比时跳过 | `0` |
+| `CODEX_AUTO_UPDATE` | **为 `1`（默认）时会无人值守地升级你的 Codex CLI**——想自己管理 Codex 版本请设为 `0`。在真实发送 Codex prompt 前执行 `codex update`（跳过、dry-run、check、status 时绝不执行），按间隔节流；失败或超时只告警 | `1` |
+| `CODEX_AUTO_UPDATE_INTERVAL_HOURS` | 两次更新尝试的最小间隔小时数（记录在 `run/codex-update.last`，失败也记录） | `24` |
+| `CODEX_UPDATE_TIMEOUT_SECONDS` | `codex update` 的超时时间 | `180` |
+| `CODEX_MODEL_FALLBACK` | 为 `1` 时，若模型被拒（"model is not supported"），按顺序从 Codex 模型缓存中选下一个候选重试；其它错误不重试，也绝不改写 `.env` | `1` |
+| `CODEX_MODEL_FALLBACK_MAX_TRIES` | 每次运行最多的备用模型重试次数（被拒模型逐个排除） | `3` |
+| `CODEX_MODELS_CACHE` | 选择备用模型所用的 Codex 模型缓存（识别 `$CODEX_HOME`） | `~/.codex/models_cache.json` |
 | `CODEX_ACTIVATE_ONLY_WHEN_IDLE` | `1` 或 `0`。仅对只有 7 天周窗口的 Codex 账号（无 5 小时窗口）生效：为 `1` 时，周窗口已在计时则跳过 Codex 激活（原因 `window_already_active`），等窗口空闲后才发送；上报了 5 小时窗口时不生效。需 `ENABLE_QUOTA_PREFLIGHT=1` | `1` |
 | `CLAUDE_STATUS_SOURCE` | `cache` 直接读 oh-my-claudecode 插件的本地用量缓存（不触碰任何凭证）；`native` 用钥匙串 token 只读查询用量接口——无需 omc，token 过期即跳过、绝不刷新；`omc` 强制 `omc wait status` 实时查询，无头运行时可能轮换钥匙串登录凭证 | `cache` |
 | `CLAUDE_USAGE_CACHE_FILE` | 用量缓存路径覆盖（可选） | `~/.claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json` |
@@ -328,6 +334,9 @@ App 不替代脚本，而是调用现有入口：
 
 - `stoker-cli-<version>.tar.gz`：轻量 CLI/launchd 包。
 - `stoker-gui-<version>.dmg`：给初学者的 GUI App 安装包。
+
+`STOKER_PLAIN_DMG=1 ./scripts/package-release.sh` 会跳过 Finder 美化安装窗口、直接生成普通 DMG（供 CI 等无头环境使用）。
+美化布局的 Finder 自动化也限时 60 秒，失败时回退为普通 DMG。
 - `stoker-gui-<version>.zip`：GUI App 备用压缩包。
 
 ## 工作方式
@@ -476,7 +485,7 @@ Runner 会把两个 CLI 的上下文压缩到激活所需的最低限度：
 | `-c 'features.memories=false'` | 禁用 memories |
 | `-c 'features.multi_agent=false'` | 禁用 multi-agent |
 | `-c 'features.goals=false'` | 禁用 goals |
-| `-c 'features.codex_hooks=false'` | 禁用 hooks |
+| `-c 'features.hooks=false'` | 禁用 hooks |
 | `-c 'features.child_agents_md=false'` | 禁用 AGENTS.md 加载 |
 | `-c 'model_reasoning_effort="low"'` | 最低推理力度 |
 
@@ -488,6 +497,17 @@ Runner 会把两个 CLI 的上下文压缩到激活所需的最低限度：
 > **从 ≤ 0.3.5 升级：** 你的 `.env` 很可能仍写着 `CODEX_MODEL=gpt-5.4-mini`。引擎现在会记录 WARNING
 > 并改用 `gpt-5.6-luna`；菜单栏 App 加载时也会自动迁移该值（点一次“保存”即写回）。只用 CLI 的话，
 > 请手动修改 `.env` 里的 `CODEX_MODEL`。
+
+**套餐变动时保持 Codex 可用。** 默认（`CODEX_AUTO_UPDATE=1`）Stoker **会无人值守地升级你的 Codex CLI**；
+不想要可在 `.env` 设 `CODEX_AUTO_UPDATE=0`。真实发送 Codex prompt 前，引擎会执行 `codex update`（每
+`CODEX_AUTO_UPDATE_INTERVAL_HOURS` 最多一次，受 `CODEX_UPDATE_TIMEOUT_SECONDS` 限时），并在 usage 记录里写入
+`cli_update: {attempted, from, to, exit}`；更新失败绝不阻塞激活。若随后 Codex 拒绝所配置的模型
+（"model is not supported"），会按顺序从 `~/.codex/models_cache.json` 选下一个候选重试：先是被拒模型自身的
+`upgrade.model`，再按含 `luna`、`terra`、`sol`、其它分档（档内按 `priority` 升序）。只考虑可见、支持 `low`
+推理力度且未过 `retirement_at` 的模型，被拒模型逐个排除；成功、遇到其它错误或达到
+`CODEX_MODEL_FALLBACK_MAX_TRIES` 次即停止。每次尝试各写一条 usage 记录（重试带
+`model_fallback: {from, to, attempt}`；被重试取代的失败记录带 `superseded_by_fallback: true`，App 不计为错误），
+并输出 WARNING 提示你把 `CODEX_MODEL` 设为成功的模型。不会改写 `.env`。
 
 ### 月成本估算（每天 4 次激活）
 

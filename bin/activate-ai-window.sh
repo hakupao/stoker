@@ -55,6 +55,16 @@ QUOTA_EXHAUSTED_THRESHOLD_PERCENT="${QUOTA_EXHAUSTED_THRESHOLD_PERCENT:-0}"
 # Weekly-only Codex accounts (no 5-hour window): skip the prompt while the 7-day
 # window is already anchored/running — another prompt can't start a new one.
 CODEX_ACTIVATE_ONLY_WHEN_IDLE="${CODEX_ACTIVATE_ONLY_WHEN_IDLE:-1}"
+# Keep the Codex CLI current: right before a real Codex prompt, run `codex update`
+# at most once per interval (attempt stamp under run/). Never fails the run.
+CODEX_AUTO_UPDATE="${CODEX_AUTO_UPDATE:-1}"
+CODEX_AUTO_UPDATE_INTERVAL_HOURS="${CODEX_AUTO_UPDATE_INTERVAL_HOURS:-24}"
+CODEX_UPDATE_TIMEOUT_SECONDS="${CODEX_UPDATE_TIMEOUT_SECONDS:-180}"
+# When Codex rejects the model ("model is not supported" 400), retry once with a
+# listed model from the CLI's own model cache.
+CODEX_MODEL_FALLBACK="${CODEX_MODEL_FALLBACK:-1}"
+CODEX_MODEL_FALLBACK_MAX_TRIES="${CODEX_MODEL_FALLBACK_MAX_TRIES:-3}"
+CODEX_MODELS_CACHE="${CODEX_MODELS_CACHE:-${CODEX_HOME:-${HOME}/.codex}/models_cache.json}"
 CLAUDE_STATUS_SOURCE="${CLAUDE_STATUS_SOURCE:-cache}"
 CLAUDE_USAGE_CACHE_FILE="${CLAUDE_USAGE_CACHE_FILE:-${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/plugins/oh-my-claudecode/.usage-cache-anthropic.json}"
 SECURITY_BIN="${SECURITY_BIN:-/usr/bin/security}"
@@ -118,6 +128,12 @@ Environment overrides:
   QUOTA_PREFLIGHT_ON_UNKNOWN=allow
   QUOTA_EXHAUSTED_THRESHOLD_PERCENT=0
   CODEX_ACTIVATE_ONLY_WHEN_IDLE=1  # weekly-only Codex: skip while the 7-day window is already running
+  CODEX_AUTO_UPDATE=1              # run `codex update` before a real Codex prompt (throttled)
+  CODEX_AUTO_UPDATE_INTERVAL_HOURS=24
+  CODEX_UPDATE_TIMEOUT_SECONDS=180
+  CODEX_MODEL_FALLBACK=1           # retry with listed models on "model is not supported"
+  CODEX_MODEL_FALLBACK_MAX_TRIES=3 # max fallback attempts per run
+  CODEX_MODELS_CACHE=~/.codex/models_cache.json
   CLAUDE_STATUS_SOURCE=cache       # cache (plugin cache) | native (read-only Keychain+API) | omc (legacy live query)
   CLAUDE_USAGE_CACHE_FILE=/path/to/.usage-cache-anthropic.json
   KEEP_AWAKE_MODE=off
@@ -181,6 +197,23 @@ case "$QUOTA_PREFLIGHT_ON_UNKNOWN" in
     exit 2
     ;;
 esac
+
+for _flag in CODEX_AUTO_UPDATE CODEX_MODEL_FALLBACK; do
+  case "${!_flag}" in
+    0|1) ;;
+    *)
+      echo "${_flag} must be 0 or 1" >&2
+      exit 2
+      ;;
+  esac
+done
+for _num in CODEX_AUTO_UPDATE_INTERVAL_HOURS CODEX_UPDATE_TIMEOUT_SECONDS CODEX_MODEL_FALLBACK_MAX_TRIES; do
+  if ! [[ "${!_num}" =~ ^[0-9]+$ ]] || (( 10#${!_num} <= 0 )); then
+    echo "${_num} must be a positive integer" >&2
+    exit 2
+  fi
+done
+unset _flag _num
 
 case "$CODEX_ACTIVATE_ONLY_WHEN_IDLE" in
   0|1) ;;
@@ -273,15 +306,35 @@ run_with_timeout() {
   local output_file="$1"
   shift
 
-  "$@" >"$output_file" 2>&1 &
+  # Run the command as the leader of its own process group so a timeout can kill
+  # the whole tree (a CLI's helper children would otherwise be orphaned). perl
+  # ships with macOS; `exec {$ARGV[0]} @ARGV` never goes through a shell.
+  local own_group=0
+  if command -v perl >/dev/null 2>&1; then
+    own_group=1
+    perl -e 'setpgrp(0, 0); exec { $ARGV[0] } @ARGV or die "exec $ARGV[0]: $!\n"' -- "$@" \
+      </dev/null >"$output_file" 2>&1 &
+  else
+    "$@" </dev/null >"$output_file" 2>&1 &
+  fi
   local pid=$!
   local elapsed=0
 
   while kill -0 "$pid" 2>/dev/null; do
     if (( elapsed >= TIMEOUT_SECONDS )); then
-      kill "$pid" 2>/dev/null || true
+      if (( own_group )); then
+        kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+      else
+        pkill -TERM -P "$pid" 2>/dev/null || true
+        kill -TERM "$pid" 2>/dev/null || true
+      fi
       sleep 2
-      kill -9 "$pid" 2>/dev/null || true
+      if (( own_group )); then
+        kill -KILL -- "-$pid" 2>/dev/null || true
+      else
+        pkill -KILL -P "$pid" 2>/dev/null || true
+      fi
+      kill -KILL "$pid" 2>/dev/null || true
       wait "$pid" 2>/dev/null || true
       return 124
     fi
@@ -350,6 +403,10 @@ record_claude_usage() {
 record_codex_usage() {
   local exit_code="$1"
   local output_file="$2"
+  local model="${3:-$CODEX_MODEL}"
+  local cli_update="${4:-null}"
+  local model_fallback="${5:-null}"
+  local superseded="${6:-false}"
 
   if [[ -z "$JQ_BIN" || ! -x "$JQ_BIN" ]]; then
     log "WARNING: jq not found; Codex usage snapshot was not recorded"
@@ -361,7 +418,10 @@ record_codex_usage() {
     --arg timestamp "$(timestamp)" \
     --arg run_id "$RUN_ID" \
     --arg tool "codex" \
-    --arg model "$CODEX_MODEL" \
+    --arg model "$model" \
+    --argjson cli_update "$cli_update" \
+    --argjson model_fallback "$model_fallback" \
+    --argjson superseded "$superseded" \
     --argjson exit_code "$exit_code" \
     --arg raw_log "$output_file" '
       (split("\n") | map(select(length > 0) | try fromjson catch empty)) as $events
@@ -383,6 +443,9 @@ record_codex_usage() {
           event_count: ($events | length),
           raw_log: $raw_log
         }
+        + (if $cli_update == null then {} else {cli_update: $cli_update} end)
+        + (if $model_fallback == null then {} else {model_fallback: $model_fallback} end)
+        + (if $superseded then {superseded_by_fallback: true} else {} end)
     ' "$output_file" >>"$USAGE_LOG" 2>/dev/null; then
     log "Codex usage snapshot recorded usage_log=${USAGE_LOG}"
   else
@@ -1189,10 +1252,10 @@ run_claude() {
   return "$exit_code"
 }
 
-run_codex() {
-  local output_file
-  output_file="${RAW_LOG_DIR}/$(stamp_for_file)-codex.log"
-  local cmd=(
+# Builds the `codex exec` argv for one model into CODEX_CMD.
+build_codex_cmd() {
+  local model="$1"
+  CODEX_CMD=(
     "$CODEX_BIN"
     exec
     --cd "$CODEX_WORK_DIR"
@@ -1204,22 +1267,124 @@ run_codex() {
     -c 'features.memories=false'
     -c 'features.multi_agent=false'
     -c 'features.goals=false'
-    -c 'features.codex_hooks=false'
+    -c 'features.hooks=false'
     -c 'features.child_agents_md=false'
     -c 'model_reasoning_effort="low"'
   )
 
-  if [[ "$CODEX_MODEL" != "default" ]]; then
-    cmd+=(--model "$CODEX_MODEL")
+  if [[ "$model" != "default" ]]; then
+    CODEX_CMD+=(--model "$model")
   fi
 
-  cmd+=(
+  CODEX_CMD+=(
     --json
     "$CODEX_ACTIVATION_PROMPT"
   )
+}
+
+codex_version() {
+  "$CODEX_BIN" --version </dev/null 2>/dev/null | head -n 1 | tr -d '\r'
+}
+
+# Throttled `codex update` right before a real Codex prompt. The attempt stamp is
+# written BEFORE the attempt so a broken updater is retried once per interval, not
+# every slot. Never fails the run. Sets CODEX_CLI_UPDATE_JSON when it attempted.
+maybe_update_codex() {
+  CODEX_CLI_UPDATE_JSON="null"
+  [[ "$CODEX_AUTO_UPDATE" == "1" && "$MODE" == "once" ]] || return 0
+
+  local stamp_file="${RUN_DIR}/codex-update.last"
+  local now last=0
+  now="$(date +%s)"
+  if [[ -f "$stamp_file" ]]; then
+    last="$(head -n 1 "$stamp_file" 2>/dev/null | tr -cd '0-9')"
+    [[ -n "$last" ]] || last=0
+  fi
+  # A stamp in the future (clock moved back) counts as expired.
+  if (( 10#$last <= now && now - 10#$last < 10#$CODEX_AUTO_UPDATE_INTERVAL_HOURS * 3600 )); then
+    log "Codex auto-update skipped: last attempt $(( (now - 10#$last) / 60 ))m ago (interval ${CODEX_AUTO_UPDATE_INTERVAL_HOURS}h)"
+    return 0
+  fi
+  printf '%s\n' "$now" >"$stamp_file" 2>/dev/null \
+    || log "WARNING: could not write ${stamp_file}; Codex auto-update throttle may not hold"
+
+  local from to exit_code output_file
+  output_file="${RAW_LOG_DIR}/$(stamp_for_file)-codex-update.log"
+  from="$(codex_version)"
+  log "Codex auto-update started version=${from:-unknown} timeout=${CODEX_UPDATE_TIMEOUT_SECONDS}s"
+  # Dynamic scoping: run_with_timeout reads this TIMEOUT_SECONDS for the update only.
+  local TIMEOUT_SECONDS="$CODEX_UPDATE_TIMEOUT_SECONDS"
+  run_with_timeout "$output_file" "$CODEX_BIN" update
+  exit_code=$?
+  to="$(codex_version)"
+  if [[ -n "$from" && -z "$to" ]]; then
+    # The binary answered before the update but not after: drop the throttle stamp
+    # so the next slot retries the update instead of waiting a full interval.
+    log "ERROR: codex binary unusable after update (was ${from}; exit=${exit_code}); will retry the update next run raw=${output_file}"
+    rm -f "$stamp_file" 2>/dev/null || true
+  elif (( exit_code == 124 )); then
+    log "WARNING: Codex auto-update timed out after ${CODEX_UPDATE_TIMEOUT_SECONDS}s; continuing with version=${to:-unknown} raw=${output_file}"
+  elif (( exit_code != 0 )); then
+    log "WARNING: Codex auto-update failed exit=${exit_code}; continuing with version=${to:-unknown} raw=${output_file}"
+  else
+    log "Codex auto-update finished version=${from:-unknown} -> ${to:-unknown}"
+  fi
+
+  if [[ -n "$JQ_BIN" && -x "$JQ_BIN" ]]; then
+    # shellcheck disable=SC2016 # jq variables are intentionally evaluated by jq.
+    CODEX_CLI_UPDATE_JSON="$("$JQ_BIN" -n -c --arg from "$from" --arg to "$to" --argjson exit "$exit_code" \
+      '{attempted: true, from: (if $from == "" then null else $from end), to: (if $to == "" then null else $to end), exit: $exit}' 2>/dev/null)" \
+      || CODEX_CLI_UPDATE_JSON="null"
+    [[ -n "$CODEX_CLI_UPDATE_JSON" ]] || CODEX_CLI_UPDATE_JSON="null"
+  fi
+  return 0
+}
+
+# Prints the NEXT fallback model from the CLI's model cache, or fails if none.
+# $1 = newline-separated models already rejected this run (never re-picked).
+# Candidates: visibility=="list", support reasoning effort "low" (we pass
+# model_reasoning_effort="low"), and not past upgrade.retirement_at. Order: the
+# rejected models' own upgrade.model targets first, then slugs containing luna,
+# terra, sol, anything else — ascending .priority within each tier.
+pick_codex_fallback_model() {
+  local rejected="$1"
+  [[ -n "$JQ_BIN" && -x "$JQ_BIN" && -f "$CODEX_MODELS_CACHE" ]] || return 1
+  # shellcheck disable=SC2016 # jq variables are intentionally evaluated by jq.
+  "$JQ_BIN" -r --arg rejected "$rejected" '
+    def retired:
+      ((.upgrade // {}) | if type == "object" then (.retirement_at // null) else null end) as $r
+      | if $r == null then false
+        else
+          ((try ($r | tostring | sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601) catch null)) as $t
+          | ($t != null and $t <= now)
+        end;
+    def supports_low:
+      [(.supported_reasoning_levels // [])[] | if type == "object" then .effort else . end]
+      | index("low") != null;
+    def tier:
+      if (.slug | test("luna")) then 0
+      elif (.slug | test("terra")) then 1
+      elif (.slug | test("sol")) then 2
+      else 3 end;
+    ($rejected | split("\n") | map(select(length > 0))) as $rej
+    | [(.models // [])[] | select(type == "object" and (.slug | type) == "string" and .slug != "")] as $all
+    | [$all[] | select(.visibility == "list" and supports_low and (retired | not)
+                       and (.slug as $s | $rej | index($s) | not))] as $usable
+    | [$rej[] as $r | $all[] | select(.slug == $r)
+       | ((.upgrade // {}) | if type == "object" then (.model // empty) else empty end)] as $upgrades
+    | [$upgrades[] as $u | $usable[] | select(.slug == $u) | .slug]
+      + ($usable | sort_by([tier, (.priority // 1000000)]) | map(.slug))
+    | first // empty
+  ' "$CODEX_MODELS_CACHE" 2>/dev/null | head -n 1 | grep .
+}
+
+run_codex() {
+  local output_file
+  output_file="${RAW_LOG_DIR}/$(stamp_for_file)-codex.log"
+  build_codex_cmd "$CODEX_MODEL"
 
   if [[ "$MODE" == "dry-run" ]]; then
-    log "DRY-RUN Codex: ${cmd[*]}"
+    log "DRY-RUN Codex: ${CODEX_CMD[*]}"
     return 0
   fi
 
@@ -1228,11 +1393,65 @@ run_codex() {
     log "ERROR: Codex work directory not found: $CODEX_WORK_DIR"
     return 1
   fi
-  log "Codex job started"
-  run_with_timeout "$output_file" "${cmd[@]}"
-  local exit_code=$?
-  record_codex_usage "$exit_code" "$output_file"
-  log "Codex job completed exit=${exit_code} $(summarize_output "$output_file") raw=${output_file}"
+  maybe_update_codex
+
+  # One usage row per attempt. When Codex rejects the model ("model is not
+  # supported"), retry with the next cached candidate, up to
+  # CODEX_MODEL_FALLBACK_MAX_TRIES fallback attempts; any other outcome stops.
+  local model="$CODEX_MODEL" attempt=0 exit_code rejected="" last_rejected=""
+  local cli_update="$CODEX_CLI_UPDATE_JSON" fallback_json="null" next_model rejected_model
+  while true; do
+    build_codex_cmd "$model"
+    if (( attempt == 0 )); then
+      log "Codex job started model=${model}"
+    else
+      log "Codex job started model=${model} (fallback attempt ${attempt}/${CODEX_MODEL_FALLBACK_MAX_TRIES})"
+    fi
+    run_with_timeout "$output_file" "${CODEX_CMD[@]}"
+    exit_code=$?
+
+    next_model=""
+    if (( exit_code != 0 )) && [[ "$CODEX_MODEL_FALLBACK" == "1" ]] \
+      && grep -qi 'model is not supported' "$output_file" 2>/dev/null; then
+      rejected_model="$(grep -oE "The '[^']+' model is not supported" "$output_file" 2>/dev/null | head -n 1 | sed -E "s/^The '([^']+)'.*/\\1/")"
+      [[ -n "$rejected_model" ]] || rejected_model="$model"
+      rejected="${rejected}${rejected_model}"$'\n'
+      [[ "$rejected_model" == "$model" ]] || rejected="${rejected}${model}"$'\n'
+      last_rejected="$rejected_model"
+      if (( attempt >= 10#$CODEX_MODEL_FALLBACK_MAX_TRIES )); then
+        log "ERROR: Codex rejected model ${rejected_model}; gave up after ${attempt} fallback attempt(s) (CODEX_MODEL_FALLBACK_MAX_TRIES=${CODEX_MODEL_FALLBACK_MAX_TRIES}). Set CODEX_MODEL in ${ENV_FILE}."
+      elif ! next_model="$(pick_codex_fallback_model "$rejected")"; then
+        next_model=""
+        log "ERROR: Codex rejected model ${rejected_model} and no fallback model is available (cache: ${CODEX_MODELS_CACHE}); set CODEX_MODEL in ${ENV_FILE}"
+      fi
+    fi
+
+    local superseded=false
+    [[ -n "$next_model" ]] && superseded=true
+    record_codex_usage "$exit_code" "$output_file" "$model" "$cli_update" "$fallback_json" "$superseded"
+    log "Codex job completed exit=${exit_code} model=${model} $(summarize_output "$output_file") raw=${output_file}"
+    [[ -n "$next_model" ]] || break
+
+    attempt=$(( attempt + 1 ))
+    log "WARNING: Codex rejected model ${last_rejected}; retrying with ${next_model} (fallback attempt ${attempt}/${CODEX_MODEL_FALLBACK_MAX_TRIES})"
+    fallback_json="null"
+    if [[ -n "$JQ_BIN" && -x "$JQ_BIN" ]]; then
+      # shellcheck disable=SC2016 # jq variables are intentionally evaluated by jq.
+      fallback_json="$("$JQ_BIN" -n -c --arg from "$last_rejected" --arg to "$next_model" --argjson attempt "$attempt" \
+        '{from: $from, to: $to, attempt: $attempt}' 2>/dev/null)" || fallback_json="null"
+      [[ -n "$fallback_json" ]] || fallback_json="null"
+    fi
+    cli_update="null"
+    model="$next_model"
+    output_file="${RAW_LOG_DIR}/$(stamp_for_file)-codex-fallback-${attempt}.log"
+  done
+
+  if (( exit_code == 0 && attempt > 0 )); then
+    log "WARNING: ************************************************************"
+    log "WARNING: Codex model ${CODEX_MODEL} is not supported; this run used ${model}."
+    log "WARNING: Set CODEX_MODEL=${model} in ${ENV_FILE} to make this permanent."
+    log "WARNING: ************************************************************"
+  fi
   return "$exit_code"
 }
 

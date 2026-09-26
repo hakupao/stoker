@@ -16,6 +16,13 @@ output="$(
 grep -F -- "--cd $ROOT_DIR/codex-probe" <<<"$output" >/dev/null
 grep -F -- "Read only ./probe.py" <<<"$output" >/dev/null
 grep -F -- "Do not inspect any other path" <<<"$output" >/dev/null
+# features.codex_hooks is deprecated (Codex CLI warns); the current key is features.hooks.
+grep -F -- "-c features.hooks=false" <<<"$output" >/dev/null \
+  || { echo "expected -c features.hooks=false in the codex command" >&2; exit 1; }
+if grep -F -- "codex_hooks" <<<"$output" >/dev/null; then
+  echo "deprecated features.codex_hooks must not be passed" >&2
+  exit 1
+fi
 
 if grep -F -- "Reply exactly READY" <<<"$output" >/dev/null; then
   echo "expected Codex probe dry-run prompt instead of READY-only prompt" >&2

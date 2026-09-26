@@ -173,6 +173,8 @@ build_styled_dmg() {
   if ! /usr/bin/osascript - "$DMG_VOLNAME" >/dev/null 2>&1 <<'APPLESCRIPT'
 on run argv
   set volName to item 1 of argv
+  -- Bound the whole Finder conversation: headless/CI hosts can hang on automation.
+  with timeout of 60 seconds
   tell application "Finder"
     tell disk volName
       open
@@ -199,6 +201,7 @@ on run argv
       close
     end tell
   end tell
+  end timeout
 end run
 APPLESCRIPT
   then
@@ -233,7 +236,11 @@ build_gui_package() {
     return 0
   fi
 
-  if build_styled_dmg; then
+  # STOKER_PLAIN_DMG=1 (set by CI) skips Finder styling entirely.
+  if [[ "${STOKER_PLAIN_DMG:-0}" == "1" ]]; then
+    echo "STOKER_PLAIN_DMG=1; building a plain DMG (no Finder styling)"
+    build_plain_dmg
+  elif build_styled_dmg; then
     echo "Built styled ${GUI_DMG}"
   else
     echo "WARNING: styled DMG layout unavailable; built a plain DMG instead" >&2

@@ -33,7 +33,8 @@ public enum LogTimestamp: Sendable {
 // MARK: - Usage Record
 
 public struct UsageRecord: Decodable, Identifiable, Sendable {
-    public var id: String { "\(timestamp)-\(tool ?? "")-\(runId ?? "")" }
+    // Model disambiguates same-second rows (a model-fallback retry shares the run id).
+    public var id: String { "\(timestamp)-\(tool ?? "")-\(runId ?? "")-\(model ?? "")" }
 
     public let timestamp: String
     public let date: Date?
@@ -52,9 +53,12 @@ public struct UsageRecord: Decodable, Identifiable, Sendable {
     public let skipped: Bool?
     public let skipReason: String?
     public let eventCount: Int?
+    /// A failed attempt the engine retried with a fallback model in the same run; the
+    /// retry's own row carries the outcome, so this one isn't counted as an error.
+    public let supersededByFallback: Bool?
 
     public var status: RunStatus {
-        if skipped == true { return .skipped }
+        if skipped == true || supersededByFallback == true { return .skipped }
         if ok == true { return .success }
         return .error
     }
@@ -70,7 +74,7 @@ public struct UsageRecord: Decodable, Identifiable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case timestamp, runId, tool, exitCode, ok, result
         case sessionId, threadId, model, durationMs, totalCostUsd
-        case usage, rawLog, skipped, skipReason, eventCount
+        case usage, rawLog, skipped, skipReason, eventCount, supersededByFallback
     }
 
     public init(from decoder: Decoder) throws {
@@ -91,6 +95,7 @@ public struct UsageRecord: Decodable, Identifiable, Sendable {
         skipped = try c.decodeIfPresent(Bool.self, forKey: .skipped)
         skipReason = try c.decodeIfPresent(String.self, forKey: .skipReason)
         eventCount = try c.decodeIfPresent(Int.self, forKey: .eventCount)
+        supersededByFallback = try c.decodeIfPresent(Bool.self, forKey: .supersededByFallback)
         date = LogTimestamp.parse(timestamp)
     }
 }
