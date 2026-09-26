@@ -31,6 +31,7 @@ struct ClaudeSettingsCard: View {
             .opacity(model.settings.enableClaude ? 1 : 0.5)
         }
         .padding(DS.cardPadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(cardBackground)
         .overlay(cardBorder)
         .shadow(color: highlight ? theme.accentOn.opacity(0.35) : .clear, radius: 10)
@@ -51,8 +52,9 @@ struct ClaudeSettingsCard: View {
                 .foregroundStyle(theme.seriesClaude)
             Spacer()
             Toggle("", isOn: $model.settings.enableClaude)
-                .labelsHidden()
+                .toggleStyle(.switch)
                 .tint(theme.seriesClaude)
+                .labelsHidden()
         }
     }
 
@@ -66,7 +68,7 @@ struct ClaudeSettingsCard: View {
         }
     }
 
-    // Health-tinted status strip, echoing the ToolToggleTile treatment.
+    // Health-tinted status strip.
     private var statusStrip: some View {
         let tint = accent
         return HStack(spacing: 8) {
@@ -166,6 +168,7 @@ struct CodexSettingsCard: View {
             .opacity(model.settings.enableCodex ? 1 : 0.5)
         }
         .padding(DS.cardPadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous)
                 .fill(theme.card)
@@ -183,8 +186,9 @@ struct CodexSettingsCard: View {
                 .foregroundStyle(theme.seriesCodex)
             Spacer()
             Toggle("", isOn: $model.settings.enableCodex)
-                .labelsHidden()
+                .toggleStyle(.switch)
                 .tint(theme.seriesCodex)
+                .labelsHidden()
         }
     }
 

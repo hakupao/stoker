@@ -383,10 +383,12 @@ struct SettingsTabContent: View {
 
                     HStack(alignment: .top, spacing: 12) {
                         ClaudeSettingsCard(model: model)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                            .frame(maxWidth: .infinity)
                         CodexSettingsCard(model: model)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                            .frame(maxWidth: .infinity)
                     }
+                    // Equal-height cards: each fills the taller one's height (exactly
+                    // ActivityTabContent's ClaudeCard/CodexCard treatment).
                     .fixedSize(horizontal: false, vertical: true)
 
                     AdvancedSection(model: model)
