@@ -29,6 +29,13 @@ public enum ToolHealthEvaluator {
         return (failures, runs.first, failures > 0 ? lastError : nil)
     }
 
+    private static func build(state: ToolHealthState,
+                              summary s: (failures: Int, last: UsageRecord?, lastError: String?),
+                              nextActivation: Date?) -> ToolHealth {
+        ToolHealth(state: state, consecutiveFailures: s.failures, lastRunAt: s.last?.date,
+                  lastRunOK: s.last.map { $0.ok == true }, lastError: s.lastError, nextActivation: nextActivation)
+    }
+
     public static func claude(records: [UsageRecord], scheduleOn: Bool, times: [String],
                               now: Date = Date(), calendar: Calendar = .current) -> ToolHealth {
         let runs = realRuns(records, tool: "claude")
@@ -52,8 +59,7 @@ public enum ToolHealthEvaluator {
         } else {
             state = .ok
         }
-        return ToolHealth(state: state, consecutiveFailures: s.failures, lastRunAt: s.last?.date,
-                          lastRunOK: s.last.map { $0.ok == true }, lastError: s.lastError, nextActivation: next)
+        return build(state: state, summary: s, nextActivation: next)
     }
 
     public static func codex(records: [UsageRecord], weekly: ActivationState.QuotaWindow?,
@@ -66,20 +72,24 @@ public enum ToolHealthEvaluator {
         let cycleStart = resetAt?.addingTimeInterval(-Double(windowMinutes) * 60)
         let ranThisCycle = cycleStart.map { start in runs.contains { $0.ok == true && $0.date! >= start } } ?? false
         let used = weekly?.usedPercent ?? 0
+        let exhaustedByPercent = (weekly?.remainingPercent ?? 100) <= 0
+        // The engine anchors on the *window*, independent of a later failure overriding the
+        // displayed state to warning/alert — it still skips runs while the window is anchored.
+        // This drives both the state chain below and `from` for nextActivation.
+        let anchoredWindow = active && (exhaustedByPercent || used > 0 || ranThisCycle)
 
         let state: ToolHealthState
         if s.failures >= 2 { state = .alert }
         else if s.failures == 1 { state = .warning }
-        else if active, (weekly?.remainingPercent ?? 1) <= 0 { state = .exhausted }
-        else if active, used > 0 || ranThisCycle { state = .anchored }
+        else if anchoredWindow, exhaustedByPercent { state = .exhausted }
+        else if anchoredWindow { state = .anchored }
         else { state = .pending }
 
         var next: Date? = nil
         if scheduleOn {
-            let from = (state == .anchored || state == .exhausted) ? max(now, resetAt ?? now) : now
+            let from = anchoredWindow ? max(now, resetAt ?? now) : now
             next = ScheduleFormatter.nextFire(times: times, now: from, calendar: calendar)
         }
-        return ToolHealth(state: state, consecutiveFailures: s.failures, lastRunAt: s.last?.date,
-                          lastRunOK: s.last.map { $0.ok == true }, lastError: s.lastError, nextActivation: next)
+        return build(state: state, summary: s, nextActivation: next)
     }
 }

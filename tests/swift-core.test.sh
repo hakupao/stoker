@@ -406,11 +406,21 @@ precondition(ToolHealthEvaluator.codex(records: [], weekly: win(40, "2026-09-26T
 // exhausted
 precondition(ToolHealthEvaluator.codex(records: [rec("2026-09-26 22:56:00 UTC", "codex", ok: true)],
     weekly: win(100, "2026-10-03T22:49:45Z"), scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc).state == .exhausted)
-// last real run failed → warning even though anchored (skipped rows in between ignored)
-precondition(ToolHealthEvaluator.codex(records: [
+// last real run failed → warning even though anchored (skipped rows in between ignored);
+// nextActivation must still track the anchored WINDOW (first slot after resetsAt), not the
+// warning-overridden state — the engine skips runs while the window is anchored regardless.
+let xWarningAnchored = ToolHealthEvaluator.codex(records: [
     rec("2026-09-26 22:55:00 UTC", "codex", ok: false),
     rec("2026-09-26 23:54:00 UTC", "codex", skipped: true)],
-    weekly: win(8, "2026-10-03T22:49:45Z"), scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc).state == .warning)
+    weekly: win(8, "2026-10-03T22:49:45Z"), scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc)
+precondition(xWarningAnchored.state == .warning)
+precondition(xWarningAnchored.nextActivation == iso("2026-10-04T07:00:00Z"))
+// pending window (not anchored: used 0, no run this cycle) + 1 failure → still warning
+precondition(ToolHealthEvaluator.codex(records: [rec("2026-09-26 22:00:00 UTC", "codex", ok: false)],
+    weekly: win(0, "2026-10-04T00:00:00Z"), scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc).state == .warning)
+// schedule off → no nextActivation even for an anchored window
+precondition(ToolHealthEvaluator.codex(records: [], weekly: win(8, "2026-10-03T22:49:45Z"),
+    scheduleOn: false, times: slots, now: toolHealthNow, calendar: utc).nextActivation == nil)
 // two consecutive real failures → alert, overriding anchored/exhausted
 let xAlert = ToolHealthEvaluator.codex(records: [
     rec("2026-09-19 22:00:00 UTC", "codex", ok: false),
