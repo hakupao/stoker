@@ -41,6 +41,20 @@ public enum L10n {
     public static var weekly: String {
         AppLanguage.current == .zh ? "周" : "Weekly"
     }
+    /// Constant tag on a weekly-only tool's quota row (Codex has only a 7-day window).
+    public static var weeklyWindowHint: String {
+        AppLanguage.current == .zh ? "周窗口" : "Weekly window"
+    }
+    /// Short window tag for compact labels ("Codex 92% 周").
+    public static var weeklyShort: String {
+        AppLanguage.current == .zh ? "周" : "wk"
+    }
+    /// Tooltip on the 5h/weekly picker: it only switches Claude.
+    public static var windowPickerHelp: String {
+        AppLanguage.current == .zh
+            ? "切换 Claude 的 5 小时 / 周窗口；Codex 只有 7 天周窗口，始终显示周额度"
+            : "Switches Claude between its 5-hour and weekly windows; Codex has only a 7-day window and always shows weekly"
+    }
     public static var noData: String {
         AppLanguage.current == .zh ? "暂无数据" : "No data"
     }
@@ -51,18 +65,18 @@ public enum L10n {
     public static var quotaRemaining: String {
         AppLanguage.current == .zh ? "剩余额度" : "Remaining"
     }
-    /// Tooltip spelling out both sides of the 5-hour window so "余额 vs 已用" is unambiguous.
-    public static func quotaMiniHelp(remaining: Double?, used: Double?) -> String {
+    /// Tooltip spelling out both sides of a window so "余额 vs 已用" is unambiguous.
+    public static func quotaMiniHelp(remaining: Double?, used: Double?, weekly: Bool = false) -> String {
         guard let remaining else {
             return AppLanguage.current == .zh ? "暂无额度数据" : "No quota data yet"
         }
         let r = Int(remaining.rounded())
         if AppLanguage.current == .zh {
-            var s = "本 5 小时窗口剩余 \(r)%"
+            var s = weekly ? "本周窗口剩余 \(r)%" : "本 5 小时窗口剩余 \(r)%"
             if let used { s += "（已用 \(Int(used.rounded()))%）" }
             return s
         } else {
-            var s = "5-hour window: \(r)% remaining"
+            var s = weekly ? "Weekly window: \(r)% remaining" : "5-hour window: \(r)% remaining"
             if let used { s += " (\(Int(used.rounded()))% used)" }
             return s
         }

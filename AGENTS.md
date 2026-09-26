@@ -7,7 +7,8 @@ apply the same change to the other.
 ## What this is
 
 **Stoker** is a macOS `launchd` scheduler that sends tiny low-cost check-in prompts to the
-Claude Code and Codex CLIs at fixed times to keep usage windows "lit," then records activation
+Claude Code and Codex CLIs at fixed times to keep usage windows "lit" (Claude: 5-hour + weekly;
+Codex: only a 7-day window since Sept 2026, anchored once per week), then records activation
 logs, per-run token usage, and quota snapshots. There are two entry points over **one shared
 Bash engine**: the CLI/`launchd` path (`install.sh`) and an optional SwiftUI menu bar app that
 shells out to the same scripts. The app contains no scheduler or activation logic of its own.
@@ -92,7 +93,7 @@ SIGTERM to the group → 2s → SIGKILL, exit 124 on timeout, default `TIMEOUT_S
 `QUOTA_PREFLIGHT_ON_UNKNOWN` (default `allow`; only the literal `skip` skips). An exhausted
 window whose `resets_at` is already in the past does **not** count as exhausted (snapshots can be
 last-known data). Claude `scoped_weekly` buckets count toward exhaustion only when
-`is_active == true`. Codex on a weekly-only account (`five_hour == null`) is also skipped with
+`is_active == true`. Codex (weekly-only by design; its `five_hour` is always null) is also skipped with
 reason `window_already_active` while the 7-day window is anchored (reset in the future and >15 min
 short of a full window, measured from the row's `captured_at_epoch`) unless
 `CODEX_ACTIVATE_ONLY_WHEN_IDLE=0`. Note the quota *sources* (`CLAUDE_STATUS_SOURCE`): `cache` (default) reads the

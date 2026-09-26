@@ -288,6 +288,39 @@ public struct ActivationState: Decodable {
         /// The plan/tier to display, whichever tool populated it.
         public var displayPlan: String? { planType ?? subscriptionType }
 
+        /// Short, human-readable plan pill text (nil hides the pill). See `planLabel(_:)`.
+        public var displayPlanLabel: String? { displayPlan.flatMap(ToolQuota.planLabel) }
+
+        /// Humanizes a raw plan tier: known tiers map to their names; anything else is split on
+        /// `_`/`-`, filler tokens ("self", "serve") dropped, and the rest title-cased — so
+        /// "self_serve_business_prolite" reads "Business Pro Lite". "unknown"/empty → nil.
+        public static func planLabel(_ raw: String) -> String? {
+            let known: [String: String] = [
+                "free": "Free", "plus": "Plus", "pro": "Pro", "prolite": "Pro Lite",
+                "team": "Team", "business": "Business", "enterprise": "Enterprise",
+                "edu": "Edu", "max": "Max"
+            ]
+            let filler: Set<String> = ["self", "serve", "selfserve"]
+            let tokens = raw.lowercased()
+                .split(whereSeparator: { $0 == "_" || $0 == "-" || $0 == " " })
+                .map(String.init)
+                .filter { !filler.contains($0) }
+            guard !tokens.isEmpty, tokens != ["unknown"] else { return nil }
+            return tokens.map { known[$0] ?? $0.capitalized }.joined(separator: " ")
+        }
+
+        /// Codex has had only a 7-day window since Sept 2026, so it is weekly-only by design;
+        /// Claude has both a 5-hour and a weekly window.
+        public static func isWeeklyOnly(tool: String) -> Bool {
+            tool == "codex"
+        }
+
+        /// The window to display: weekly-only tools always show weekly; others honour the
+        /// 5-hour/weekly picker.
+        public func window(tool: String, preferFiveHour: Bool) -> QuotaWindow? {
+            preferFiveHour && !ToolQuota.isWeeklyOnly(tool: tool) ? fiveHour : weekly
+        }
+
         private enum CodingKeys: String, CodingKey {
             case ok, timestamp
             case fiveHour = "five_hour"

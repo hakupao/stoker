@@ -14,7 +14,7 @@ fixed times, then records activation logs, per-run token usage, and quota status
 [![CI](https://github.com/hakupao/stoker/actions/workflows/ci.yml/badge.svg)](https://github.com/hakupao/stoker/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/macOS-14%2B-000000?logo=apple&logoColor=white)](#requirements)
-[![Version](https://img.shields.io/badge/version-0.3.5-E36E43)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.6-E36E43)](CHANGELOG.md)
 [![Website](https://img.shields.io/badge/Website-stoker.bojiangz.com-E36E43?logo=githubpages&logoColor=white)](https://stoker.bojiangz.com/)
 
 ![Bash](https://img.shields.io/badge/Bash-4EAA25?logo=gnubash&logoColor=white)
@@ -44,7 +44,8 @@ one simple file instead of scanning real projects or modifying files.
 
 The name is a nod to a *stoker* — the crew member who keeps a furnace fed so the fire never
 goes out. That is exactly what this tool does for your AI usage windows: it keeps them lit on
-a schedule you choose.
+a schedule you choose. Claude has a 5-hour and a weekly window; Codex, as of September 2026, has
+only a 7-day window, which Stoker anchors once per week (see `CODEX_ACTIVATE_ONLY_WHEN_IDLE`).
 
 The default schedule is `07:00`, `12:00`, `17:00`, and `22:00` local macOS time.
 
@@ -56,7 +57,7 @@ The default schedule is `07:00`, `12:00`, `17:00`, and `22:00` local macOS time.
 | 🪶 | **A minimal prompt** that tells both CLIs not to inspect files, run tools, or modify anything. |
 | 📜 | **Human-readable run history** in `logs/activation.log`. |
 | 📊 | **Structured per-run usage records** in `logs/usage.jsonl`. |
-| 🔋 | **Five-hour and weekly quota snapshots** in `logs/status.jsonl`. |
+| 🔋 | **Quota snapshots** in `logs/status.jsonl` — Claude 5-hour + weekly, Codex weekly (7-day). |
 | 🚦 | **Quota preflight** that skips activation gracefully when a known quota is exhausted. |
 | 🧬 | **Clone-friendly configuration** through `.env`. |
 | 🛟 | **Safe manual commands** for dry runs, dependency checks, quota checks, and uninstall. |
@@ -217,10 +218,10 @@ Copy `.env.example` to `.env` and adjust values:
 | `CODEX_MODEL_FALLBACK` | `1` retries with the next candidate from the Codex model cache when the model is rejected ("model is not supported"); never on other errors, never rewrites `.env` | `1` |
 | `CODEX_MODEL_FALLBACK_MAX_TRIES` | Maximum fallback retries per run (each rejected model is excluded) | `3` |
 | `CODEX_MODELS_CACHE` | Codex model cache used to pick the fallback (honors `$CODEX_HOME`) | `~/.codex/models_cache.json` |
-| `CODEX_ACTIVATE_ONLY_WHEN_IDLE` | `1` or `0`. On weekly-only Codex accounts (no 5-hour window), `1` skips the Codex prompt with reason `window_already_active` while the 7-day window is already running, and sends it only once the window is idle again; no effect when a 5-hour window is reported. Needs `ENABLE_QUOTA_PREFLIGHT=1` | `1` |
+| `CODEX_ACTIVATE_ONLY_WHEN_IDLE` | `1` or `0`. Codex has only a 7-day window (since Sept 2026): `1` skips the Codex prompt with reason `window_already_active` while that window is already running, so Stoker anchors it once per week; `0` always sends. Needs `ENABLE_QUOTA_PREFLIGHT=1` | `1` |
 | `CLAUDE_STATUS_SOURCE` | `cache` reads the oh-my-claudecode plugin's local usage cache (no credentials touched); `native` queries the usage API read-only with the Keychain token — no omc needed, skips when the token is expired, never refreshes; `omc` forces a live `omc wait status` query, which can rotate the shared Keychain OAuth login in headless runs | `cache` |
 | `CLAUDE_USAGE_CACHE_FILE` | Optional usage-cache path override | `~/.claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json` |
-| `CLAUDE_USAGE_USER_AGENT` | User-Agent for the `native` usage request; a claude-code-shaped UA avoids the endpoint's aggressive 429 bucket | `claude-code/0.3.5` |
+| `CLAUDE_USAGE_USER_AGENT` | User-Agent for the `native` usage request; a claude-code-shaped UA avoids the endpoint's aggressive 429 bucket | `claude-code/0.3.6` |
 | `CODEX_STATUS_SOURCE` | `app-server` (default) spawns `codex app-server` over JSON-RPC (needs node + codex); `native` reads the ChatGPT usage endpoint over HTTP read-only — reads the token from `~/.codex/auth.json`, never refreshes it, needs no app-server, and surfaces plan tier + credit balance where available | `app-server` |
 | `CODEX_AUTH_FILE` | Codex OAuth credential path for `native` (honors `$CODEX_HOME`) | `~/.codex/auth.json` |
 | `CODEX_USAGE_API_URL` | Codex `native` usage endpoint override | `https://chatgpt.com/backend-api/wham/usage` |
@@ -297,7 +298,7 @@ Log files:
 
 - `logs/activation.log`: human-readable run history.
 - `logs/usage.jsonl`: one structured usage snapshot per tool per real run.
-- `logs/status.jsonl`: five-hour and weekly quota snapshots per tool.
+- `logs/status.jsonl`: quota snapshots per tool (Claude 5-hour + weekly; Codex weekly only).
 - `logs/raw/`: raw Claude/Codex/status outputs for debugging and future parsing.
 - `logs/launchd.out.log` and `logs/launchd.err.log`: launchd stdout/stderr.
 
@@ -311,7 +312,7 @@ is on.
 
 Highlights:
 
-- **Activity dashboard** — per-tool quota-trend chart (5-hour / weekly), a run-history timeline
+- **Activity dashboard** — per-tool quota-trend chart (5-hour / weekly for Claude; Codex always weekly), a run-history timeline
   with expandable per-run details (tokens, cost, duration, session), and summary stats with
   date-range / status / tool filters.
 - **Settings** — edit independent schedule times, toggle Claude/Codex, and configure advanced
@@ -409,9 +410,9 @@ script executes this sequence:
 3. **Quota preflight** (optional) — queries Claude and Codex quota status *before* sending any
    prompt. If a tool's quota is exhausted, that tool is skipped and the skip is recorded in
    `logs/usage.jsonl`. Claude per-scope weekly buckets (`scoped_weekly`, e.g. a model-specific
-   limit) count only while the account is actively limited by them (`is_active: true`). On a
-   weekly-only Codex account, Codex is also skipped (`window_already_active`) while its 7-day
-   window is already running — see `CODEX_ACTIVATE_ONLY_WHEN_IDLE`.
+   limit) count only while the account is actively limited by them (`is_active: true`). Codex
+   (7-day window only) is also skipped (`window_already_active`) while that window is already
+   running — see `CODEX_ACTIVATE_ONLY_WHEN_IDLE`.
 4. **Send prompt** — calls each enabled CLI with a minimal prompt. Claude replies `READY`;
    Codex runs a tiny read-only probe from `codex-probe/`. Codex uses the configured lightweight
    model with `--ephemeral`, `--skip-git-repo-check`, `--sandbox read-only`, and stripped-down

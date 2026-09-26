@@ -225,6 +225,34 @@ precondition(bareQ.displayPlan == nil)
 precondition(bareQ.credits == nil)
 precondition(bareQ.scopedWeekly == nil)
 
+// Plan pill labels: known tiers, humanized unknown tiers, "unknown" hidden.
+precondition(ActivationState.ToolQuota.planLabel("self_serve_business_prolite") == "Business Pro Lite")
+precondition(ActivationState.ToolQuota.planLabel("plus") == "Plus")
+precondition(ActivationState.ToolQuota.planLabel("prolite") == "Pro Lite")
+precondition(ActivationState.ToolQuota.planLabel("max") == "Max")
+precondition(ActivationState.ToolQuota.planLabel("enterprise") == "Enterprise")
+precondition(ActivationState.ToolQuota.planLabel("new-shiny_tier") == "New Shiny Tier")
+precondition(ActivationState.ToolQuota.planLabel("unknown") == nil)
+precondition(ActivationState.ToolQuota.planLabel("UNKNOWN") == nil)
+precondition(ActivationState.ToolQuota.planLabel("") == nil)
+precondition(decodeQuota(#"{"ok":true,"plan_type":"self_serve_business_prolite"}"#).displayPlanLabel == "Business Pro Lite")
+precondition(decodeQuota(#"{"ok":true,"plan_type":"unknown"}"#).displayPlanLabel == nil)
+precondition(claudeQ.displayPlanLabel == "Max")
+
+// Window selection: Codex is weekly-only by design (always its 7-day window);
+// Claude honours the 5h/weekly picker.
+let codexWeeklyQ = decodeQuota(#"{"ok":true,"five_hour":null,"weekly":{"used_percent":8,"remaining_percent":92}}"#)
+precondition(ActivationState.ToolQuota.isWeeklyOnly(tool: "codex"))
+precondition(!ActivationState.ToolQuota.isWeeklyOnly(tool: "claude"))
+precondition(codexWeeklyQ.window(tool: "codex", preferFiveHour: true)?.remainingPercent == 92)
+precondition(codexWeeklyQ.window(tool: "codex", preferFiveHour: false)?.remainingPercent == 92)
+let bothQ = decodeQuota(#"{"ok":true,"five_hour":{"remaining_percent":40},"weekly":{"remaining_percent":70}}"#)
+// Even a legacy Codex row that still carries a 5h window shows weekly.
+precondition(bothQ.window(tool: "codex", preferFiveHour: true)?.remainingPercent == 70)
+precondition(bothQ.window(tool: "claude", preferFiveHour: true)?.remainingPercent == 40)
+precondition(bothQ.window(tool: "claude", preferFiveHour: false)?.remainingPercent == 70)
+precondition(decodeQuota(#"{"ok":true}"#).window(tool: "codex", preferFiveHour: true) == nil)
+
 // Claude per-scope weekly buckets: decoded with ids/labels/percent/active flag; a
 // reset-passed bucket keeps its blanked percentages; inactive stays distinguishable
 // from "unknown" (nil).
@@ -266,8 +294,12 @@ AppLanguage.current = .en
 precondition(L10n.skipReasonText("window_already_active") == "Weekly window already running")
 precondition(L10n.skipReasonText("quota_exhausted") == "Quota exhausted")
 precondition(L10n.skipReasonText("preflight_status_missing") == "Quota unknown")
+precondition(L10n.weeklyWindowHint == "Weekly window")
+precondition(L10n.quotaMiniHelp(remaining: 92, used: 8, weekly: true) == "Weekly window: 92% remaining (8% used)")
+precondition(L10n.quotaMiniHelp(remaining: 40, used: nil) == "5-hour window: 40% remaining")
 AppLanguage.current = .zh
 precondition(L10n.skipReasonText("window_already_active") == "周窗口已在计时")
+precondition(L10n.weeklyWindowHint == "周窗口")
 // Usage rows (LogStore decodes with convertFromSnakeCase): a failed attempt superseded by
 // a model-fallback retry counts as skipped, not as an error; ids differ by model.
 let usageDecoder = JSONDecoder()

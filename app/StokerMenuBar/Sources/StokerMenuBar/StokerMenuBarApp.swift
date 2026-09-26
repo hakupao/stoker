@@ -601,9 +601,10 @@ struct MenuContentView: View {
     }
 
     private func quotaSummary(_ quota: [String: ActivationState.ToolQuota]) -> String {
-        let claudeH = DS.quotaLabel(quota["claude"]?.fiveHour?.remainingPercent)
-        let codexH = DS.quotaLabel(quota["codex"]?.fiveHour?.remainingPercent)
-        return "Claude 5h \(claudeH) · Codex 5h \(codexH)"
+        // Claude reports its 5-hour window; Codex is weekly-only (7-day window).
+        let claudeH = DS.quotaLabel(quota["claude"]?.window(tool: "claude", preferFiveHour: true)?.remainingPercent)
+        let codexW = DS.quotaLabel(quota["codex"]?.window(tool: "codex", preferFiveHour: true)?.remainingPercent)
+        return "Claude 5h \(claudeH) · Codex wk \(codexW)"
     }
 }
 

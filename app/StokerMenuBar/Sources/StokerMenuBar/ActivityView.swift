@@ -59,9 +59,9 @@ private struct QuotaOverviewCard: View {
         return ["claude", "codex"].filter { wanted.contains($0) && quota[$0] != nil }
     }
 
+    /// Claude honours the 5h/weekly picker; Codex (weekly-only) always shows weekly.
     private func window(for tool: String) -> ActivationState.QuotaWindow? {
-        let q = model.state?.quota[tool]
-        return chartWindow == .fiveHour ? q?.fiveHour : q?.weekly
+        model.state?.quota[tool]?.window(tool: tool, preferFiveHour: chartWindow == .fiveHour)
     }
 
     var body: some View {
@@ -81,6 +81,7 @@ private struct QuotaOverviewCard: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 130)
+                .help(L10n.windowPickerHelp)
 
                 Picker("", selection: $logStore.toolFilter) {
                     Text(L10n.allTools).tag(ToolFilter.all)
@@ -108,8 +109,10 @@ private struct QuotaOverviewCard: View {
                             tool: tool,
                             window: window(for: tool),
                             asOf: model.state?.quota[tool]?.timestamp.flatMap(LogTimestamp.parse),
-                            planType: model.state?.quota[tool]?.displayPlan,
-                            credits: model.state?.quota[tool]?.credits
+                            planType: model.state?.quota[tool]?.displayPlanLabel,
+                            isWeeklyOnly: ActivationState.ToolQuota.isWeeklyOnly(tool: tool),
+                            credits: model.state?.quota[tool]?.credits,
+                            showsWeekly: chartWindow == .weekly
                         )
                         // Claude per-scope weekly limits (e.g. a model-specific bucket) sit
                         // under the Claude gauge, independent of the 5h/weekly picker.
@@ -151,8 +154,12 @@ private struct GaugeRow: View {
     let asOf: Date?
     /// Tool-level plan tier (Codex plan_type / Claude subscription_type); nil hides the badge.
     var planType: String? = nil
+    /// Weekly-only tool (Codex): the row always shows the weekly window and says so.
+    var isWeeklyOnly: Bool = false
     /// Tool-level credit balance; nil (or empty) hides the credits line.
     var credits: ActivationState.Credits? = nil
+    /// The picker is on the weekly view (for the hover text).
+    var showsWeekly: Bool = false
     @Environment(\.stokerTheme) private var theme
 
     private var color: Color {
@@ -189,8 +196,11 @@ private struct GaugeRow: View {
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(color)
                 if let plan = planType, !plan.isEmpty {
-                    Text(plan.capitalized)
+                    Text(plan)
                         .font(.system(size: 9, weight: .bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .truncationMode(.tail)
                         .foregroundStyle(theme.textSecondary)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
@@ -234,6 +244,12 @@ private struct GaugeRow: View {
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(theme.textMuted)
                     .lineLimit(1)
+                if isWeeklyOnly {
+                    Text(L10n.weeklyWindowHint)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(theme.textSecondary)
+                        .lineLimit(1)
+                }
                 if let ct = creditsText {
                     Text(ct)
                         .font(.system(size: 9, weight: .medium))
@@ -244,7 +260,8 @@ private struct GaugeRow: View {
             .frame(width: 96, alignment: .trailing)
         }
         // Spell out remaining vs used on hover so the single bar's meaning is unambiguous.
-        .help(L10n.quotaMiniHelp(remaining: window?.remainingPercent, used: window?.usedPercent))
+        .help(L10n.quotaMiniHelp(remaining: window?.remainingPercent, used: window?.usedPercent,
+                                 weekly: isWeeklyOnly || showsWeekly))
     }
 }
 
@@ -322,7 +339,7 @@ private struct ScopedWeeklyRow: View {
         }
         .help(inactive
             ? L10n.scopedInactiveHelp
-            : L10n.quotaMiniHelp(remaining: bucket.remainingPercent, used: bucket.usedPercent))
+            : L10n.quotaMiniHelp(remaining: bucket.remainingPercent, used: bucket.usedPercent, weekly: true))
     }
 }
 

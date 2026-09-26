@@ -2,12 +2,11 @@
 set -euo pipefail
 
 # Verifies the Codex idle-window preflight policy (CODEX_ACTIVATE_ONLY_WHEN_IDLE):
-# on a weekly-only account (five_hour == null) a prompt is skipped with reason
+# Codex is weekly-only (7-day window since Sept 2026), so a prompt is skipped with reason
 # window_already_active while the 7-day window is already anchored, and allowed
 # while it is idle. Cases:
 #   A) idle signature (resets_at == now + full window) → allow
 #   B) anchored (resets_at < now + window - 15min)      → skip window_already_active
-#   C) a five_hour window is present                     → allow (policy off)
 #   D) CODEX_ACTIVATE_ONLY_WHEN_IDLE=0                   → allow
 #   E) anchored AND exhausted                            → skip quota_exhausted
 #   F) invalid CODEX_ACTIVATE_ONLY_WHEN_IDLE             → rejected up front
@@ -34,18 +33,14 @@ export SENTINEL_DIR="$TMP_DIR/sentinels"
 jq -n '{tokens: {access_token: "tok", account_id: "acct"}}' >"$AUTH"
 
 # Fake wham/usage: one weekly window (used $USED_PCT, resets $RESET_OFFSET seconds
-# from now); WITH_FIVE_HOUR=1 adds a 5-hour primary window.
+# from now) — Codex reports no 5-hour window.
 cat >"$TMP_DIR/bin/curl-fake" <<'SH'
 #!/usr/bin/env bash
 cat >/dev/null
 [[ "${CURL_FAIL:-0}" == "1" ]] && exit 22
 now=$(date +%s)
 weekly="{\"used_percent\":${USED_PCT},\"limit_window_seconds\":604800,\"reset_at\":$(( now + RESET_OFFSET ))}"
-if [[ "${WITH_FIVE_HOUR:-0}" == "1" ]]; then
-  printf '{"plan_type":"plus","rate_limit":{"allowed":true,"primary_window":{"used_percent":0,"limit_window_seconds":18000,"reset_at":%s},"secondary_window":%s}}\n' "$(( now + 18000 ))" "$weekly"
-else
-  printf '{"plan_type":"plus","rate_limit":{"allowed":true,"primary_window":%s,"secondary_window":null}}\n' "$weekly"
-fi
+printf '{"plan_type":"plus","rate_limit":{"allowed":true,"primary_window":%s,"secondary_window":null}}\n' "$weekly"
 SH
 cat >"$TMP_DIR/bin/codex-fake" <<'SH'
 #!/usr/bin/env bash
@@ -93,10 +88,6 @@ run_once env USED_PCT=5 RESET_OFFSET=259200
 expect_skipped "anchored window" "window_already_active"
 jq -e '.preflight.exhausted == [] and .preflight.status_ok == true' <<<"$(last_codex_usage)" >/dev/null \
   || { echo "anchored skip must not be reported as exhaustion: $(last_codex_usage)" >&2; exit 1; }
-
-# C) a 5-hour window is present → the weekly-only policy does not apply
-run_once env USED_PCT=5 RESET_OFFSET=259200 WITH_FIVE_HOUR=1
-expect_allowed "five_hour present"
 
 # D) policy disabled
 run_once env USED_PCT=5 RESET_OFFSET=259200 CODEX_ACTIVATE_ONLY_WHEN_IDLE=0

@@ -199,15 +199,17 @@ private struct UnifiedHeader: View {
                 Text(L10n.quotaRemaining)
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(theme.textMuted)
+                // Claude shows its 5-hour window; Codex is weekly-only (7-day window).
                 QuotaMiniBar(
                     label: "Claude",
-                    window: model.state?.quota["claude"]?.fiveHour,
+                    window: model.state?.quota["claude"]?.window(tool: "claude", preferFiveHour: true),
                     color: theme.seriesClaude
                 )
                 QuotaMiniBar(
                     label: "Codex",
-                    window: model.state?.quota["codex"]?.fiveHour,
-                    color: theme.seriesCodex
+                    window: model.state?.quota["codex"]?.window(tool: "codex", preferFiveHour: true),
+                    color: theme.seriesCodex,
+                    isWeeklyOnly: true
                 )
                 Spacer()
                 TabPicker(selected: $selectedTab)
@@ -322,6 +324,8 @@ private struct QuotaMiniBar: View {
     var label: String
     var window: ActivationState.QuotaWindow?
     var color: Color
+    /// Weekly-only tool (Codex): tag the bar so its window is clear.
+    var isWeeklyOnly: Bool = false
     @Environment(\.stokerTheme) private var theme
 
     private var percent: Double? { window?.remainingPercent }
@@ -350,9 +354,17 @@ private struct QuotaMiniBar: View {
                 .font(.system(size: 10, weight: .bold, design: .rounded))
                 .foregroundStyle(quotaColor)
                 .frame(width: 30, alignment: .trailing)
+
+            if isWeeklyOnly {
+                Text(L10n.weeklyShort)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(theme.textMuted)
+                    .lineLimit(1)
+            }
         }
         // Spell out remaining vs used so the bar's meaning is unambiguous on hover.
-        .help(L10n.quotaMiniHelp(remaining: window?.remainingPercent, used: window?.usedPercent))
+        .help(L10n.quotaMiniHelp(remaining: window?.remainingPercent, used: window?.usedPercent,
+                                 weekly: isWeeklyOnly))
     }
 }
 
@@ -403,7 +415,7 @@ struct BottomActionBar: View {
     @Environment(\.stokerTheme) private var theme
 
     private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.5"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.6"
     }
 
     var body: some View {

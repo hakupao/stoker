@@ -52,8 +52,8 @@ ENABLE_STATUS_SNAPSHOTS="${ENABLE_STATUS_SNAPSHOTS:-1}"
 ENABLE_QUOTA_PREFLIGHT="${ENABLE_QUOTA_PREFLIGHT:-1}"
 QUOTA_PREFLIGHT_ON_UNKNOWN="${QUOTA_PREFLIGHT_ON_UNKNOWN:-allow}"
 QUOTA_EXHAUSTED_THRESHOLD_PERCENT="${QUOTA_EXHAUSTED_THRESHOLD_PERCENT:-0}"
-# Weekly-only Codex accounts (no 5-hour window): skip the prompt while the 7-day
-# window is already anchored/running — another prompt can't start a new one.
+# Codex is weekly-only (7-day window): skip the prompt while that window is
+# already anchored/running — another prompt can't start a new one.
 CODEX_ACTIVATE_ONLY_WHEN_IDLE="${CODEX_ACTIVATE_ONLY_WHEN_IDLE:-1}"
 # Keep the Codex CLI current: right before a real Codex prompt, run `codex update`
 # at most once per interval (attempt stamp under run/). Never fails the run.
@@ -74,7 +74,7 @@ CLAUDE_USAGE_API_URL="${CLAUDE_USAGE_API_URL:-https://api.anthropic.com/api/oaut
 # a claude-code-shaped UA into an aggressively rate-limited bucket (persistent 429),
 # so default to one; override to change or to send an honest Stoker UA. NOTE: the
 # default carries this build's version — it is a version-bump sync site (see CLAUDE.md).
-CLAUDE_USAGE_USER_AGENT="${CLAUDE_USAGE_USER_AGENT:-claude-code/0.3.5}"
+CLAUDE_USAGE_USER_AGENT="${CLAUDE_USAGE_USER_AGENT:-claude-code/0.3.6}"
 # Codex quota source: "app-server" (default) spawns `codex app-server` over JSON-RPC;
 # "native" GETs the ChatGPT usage endpoint read-only (no app-server, no token refresh).
 CODEX_STATUS_SOURCE="${CODEX_STATUS_SOURCE:-app-server}"
@@ -920,7 +920,7 @@ send({
   id: 1,
   method: "initialize",
   params: {
-    clientInfo: { name: "stoker", version: "0.3.5" },
+    clientInfo: { name: "stoker", version: "0.3.6" },
     capabilities: null,
   },
 });
@@ -1061,8 +1061,8 @@ quota_preflight_decision() {
               empty
             end
         end;
-      # Weekly-only Codex account (five_hour == null): the 7-day window is
-      # "anchored" once its reset is fixed in the future. An idle (not yet
+      # Codex has only a 7-day window (since Sept 2026), so it is treated as
+      # weekly-only: the window is "anchored" once its reset is fixed in the future. An idle (not yet
       # started) window reports resets_at_epoch == query time + window length,
       # drifting with each query, so anything more than 15 minutes short of a
       # full window means a run already started it and another prompt only
@@ -1071,7 +1071,7 @@ quota_preflight_decision() {
       # slow run or clock skew cannot make an idle window look anchored.
       def window_already_active($s):
         ($s.weekly // null) as $w
-        | if $s.five_hour != null or $w == null then false
+        | if $w == null then false
           else
             (n($w.resets_at_epoch // null)) as $e
             | ((n($w.window_minutes // null)) // 10080) as $mins

@@ -263,7 +263,11 @@ public final class LogStore: ObservableObject {
             guard let date = record.date else { continue }
             let pct: Double?
             switch window {
-            case .fiveHour: pct = record.fiveHour?.remainingPercent
+            // Weekly-only tools (Codex) always chart their weekly window.
+            case .fiveHour:
+                pct = ActivationState.ToolQuota.isWeeklyOnly(tool: record.tool)
+                    ? record.weekly?.remainingPercent
+                    : record.fiveHour?.remainingPercent
             case .weekly: pct = record.weekly?.remainingPercent
             }
             guard let pct else { continue }

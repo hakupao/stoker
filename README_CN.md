@@ -9,12 +9,12 @@
 **按你的作息，把 Claude Code 和 Codex 的用量窗口一直「续上火」。**
 
 一个很小的 macOS `launchd` 定时器：按固定时间轻量触发 Claude Code 和 Codex，并记录触发日志、
-单次 usage、5 小时窗口和周额度状态快照。
+单次 usage 和额度状态快照（Claude：5 小时 + 周窗口；Codex 自 2026 年 9 月起只有 7 天周窗口，Stoker 每周锚定一次）。
 
 [![CI](https://github.com/hakupao/stoker/actions/workflows/ci.yml/badge.svg)](https://github.com/hakupao/stoker/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/macOS-14%2B-000000?logo=apple&logoColor=white)](#环境要求)
-[![Version](https://img.shields.io/badge/version-0.3.5-E36E43)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.6-E36E43)](CHANGELOG.md)
 [![Website](https://img.shields.io/badge/Website-stoker.bojiangz.com-E36E43?logo=githubpages&logoColor=white)](https://stoker.bojiangz.com/)
 
 ![Bash](https://img.shields.io/badge/Bash-4EAA25?logo=gnubash&logoColor=white)
@@ -51,7 +51,7 @@ Stoker（司炉——锅炉房里负责不停添煤、让炉火长燃不灭的�
 | 🪶 | **极短 prompt** —— 要求两个 CLI 不读文件、不运行工具、不修改内容。 |
 | 📜 | **可读运行历史** —— `logs/activation.log` 记录人类可读的运行历史。 |
 | 📊 | **结构化 usage** —— `logs/usage.jsonl` 记录每次真实触发返回的 token/usage 信息。 |
-| 🔋 | **额度快照** —— `logs/status.jsonl` 记录 5 小时窗口和周额度快照。 |
+| 🔋 | **额度快照** —— `logs/status.jsonl` 记录 Claude 5 小时 + 周额度、Codex 周（7 天）额度快照。 |
 | 🚦 | **额度预检** —— 真实触发前先检查额度；如果明确额度耗尽，会优雅跳过并记录日志。 |
 | 🧬 | **可克隆配置** —— 通过 `.env` 配置时间、label、prompt、timeout 和工具路径。 |
 | 🛟 | **安全手动命令** —— 支持 dry-run、依赖检查、只查额度、手动触发和卸载。 |
@@ -202,10 +202,10 @@ codex job skipped by quota preflight reason=quota_exhausted
 | `CODEX_MODEL_FALLBACK` | 为 `1` 时，若模型被拒（"model is not supported"），按顺序从 Codex 模型缓存中选下一个候选重试；其它错误不重试，也绝不改写 `.env` | `1` |
 | `CODEX_MODEL_FALLBACK_MAX_TRIES` | 每次运行最多的备用模型重试次数（被拒模型逐个排除） | `3` |
 | `CODEX_MODELS_CACHE` | 选择备用模型所用的 Codex 模型缓存（识别 `$CODEX_HOME`） | `~/.codex/models_cache.json` |
-| `CODEX_ACTIVATE_ONLY_WHEN_IDLE` | `1` 或 `0`。仅对只有 7 天周窗口的 Codex 账号（无 5 小时窗口）生效：为 `1` 时，周窗口已在计时则跳过 Codex 激活（原因 `window_already_active`），等窗口空闲后才发送；上报了 5 小时窗口时不生效。需 `ENABLE_QUOTA_PREFLIGHT=1` | `1` |
+| `CODEX_ACTIVATE_ONLY_WHEN_IDLE` | `1` 或 `0`。Codex 自 2026 年 9 月起只有 7 天周窗口：为 `1` 时，周窗口已在计时则跳过 Codex 激活（原因 `window_already_active`），即 Stoker 每周锚定一次；`0` 则每次都发送。需 `ENABLE_QUOTA_PREFLIGHT=1` | `1` |
 | `CLAUDE_STATUS_SOURCE` | `cache` 直接读 oh-my-claudecode 插件的本地用量缓存（不触碰任何凭证）；`native` 用钥匙串 token 只读查询用量接口——无需 omc，token 过期即跳过、绝不刷新；`omc` 强制 `omc wait status` 实时查询，无头运行时可能轮换钥匙串登录凭证 | `cache` |
 | `CLAUDE_USAGE_CACHE_FILE` | 用量缓存路径覆盖（可选） | `~/.claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json` |
-| `CLAUDE_USAGE_USER_AGENT` | `native` 用量请求的 User-Agent；claude-code 形态的 UA 可避开该接口激进的 429 限流桶 | `claude-code/0.3.5` |
+| `CLAUDE_USAGE_USER_AGENT` | `native` 用量请求的 User-Agent；claude-code 形态的 UA 可避开该接口激进的 429 限流桶 | `claude-code/0.3.6` |
 | `CODEX_STATUS_SOURCE` | `app-server`（默认）经 JSON-RPC 拉起 `codex app-server`（需 node + codex）；`native` 只读 HTTP 查询 ChatGPT 用量接口——读 `~/.codex/auth.json` 里的 token、绝不刷新、无需 app-server，并在支持的套餐上显示套餐档位与额度余额 | `app-server` |
 | `CODEX_AUTH_FILE` | `native` 用的 Codex OAuth 凭证路径（识别 `$CODEX_HOME`） | `~/.codex/auth.json` |
 | `CODEX_USAGE_API_URL` | Codex `native` 用量接口地址覆盖 | `https://chatgpt.com/backend-api/wham/usage` |
@@ -275,7 +275,7 @@ tail -20 logs/status.jsonl | jq
 
 - `logs/activation.log`：人类可读的运行历史。
 - `logs/usage.jsonl`：每个工具每次真实触发的 usage 快照。
-- `logs/status.jsonl`：5 小时窗口和周额度快照。
+- `logs/status.jsonl`：额度快照（Claude 5 小时 + 周；Codex 仅周窗口）。
 - `logs/raw/`：Claude、Codex 和 status 查询的原始输出。
 - `logs/launchd.out.log` / `logs/launchd.err.log`：launchd 的 stdout/stderr。
 
@@ -287,7 +287,7 @@ CLI/launchd 仍然是主引擎；菜单栏 App 是单独给初学者使用的 GU
 
 亮点：
 
-- **活动仪表盘** —— 按工具的额度趋势图（5 小时 / 每周）、可展开查看单次详情（token、费用、耗时、
+- **活动仪表盘** —— 按工具的额度趋势图（Claude 可切 5 小时 / 每周；Codex 始终为周）、可展开查看单次详情（token、费用、耗时、
   session）的运行记录时间线，以及带「时间范围 / 状态 / 工具」筛选的统计条。
 - **设置** —— 编辑相互独立的多个触发时间、开关 Claude/Codex、配置高级选项（额度预检、运行后快照、
   防睡眠、开机自启）。
@@ -379,7 +379,7 @@ flowchart TB
 3. **额度预检**（可选） —— 在发送任何 prompt *之前*查询 Claude 和 Codex 的额度状态。如果某个
    工具的额度已耗尽，该工具会被跳过，跳过记录写入 `logs/usage.jsonl`。Claude 的分项周额度
    （`scoped_weekly`，如某个模型专属的限额）仅在账号当前确实受其限制（`is_active: true`）时计入。
-   对只有周窗口的 Codex 账号，若 7 天窗口已在计时，Codex 也会被跳过（`window_already_active`）——
+   Codex（只有 7 天周窗口）若周窗口已在计时，也会被跳过（`window_already_active`）——
    见 `CODEX_ACTIVATE_ONLY_WHEN_IDLE`。
 4. **发送 prompt** —— 对每个启用的 CLI 发送一个极简 prompt（`Reply exactly READY`）。Claude
    使用超轻量模式（见[成本优化](#成本优化)）。Codex 使用配置的轻量模型，并带上 `--ephemeral`、

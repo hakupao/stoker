@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## 0.3.6 - 2026-09-26
 
 ### Changed
 - **Default Codex model is now `gpt-5.6-luna`.** `gpt-5.4-mini` was retired for ChatGPT-account
@@ -12,16 +12,21 @@ All notable changes to this project will be documented in this file.
   (the old `.env.example` and every app save wrote it). The engine now logs a WARNING and uses
   `gpt-5.6-luna` for any retired model, and the menu bar app migrates the setting on load, so the
   next Save rewrites `.env`; CLI-only users should edit `CODEX_MODEL` in `.env` themselves.
+- **Codex is weekly-only by design.** As of September 2026 Codex has only a 7-day window, so Stoker
+  anchors it once per week (idle-window policy applies to Codex unconditionally), and the app's
+  Codex row, header bar, menu summary and trend always show the weekly window — the 5h/weekly
+  picker now switches Claude only. Codex plan pills are humanized and single-line
+  (`self_serve_business_prolite` → "Business Pro Lite"; `unknown` hides the pill).
 
 ### Added
-- **Codex idle-window policy (`CODEX_ACTIVATE_ONLY_WHEN_IDLE`, default `1`).** Codex accounts
-  that now report only a 7-day window (no 5-hour window) no longer burn a prompt while that
+- **Codex idle-window policy (`CODEX_ACTIVATE_ONLY_WHEN_IDLE`, default `1`).** Codex (now only
+  a 7-day window) no longer burns a prompt while that
   window is already running: the quota preflight skips Codex with the new reason
   `window_already_active` (not `quota_exhausted`) until the window is idle again. A window counts
   as running when its reset is in the future and more than 15 minutes short of a full window,
   measured from the snapshot's capture time (Codex status rows now carry `captured_at_epoch`;
-  an idle window reports capture time + window length). Accounts that still report a 5-hour window are
-  unaffected; `0` restores the old always-send behavior. The app labels the skip "Weekly window
+  an idle window reports capture time + window length). `0` restores the old always-send
+  behavior. The app labels the skip "Weekly window
   already running" / "周窗口已在计时".
 - **Claude per-scope weekly buckets (`scoped_weekly`).** Status rows and `app-status` now carry
   the plugin cache's `scopedWeeklyBuckets` (and, for `CLAUDE_STATUS_SOURCE=native`, every
