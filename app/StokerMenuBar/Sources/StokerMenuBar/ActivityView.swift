@@ -180,8 +180,7 @@ private struct GaugeRow: View {
         return nil
     }
     private var resetDate: Date? {
-        guard let iso = window?.resetsAt else { return nil }
-        return ISO8601DateFormatter().date(from: iso)
+        ResetTime.parse(window?.resetsAt)
     }
     private var trailingText: String {
         if let reset = resetDate, let s = L10n.resetsIn(reset, now: Date()) { return s }
@@ -278,13 +277,8 @@ private struct ScopedWeeklyRow: View {
     private var remaining: Double? { bucket.remainingPercent }
     private var inactive: Bool { bucket.isActive == false }
 
-    /// The plugin cache stamps fractional seconds ("…T08:00:00.315Z"), which a bare
-    /// ISO8601DateFormatter rejects — try fractional first, then plain.
     private var resetDate: Date? {
-        guard let iso = bucket.resetsAt else { return nil }
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
+        ResetTime.parse(bucket.resetsAt)
     }
 
     var body: some View {

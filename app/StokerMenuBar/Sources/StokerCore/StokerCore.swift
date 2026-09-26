@@ -206,6 +206,17 @@ public enum ProjectLocator {
     }
 }
 
+/// Parses the quota `resets_at` strings the engine emits. Claude's carry fractional
+/// seconds ("…:59.914Z"), which a default ISO8601DateFormatter rejects.
+public enum ResetTime {
+    public static func parse(_ iso: String?) -> Date? {
+        guard let iso, !iso.isEmpty else { return nil }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
+    }
+}
+
 public struct ActivationState: Decodable {
     public var root: String
     public var label: String
@@ -284,6 +295,9 @@ public struct ActivationState: Decodable {
         /// Overage/credit balance. Shape differs by tool (Codex balance vs Claude
         /// extra_usage), so every field is optional; nil when the source has none.
         public var credits: Credits?
+        /// Codex-only: rate-limit reset credits (available count + earliest expiry).
+        /// nil when the source carries none.
+        public var resetCredits: ResetCredits?
 
         /// The plan/tier to display, whichever tool populated it.
         public var displayPlan: String? { planType ?? subscriptionType }
@@ -330,6 +344,7 @@ public struct ActivationState: Decodable {
             case planType = "plan_type"
             case subscriptionType = "subscription_type"
             case credits
+            case resetCredits = "reset_credits"
         }
 
         public init(from decoder: Decoder) throws {
@@ -348,6 +363,8 @@ public struct ActivationState: Decodable {
             // Defensive: a surprise `credits` shape (e.g. a bare string carried by an
             // older snapshot row) must not fail the whole ActivationState decode.
             credits = (try? c.decodeIfPresent(Credits.self, forKey: .credits)) ?? nil
+            // Defensive like `credits`: a malformed `reset_credits` must not fail the whole decode.
+            resetCredits = (try? c.decodeIfPresent(ResetCredits.self, forKey: .resetCredits)) ?? nil
         }
     }
 
@@ -383,6 +400,18 @@ public struct ActivationState: Decodable {
             case remainingPercent = "remaining_percent"
             case usedPercent = "used_percent"
             case resetsAt = "resets_at"
+        }
+    }
+
+    /// Codex-only: how many rate-limit reset credits are currently available, and
+    /// when the earliest of them expires.
+    public struct ResetCredits: Decodable {
+        public var availableCount: Int
+        public var earliestExpiresAt: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case availableCount = "available_count"
+            case earliestExpiresAt = "earliest_expires_at"
         }
     }
 

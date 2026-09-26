@@ -24,7 +24,7 @@ ENV
 
 cat >"$TMP_DIR/logs/status.jsonl" <<'JSONL'
 {"timestamp":"2026-05-27 10:00:00 JST","run_id":"r1","tool":"claude","ok":true,"five_hour":{"remaining_percent":72},"weekly":{"remaining_percent":61},"sonnet_weekly":{"remaining_percent":58}}
-{"timestamp":"2026-05-27 10:01:00 JST","run_id":"r1","tool":"codex","ok":true,"five_hour":{"remaining_percent":81},"weekly":{"remaining_percent":69}}
+{"timestamp":"2026-05-27 10:01:00 JST","run_id":"r1","tool":"codex","ok":true,"five_hour":{"remaining_percent":81},"weekly":{"remaining_percent":69},"reset_credits":{"available_count":1,"earliest_expires_at":"2026-10-22T20:37:22Z"}}
 JSONL
 
 cat >"$TMP_DIR/logs/usage.jsonl" <<'JSONL'
@@ -50,6 +50,7 @@ jq -e '
   and .keep_awake.mode == "during"
   and .keep_awake.seconds == 600
   and .quota.codex.five_hour.remaining_percent == 81
+  and .quota.codex.reset_credits.available_count == 1
   and .quota.claude.sonnet_weekly.remaining_percent == 58
   and .last_usage.tool == "codex"
   and .last_usage.result == "READY"

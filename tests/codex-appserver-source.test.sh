@@ -46,7 +46,7 @@ run_appserver() {
 }
 
 # ── A) normal account: primary=5h(300min), secondary=weekly(10080min) ───────
-run_appserver '{"id":2,"result":{"rateLimitsByLimitId":{"codex":{"planType":"pro","rateLimitReachedType":null,"credits":{"hasCredits":true,"unlimited":false,"balance":42},"primary":{"usedPercent":40,"windowDurationMins":300,"resetsAt":1785000000},"secondary":{"usedPercent":70,"windowDurationMins":10080,"resetsAt":1785500000}}}}}' \
+run_appserver '{"id":2,"result":{"rateLimitsByLimitId":{"codex":{"planType":"pro","rateLimitReachedType":null,"credits":{"hasCredits":true,"unlimited":false,"balance":42},"primary":{"usedPercent":40,"windowDurationMins":300,"resetsAt":1785000000},"secondary":{"usedPercent":70,"windowDurationMins":10080,"resetsAt":1785500000}}},"rateLimitResetCredits":{"availableCount":1,"credits":[{"id":"a","resetType":"codexRateLimits","status":"available","grantedAt":1790109442,"expiresAt":1792701442},{"id":"b","resetType":"codexRateLimits","status":"used","grantedAt":1790000000,"expiresAt":1791000000}]}}}' \
   || { echo "expected app-server snapshot to succeed" >&2; exit 1; }
 row="$(grep '"tool":"codex"' "$STATUS" | tail -1)"
 jq -e '
@@ -62,6 +62,9 @@ jq -e '
     and .credits.has_credits == true
   ' <<<"$row" >/dev/null \
   || { echo "unexpected app-server row: $row" >&2; exit 1; }
+# (1792701442 = 2026-10-22T20:37:22Z; verify with: date -u -r 1792701442 +%Y-%m-%dT%H:%M:%SZ)
+jq -e '.reset_credits.available_count == 1 and .reset_credits.earliest_expires_at == "2026-10-22T20:37:22Z"' <<<"$row" >/dev/null \
+  || { echo "expected reset_credits parsed from rateLimitResetCredits: $row" >&2; exit 1; }
 
 # ── B) weekly-as-primary: a lone 10080-min window must route to weekly ──────
 run_appserver '{"id":2,"result":{"rateLimitsByLimitId":{"codex":{"planType":"plus","primary":{"usedPercent":0,"windowDurationMins":10080,"resetsAt":1785500000}}}}}' \
@@ -73,5 +76,7 @@ jq -e '
     and .weekly.used_percent == 0
   ' <<<"$row" >/dev/null \
   || { echo "expected weekly-as-primary to route to weekly (not 5h): $row" >&2; exit 1; }
+jq -e '.reset_credits == null' <<<"$row" >/dev/null \
+  || { echo "expected reset_credits null when rateLimitResetCredits is absent: $row" >&2; exit 1; }
 
 echo "codex app-server source test passed"

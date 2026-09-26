@@ -279,6 +279,20 @@ let mixedScopedQ = decodeQuota(#"{"ok":true,"scoped_weekly":[{"id":"a","label":"
 precondition(mixedScopedQ.scopedWeekly?.count == 1)
 precondition(mixedScopedQ.scopedWeekly?.first?.id == "b")
 
+// ResetTime: fractional and plain ISO, nil/garbage → nil
+precondition(ResetTime.parse("2026-09-28T07:59:59.914Z") != nil)
+precondition(ResetTime.parse("2026-10-03T13:49:45Z") != nil)
+precondition(ResetTime.parse(nil) == nil)
+precondition(ResetTime.parse("soon") == nil)
+
+// reset_credits decode: present, absent, malformed (must not drop the quota)
+let rc = decodeQuota(#"{"ok":true,"weekly":{"used_percent":1},"reset_credits":{"available_count":1,"earliest_expires_at":"2026-10-22T20:37:22Z"}}"#)
+precondition(rc.resetCredits?.availableCount == 1)
+precondition(rc.resetCredits?.earliestExpiresAt == "2026-10-22T20:37:22Z")
+precondition(decodeQuota(#"{"ok":true}"#).resetCredits == nil)
+let badRC = decodeQuota(#"{"ok":true,"weekly":{"used_percent":5},"reset_credits":"oops"}"#)
+precondition(badRC.resetCredits == nil && badRC.weekly?.usedPercent == 5)
+
 // Retired Codex model migration: a stale .env pin is replaced by the current default
 // (the next save persists it); custom and "default" values are kept.
 precondition(AppSettings(values: ["CODEX_MODEL": "gpt-5.4-mini"]).codexModel == "gpt-5.6-luna")

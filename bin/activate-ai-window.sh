@@ -812,6 +812,13 @@ record_codex_status() {
               unlimited: ($r.credits.unlimited // null),
               balance: (if ($r.credits.balance // null) == null then null else ($r.credits.balance | tostring) end)
             } end),
+            reset_credits: (
+              ($r.rate_limit_reset_credits.available_count // null) as $ac
+              | if $ac == null then null else {
+                  available_count: $ac,
+                  earliest_expires_at: ($r.rate_limit_reset_credits.earliest_expires_at // null)
+                } end
+            ),
             five_hour: win($five_src),
             weekly: win($weekly_src),
             error: null,
@@ -958,6 +965,16 @@ NODE
             unlimited: ($snapshot.credits.unlimited // null),
             balance: (if ($snapshot.credits.balance // null) == null then null else ($snapshot.credits.balance | tostring) end)
           } end),
+          reset_credits: (
+            ($record.result.rateLimitResetCredits // null) as $rc
+            | if $rc == null then null else
+                ([($rc.credits // [])[] | select(.status == "available")]) as $avail
+                | {
+                    available_count: ($avail | length),
+                    earliest_expires_at: ([$avail[].expiresAt | numbers] | min | if . == null then null else todateiso8601 end)
+                  }
+              end
+          ),
           five_hour: (if $primary == null then null else {
             used_percent: ($primary.usedPercent // null),
             remaining_percent: (if ($primary.usedPercent // null) == null then null else (100 - $primary.usedPercent) end),
