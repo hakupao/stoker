@@ -18,11 +18,12 @@ fi
 LABEL="${LABEL:-com.stoker.ai-window}"
 SCHEDULE_TIMES="${SCHEDULE_TIMES:-07:00,12:00,17:00,22:00}"
 ACTIVATION_TOOL="${ACTIVATION_TOOL:-all}"
-CODEX_MODEL="${CODEX_MODEL:-gpt-5.4-mini}"
+CODEX_MODEL="${CODEX_MODEL:-gpt-5.6-luna}"
 ENABLE_STATUS_SNAPSHOTS="${ENABLE_STATUS_SNAPSHOTS:-1}"
 ENABLE_QUOTA_PREFLIGHT="${ENABLE_QUOTA_PREFLIGHT:-1}"
 QUOTA_PREFLIGHT_ON_UNKNOWN="${QUOTA_PREFLIGHT_ON_UNKNOWN:-allow}"
 QUOTA_EXHAUSTED_THRESHOLD_PERCENT="${QUOTA_EXHAUSTED_THRESHOLD_PERCENT:-0}"
+CODEX_ACTIVATE_ONLY_WHEN_IDLE="${CODEX_ACTIVATE_ONLY_WHEN_IDLE:-1}"
 KEEP_AWAKE_MODE="${KEEP_AWAKE_MODE:-off}"
 KEEP_AWAKE_SECONDS="${KEEP_AWAKE_SECONDS:-900}"
 JQ_BIN="${JQ_BIN:-$(command -v jq 2>/dev/null || true)}"
@@ -235,7 +236,22 @@ if (( live_ms > claude_data_ms )); then
           used_percent: ($d.sonnetWeeklyPercent // null),
           remaining_percent: (if $d.sonnetWeeklyPercent == null then null else (100 - $d.sonnetWeeklyPercent) end),
           resets_at: ($d.sonnetWeeklyResetsAt // null)
-        }
+        },
+        scoped_weekly: (
+          if ($d.scopedWeeklyBuckets | type) == "array" then
+            $d.scopedWeeklyBuckets
+            | map(select(type == "object")
+                | (if (.percent | type) == "number" then .percent else null end) as $pct
+                | {
+                    id: ((.id // .label // "unknown") | tostring),
+                    label: ((.label // .id // "unknown") | tostring),
+                    used_percent: $pct,
+                    remaining_percent: (if $pct == null then null else (100 - $pct) end),
+                    resets_at: (.resetsAt // null),
+                    is_active: (if (.isActive | type) == "boolean" then .isActive else null end)
+                  })
+          else [] end
+        )
       }
   ' <<<"$quota" 2>/dev/null || true)"
   [[ -n "$refreshed" ]] && quota="$refreshed"
@@ -267,6 +283,7 @@ normalized="$("$JQ_BIN" -c '
       (if has("five_hour") then .five_hour |= normalize_window else . end)
       | (if has("weekly") then .weekly |= normalize_window else . end)
       | (if has("sonnet_weekly") then .sonnet_weekly |= normalize_window else . end)
+      | (if (.scoped_weekly | type) == "array" then .scoped_weekly |= map(normalize_window) else . end)
     else
       .
     end
@@ -277,6 +294,7 @@ normalized="$("$JQ_BIN" -c '
 last_usage="$(read_last_jsonl "$USAGE_LOG")"
 enable_status_snapshots="$(bool_from_1 "$ENABLE_STATUS_SNAPSHOTS")"
 enable_quota_preflight="$(bool_from_1 "$ENABLE_QUOTA_PREFLIGHT")"
+codex_activate_only_when_idle="$(bool_from_1 "$CODEX_ACTIVATE_ONLY_WHEN_IDLE")"
 
 # shellcheck disable=SC2016 # jq variables are intentionally evaluated by jq.
 "$JQ_BIN" -n -c \
@@ -286,6 +304,7 @@ enable_quota_preflight="$(bool_from_1 "$ENABLE_QUOTA_PREFLIGHT")"
   --arg codex_model "$CODEX_MODEL" \
   --arg quota_preflight_on_unknown "$QUOTA_PREFLIGHT_ON_UNKNOWN" \
   --argjson quota_exhausted_threshold_percent "$QUOTA_EXHAUSTED_THRESHOLD_PERCENT" \
+  --argjson codex_activate_only_when_idle "$codex_activate_only_when_idle" \
   --arg keep_awake_mode "$KEEP_AWAKE_MODE" \
   --argjson keep_awake_seconds "$KEEP_AWAKE_SECONDS" \
   --arg launchctl_state "$launchctl_state" \
@@ -323,7 +342,8 @@ enable_quota_preflight="$(bool_from_1 "$ENABLE_QUOTA_PREFLIGHT")"
         enable_status_snapshots: $enable_status_snapshots,
         enable_quota_preflight: $enable_quota_preflight,
         quota_preflight_on_unknown: $quota_preflight_on_unknown,
-        quota_exhausted_threshold_percent: $quota_exhausted_threshold_percent
+        quota_exhausted_threshold_percent: $quota_exhausted_threshold_percent,
+        codex_activate_only_when_idle: $codex_activate_only_when_idle
       },
       keep_awake: {
         mode: $keep_awake_mode,

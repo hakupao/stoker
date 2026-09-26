@@ -72,6 +72,8 @@ run_native env || { echo "expected native codex snapshot to succeed" >&2; exit 1
 row="$(grep '"tool":"codex"' "$STATUS" | tail -1)"
 jq -e '
     .ok == true
+    and (.captured_at_epoch | type) == "number"
+    and (now - .captured_at_epoch) < 60
     and .plan_type == "pro"
     and .five_hour.used_percent == 42
     and .five_hour.remaining_percent == 58

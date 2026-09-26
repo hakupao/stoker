@@ -51,6 +51,8 @@ run_appserver '{"id":2,"result":{"rateLimitsByLimitId":{"codex":{"planType":"pro
 row="$(grep '"tool":"codex"' "$STATUS" | tail -1)"
 jq -e '
     .ok == true
+    and (.captured_at_epoch | type) == "number"
+    and (now - .captured_at_epoch) < 60
     and .plan_type == "pro"
     and .five_hour.used_percent == 40
     and .five_hour.window_minutes == 300

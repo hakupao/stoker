@@ -19,8 +19,8 @@ shells out to the same scripts. The app contains no scheduler or activation logi
 # Validate / test — THE canonical gate. CONTRIBUTING.md mandates it pre-PR; CI runs it verbatim.
 ./scripts/validate.sh
 
-# Run a single test (all 5 are standalone executables; self-locate ROOT_DIR, run from anywhere)
-tests/swift-core.test.sh          # swiftc-compiles StokerCore + a driver, asserts via precondition()
+# Run a single test (all 12 are standalone executables; self-locate ROOT_DIR, run from anywhere; examples:)
+tests/swift-core.test.sh          # swiftc-compiles StokerCore (+L10n/LogStore) + a driver, asserts via precondition()
 tests/activation-state.test.sh    # bin/activation-state.sh --json output (needs jq)
 tests/keep-awake-config.test.sh   # rejects invalid KEEP_AWAKE_MODE / KEEP_AWAKE_SECONDS
 tests/release-packaging.test.sh   # package-release.sh --check
@@ -45,7 +45,7 @@ bin/activate-ai-window.sh --once --tool claude   # single real run, one tool (--
 
 There is **no Makefile / npm / `swift test`**. `scripts/validate.sh` *is* the test runner: it
 runs `bash -n` + `shellcheck` on 7 scripts, `plutil -lint`s the plist, runs `dry-run` + `app-status`
-smoke checks, runs the 5 `tests/*.test.sh` in order, then `swift build`s the app. `shellcheck`,
+smoke checks, runs the 12 `tests/*.test.sh` in order, then `swift build`s the app. `shellcheck`,
 `plutil`, and `swift` are skipped if absent; `jq`, `swiftc`, and `file` are **not** guarded and will
 hard-fail their test if missing.
 
@@ -85,7 +85,11 @@ post-run quota snapshot → release lock. Per-tool calls use `run_with_timeout()
 `logs/usage.jsonl` with `skipped:true`. When quota can't be determined, it falls back to
 `QUOTA_PREFLIGHT_ON_UNKNOWN` (default `allow`; only the literal `skip` skips). An exhausted
 window whose `resets_at` is already in the past does **not** count as exhausted (snapshots can be
-last-known data). Note the quota *sources* (`CLAUDE_STATUS_SOURCE`): `cache` (default) reads the
+last-known data). Claude `scoped_weekly` buckets count toward exhaustion only when
+`is_active == true`. Codex on a weekly-only account (`five_hour == null`) is also skipped with
+reason `window_already_active` while the 7-day window is anchored (reset in the future and >15 min
+short of a full window, measured from the row's `captured_at_epoch`) unless
+`CODEX_ACTIVATE_ONLY_WHEN_IDLE=0`. Note the quota *sources* (`CLAUDE_STATUS_SOURCE`): `cache` (default) reads the
 **oh-my-claudecode plugin's local usage cache** directly — zero credential access; `native` reads
 the Keychain OAuth token **read-only** and queries the usage API, skipping whenever the token is
 expired (it never refreshes — that refresh-and-drop is what logs interactive sessions out);

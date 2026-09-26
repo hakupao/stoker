@@ -1502,7 +1502,7 @@ struct AdvancedSection: View {
                     HStack {
                         Text(L10n.codexModel)
                         Spacer()
-                        TextField("gpt-5.4-mini", text: $model.settings.codexModel)
+                        TextField("gpt-5.6-luna", text: $model.settings.codexModel)
                             .multilineTextAlignment(.trailing)
                             .frame(maxWidth: 160)
                             .textFieldStyle(.roundedBorder)

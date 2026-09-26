@@ -19,7 +19,7 @@ let updated = EnvFile.updating(
     values: [
         "SCHEDULE_TIMES": "06:15,13:15,21:15",
         "KEEP_AWAKE_MODE": "during",
-        "CODEX_MODEL": "gpt-5.4-mini"
+        "CODEX_MODEL": "gpt-5.6-luna"
     ]
 )
 
@@ -27,7 +27,7 @@ precondition(updated.contains("# keep comments"))
 precondition(updated.contains("LABEL=com.stoker.ai-window"))
 precondition(updated.contains("SCHEDULE_TIMES=\"06:15,13:15,21:15\""))
 precondition(updated.contains("KEEP_AWAKE_MODE=during"))
-precondition(updated.contains("CODEX_MODEL=gpt-5.4-mini"))
+precondition(updated.contains("CODEX_MODEL=gpt-5.6-luna"))
 
 // ToolRequirements: ACTIVATION_TOOL decides which CLIs the app treats as required.
 precondition(ToolRequirements.requiredCLIs(activationTool: "claude") == Set(["claude"]))
@@ -223,11 +223,64 @@ precondition(legacyQ.credits == nil)
 let bareQ = decodeQuota(#"{"ok":true,"five_hour":{"used_percent":5,"remaining_percent":95}}"#)
 precondition(bareQ.displayPlan == nil)
 precondition(bareQ.credits == nil)
+precondition(bareQ.scopedWeekly == nil)
+
+// Claude per-scope weekly buckets: decoded with ids/labels/percent/active flag; a
+// reset-passed bucket keeps its blanked percentages; inactive stays distinguishable
+// from "unknown" (nil).
+let scopedQ = decodeQuota(#"{"ok":true,"scoped_weekly":[{"id":"fable","label":"Fable","used_percent":61,"remaining_percent":39,"resets_at":"2026-09-28T08:00:00.315Z","is_active":false},{"id":"x","label":null,"used_percent":null,"remaining_percent":null,"resets_at":null,"is_active":true,"reset_passed":true},{"id":"y","label":"Y","used_percent":5,"remaining_percent":95,"resets_at":null,"is_active":null}]}"#)
+precondition(scopedQ.scopedWeekly?.count == 3)
+precondition(scopedQ.scopedWeekly?[0].id == "fable")
+precondition(scopedQ.scopedWeekly?[0].label == "Fable")
+precondition(scopedQ.scopedWeekly?[0].usedPercent == 61)
+precondition(scopedQ.scopedWeekly?[0].remainingPercent == 39)
+precondition(scopedQ.scopedWeekly?[0].resetsAt == "2026-09-28T08:00:00.315Z")
+precondition(scopedQ.scopedWeekly?[0].isActive == false)
+precondition(scopedQ.scopedWeekly?[1].label == "x", "label falls back to id")
+precondition(scopedQ.scopedWeekly?[1].remainingPercent == nil)
+precondition(scopedQ.scopedWeekly?[1].resetPassed == true)
+precondition(scopedQ.scopedWeekly?[2].isActive == nil)
+// Empty array stays empty (account without scoped limits).
+precondition(decodeQuota(#"{"ok":true,"scoped_weekly":[]}"#).scopedWeekly?.isEmpty == true)
+// Malformed value degrades to nil without failing the row.
+let badScopedQ = decodeQuota(#"{"ok":true,"plan_type":"max","scoped_weekly":"bogus"}"#)
+precondition(badScopedQ.scopedWeekly == nil)
+precondition(badScopedQ.planType == "max")
+// One malformed element is dropped on its own; the rest survive.
+let mixedScopedQ = decodeQuota(#"{"ok":true,"scoped_weekly":[{"id":"a","label":"A","used_percent":"oops"},42,{"id":"b","label":"B","used_percent":10,"remaining_percent":90}]}"#)
+precondition(mixedScopedQ.scopedWeekly?.count == 1)
+precondition(mixedScopedQ.scopedWeekly?.first?.id == "b")
+
+// Retired Codex model migration: a stale .env pin is replaced by the current default
+// (the next save persists it); custom and "default" values are kept.
+precondition(AppSettings(values: ["CODEX_MODEL": "gpt-5.4-mini"]).codexModel == "gpt-5.6-luna")
+precondition(AppSettings(values: [:]).codexModel == "gpt-5.6-luna")
+precondition(AppSettings(values: ["CODEX_MODEL": "default"]).codexModel == "default")
+precondition(AppSettings(values: ["CODEX_MODEL": "gpt-9-custom"]).codexModel == "gpt-9-custom")
+precondition(AppSettings(values: ["CODEX_MODEL": "gpt-5.4-mini"]).envValues["CODEX_MODEL"] == "gpt-5.6-luna")
+
+// Skip-reason labels: the Codex idle-window policy has its own label, distinct from
+// both "exhausted" and the "quota unknown" catch-all.
+let savedLanguage = UserDefaults.standard.string(forKey: "appLanguage")
+AppLanguage.current = .en
+precondition(L10n.skipReasonText("window_already_active") == "Weekly window already running")
+precondition(L10n.skipReasonText("quota_exhausted") == "Quota exhausted")
+precondition(L10n.skipReasonText("preflight_status_missing") == "Quota unknown")
+AppLanguage.current = .zh
+precondition(L10n.skipReasonText("window_already_active") == "周窗口已在计时")
+if let savedLanguage {
+    UserDefaults.standard.set(savedLanguage, forKey: "appLanguage")
+} else {
+    UserDefaults.standard.removeObject(forKey: "appLanguage")
+}
+
 SWIFT
 
 swiftc \
   "$ROOT_DIR/app/StokerMenuBar/Sources/StokerCore/StokerCore.swift" \
   "$ROOT_DIR/app/StokerMenuBar/Sources/StokerCore/FlameTicker.swift" \
+  "$ROOT_DIR/app/StokerMenuBar/Sources/StokerCore/L10n.swift" \
+  "$ROOT_DIR/app/StokerMenuBar/Sources/StokerCore/LogStore.swift" \
   "$TMP_DIR/main.swift" \
   -o "$TMP_DIR/swift-core-test"
 

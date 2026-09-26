@@ -111,6 +111,14 @@ private struct QuotaOverviewCard: View {
                             planType: model.state?.quota[tool]?.displayPlan,
                             credits: model.state?.quota[tool]?.credits
                         )
+                        // Claude per-scope weekly limits (e.g. a model-specific bucket) sit
+                        // under the Claude gauge, independent of the 5h/weekly picker.
+                        if tool == "claude", let buckets = model.state?.quota[tool]?.scopedWeekly {
+                            // Index ids: bucket ids aren't guaranteed unique.
+                            ForEach(Array(buckets.enumerated()), id: \.offset) { _, bucket in
+                                ScopedWeeklyRow(bucket: bucket, color: theme.seriesClaude)
+                            }
+                        }
                     }
                 }
 
@@ -237,6 +245,84 @@ private struct GaugeRow: View {
         }
         // Spell out remaining vs used on hover so the single bar's meaning is unambiguous.
         .help(L10n.quotaMiniHelp(remaining: window?.remainingPercent, used: window?.usedPercent))
+    }
+}
+
+// MARK: - Scoped Weekly Row
+
+/// A compact sub-row under the Claude gauge for one per-scope weekly bucket: label, remaining %,
+/// a thin bar, and the reset countdown. Aligned to the GaugeRow columns. An inactive bucket
+/// (doesn't gate runs) is dimmed and marked so its percentage isn't read as a blocker.
+private struct ScopedWeeklyRow: View {
+    let bucket: ActivationState.ScopedWeeklyBucket
+    let color: Color
+    @Environment(\.stokerTheme) private var theme
+
+    private var remaining: Double? { bucket.remainingPercent }
+    private var inactive: Bool { bucket.isActive == false }
+
+    /// The plugin cache stamps fractional seconds ("…T08:00:00.315Z"), which a bare
+    /// ISO8601DateFormatter rejects — try fractional first, then plain.
+    private var resetDate: Date? {
+        guard let iso = bucket.resetsAt else { return nil }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Color.clear.frame(width: 64, height: 1)
+
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(L10n.scopedWeeklyLabel(bucket.label))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(theme.textSecondary)
+                    .lineLimit(1)
+                if let pct = remaining {
+                    Text("\(Int(pct.rounded()))%")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(inactive ? theme.textMuted : DS.quotaColor(pct, theme: theme))
+                        .monospacedDigit()
+                } else {
+                    Text(L10n.quotaUnknownShort)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(theme.textMuted)
+                }
+            }
+            .frame(width: 110, alignment: .leading)
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(theme.fillSubtle)
+                    if let pct = remaining {
+                        Capsule()
+                            .fill(color.opacity(inactive ? 0.35 : 0.8))
+                            .frame(width: max(0, geo.size.width * CGFloat(min(100, max(0, pct)) / 100)))
+                    }
+                }
+            }
+            .frame(height: 4)
+
+            VStack(alignment: .trailing, spacing: 2) {
+                if let reset = resetDate, let s = L10n.resetsIn(reset, now: Date()) {
+                    Text(s)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(theme.textMuted)
+                        .lineLimit(1)
+                }
+                if inactive {
+                    Text(L10n.scopedInactive)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(theme.textMuted)
+                        .lineLimit(1)
+                }
+            }
+            .frame(width: 96, alignment: .trailing)
+        }
+        .help(inactive
+            ? L10n.scopedInactiveHelp
+            : L10n.quotaMiniHelp(remaining: bucket.remainingPercent, used: bucket.usedPercent))
     }
 }
 

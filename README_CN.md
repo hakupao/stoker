@@ -190,12 +190,13 @@ codex job skipped by quota preflight reason=quota_exhausted
 | `ACTIVATION_TOOL` | `all`、`claude` 或 `codex` | `all` |
 | `ACTIVATION_PROMPT` | 发送给 CLI 的低消耗 prompt | `Reply exactly READY...` |
 | `CLAUDE_CODE_OAUTH_TOKEN` | 由 `claude setup-token` 生成的长效 token，供无人值守认证（见下） | 未设置（用钥匙串登录） |
-| `CODEX_MODEL` | Codex 激活模型；设为 `default` 则交给 Codex CLI 自行选择 | `gpt-5.4-mini` |
+| `CODEX_MODEL` | Codex 激活模型；设为 `default` 则交给 Codex CLI 自行选择 | `gpt-5.6-luna` |
 | `TIMEOUT_SECONDS` | 每个工具的超时时间 | `120` |
 | `ENABLE_STATUS_SNAPSHOTS` | 真实触发后是否记录额度快照 | `1` |
 | `ENABLE_QUOTA_PREFLIGHT` | 发送 prompt 前是否先检查额度 | `1` |
 | `QUOTA_PREFLIGHT_ON_UNKNOWN` | 无法确认额度时 `allow` 继续或 `skip` 跳过 | `allow` |
 | `QUOTA_EXHAUSTED_THRESHOLD_PERCENT` | 剩余额度低于或等于该百分比时跳过 | `0` |
+| `CODEX_ACTIVATE_ONLY_WHEN_IDLE` | `1` 或 `0`。仅对只有 7 天周窗口的 Codex 账号（无 5 小时窗口）生效：为 `1` 时，周窗口已在计时则跳过 Codex 激活（原因 `window_already_active`），等窗口空闲后才发送；上报了 5 小时窗口时不生效。需 `ENABLE_QUOTA_PREFLIGHT=1` | `1` |
 | `CLAUDE_STATUS_SOURCE` | `cache` 直接读 oh-my-claudecode 插件的本地用量缓存（不触碰任何凭证）；`native` 用钥匙串 token 只读查询用量接口——无需 omc，token 过期即跳过、绝不刷新；`omc` 强制 `omc wait status` 实时查询，无头运行时可能轮换钥匙串登录凭证 | `cache` |
 | `CLAUDE_USAGE_CACHE_FILE` | 用量缓存路径覆盖（可选） | `~/.claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json` |
 | `CLAUDE_USAGE_USER_AGENT` | `native` 用量请求的 User-Agent；claude-code 形态的 UA 可避开该接口激进的 429 限流桶 | `claude-code/0.3.5` |
@@ -367,7 +368,10 @@ flowchart TB
 2. **获取锁** —— 创建 `run/activation.lock` 防止并发；如果已有运行中的触发，第二次触发会被
    优雅跳过。
 3. **额度预检**（可选） —— 在发送任何 prompt *之前*查询 Claude 和 Codex 的额度状态。如果某个
-   工具的额度已耗尽，该工具会被跳过，跳过记录写入 `logs/usage.jsonl`。
+   工具的额度已耗尽，该工具会被跳过，跳过记录写入 `logs/usage.jsonl`。Claude 的分项周额度
+   （`scoped_weekly`，如某个模型专属的限额）仅在账号当前确实受其限制（`is_active: true`）时计入。
+   对只有周窗口的 Codex 账号，若 7 天窗口已在计时，Codex 也会被跳过（`window_already_active`）——
+   见 `CODEX_ACTIVATE_ONLY_WHEN_IDLE`。
 4. **发送 prompt** —— 对每个启用的 CLI 发送一个极简 prompt（`Reply exactly READY`）。Claude
    使用超轻量模式（见[成本优化](#成本优化)）。Codex 使用配置的轻量模型，并带上 `--ephemeral`、
    `--skip-git-repo-check`、`--sandbox read-only` 以及精简后的配置（见下文）。
@@ -468,7 +472,7 @@ Runner 会把两个 CLI 的上下文压缩到激活所需的最低限度：
 | --- | --- |
 | `--ignore-user-config` | 跳过 `~/.codex/config.toml`——去除插件、MCP、developer instructions |
 | `--ignore-rules` | 跳过 `.rules` 文件 |
-| `--model "$CODEX_MODEL"` | 使用配置的轻量激活模型（默认 `gpt-5.4-mini`） |
+| `--model "$CODEX_MODEL"` | 使用配置的轻量激活模型（默认 `gpt-5.6-luna`） |
 | `-c 'features.memories=false'` | 禁用 memories |
 | `-c 'features.multi_agent=false'` | 禁用 multi-agent |
 | `-c 'features.goals=false'` | 禁用 goals |
@@ -476,9 +480,14 @@ Runner 会把两个 CLI 的上下文压缩到激活所需的最低限度：
 | `-c 'features.child_agents_md=false'` | 禁用 AGENTS.md 加载 |
 | `-c 'model_reasoning_effort="low"'` | 最低推理力度 |
 
-效果：**~22K input tokens**（优化前 ~32K）。Codex 内部系统 prompt（~22K）仍然是 token 底线，
-但 `gpt-5.4-mini` 会让日常激活走更轻的 local-message 额度。若想使用 Codex CLI 默认模型，可设置
-`CODEX_MODEL=default`。
+效果：**~22K input tokens**（优化前 ~32K）。Codex 内部系统 prompt（~22K）仍然是 token 底线。
+默认模型为 `gpt-5.6-luna`：原默认的 `gpt-5.4-mini` 已于 2026 年 9 月对 ChatGPT 账号登录停用
+（每次都返回 HTTP 400 "not supported when using Codex with a ChatGPT account"）。若想使用 Codex CLI
+默认模型，可设置 `CODEX_MODEL=default`。
+
+> **从 ≤ 0.3.5 升级：** 你的 `.env` 很可能仍写着 `CODEX_MODEL=gpt-5.4-mini`。引擎现在会记录 WARNING
+> 并改用 `gpt-5.6-luna`；菜单栏 App 加载时也会自动迁移该值（点一次“保存”即写回）。只用 CLI 的话，
+> 请手动修改 `.env` 里的 `CODEX_MODEL`。
 
 ### 月成本估算（每天 4 次激活）
 

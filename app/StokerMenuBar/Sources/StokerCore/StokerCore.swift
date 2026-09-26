@@ -274,6 +274,9 @@ public struct ActivationState: Decodable {
         public var fiveHour: QuotaWindow?
         public var weekly: QuotaWindow?
         public var sonnetWeekly: QuotaWindow?
+        /// Per-scope weekly limits (Claude only, e.g. a model-specific bucket). nil when the
+        /// row predates the field or carries a malformed value; empty when the account has none.
+        public var scopedWeekly: [ScopedWeeklyBucket]?
         /// Codex plan tier (free/plus/pro/team). Claude carries its tier in `subscriptionType`.
         public var planType: String?
         /// Claude subscription tier (pro/max). Codex carries its tier in `planType`.
@@ -290,6 +293,7 @@ public struct ActivationState: Decodable {
             case fiveHour = "five_hour"
             case weekly
             case sonnetWeekly = "sonnet_weekly"
+            case scopedWeekly = "scoped_weekly"
             case planType = "plan_type"
             case subscriptionType = "subscription_type"
             case credits
@@ -302,6 +306,10 @@ public struct ActivationState: Decodable {
             fiveHour = try c.decodeIfPresent(QuotaWindow.self, forKey: .fiveHour)
             weekly = try c.decodeIfPresent(QuotaWindow.self, forKey: .weekly)
             sonnetWeekly = try c.decodeIfPresent(QuotaWindow.self, forKey: .sonnetWeekly)
+            // Defensive like `credits`: a surprise shape must not fail the whole decode, and
+            // one malformed bucket is dropped on its own instead of losing the whole array.
+            scopedWeekly = ((try? c.decodeIfPresent([LossyScopedBucket].self, forKey: .scopedWeekly)) ?? nil)
+                .map { $0.compactMap(\.value) }
             planType = try c.decodeIfPresent(String.self, forKey: .planType)
             subscriptionType = try c.decodeIfPresent(String.self, forKey: .subscriptionType)
             // Defensive: a surprise `credits` shape (e.g. a bare string carried by an
@@ -342,6 +350,49 @@ public struct ActivationState: Decodable {
             case remainingPercent = "remaining_percent"
             case usedPercent = "used_percent"
             case resetsAt = "resets_at"
+        }
+    }
+
+    /// One per-scope weekly limit. Only an `isActive == true` bucket gates the engine's quota
+    /// preflight; `isActive == nil` means the source doesn't say (native usage API).
+    public struct ScopedWeeklyBucket: Decodable, Identifiable {
+        public var id: String
+        public var label: String
+        public var usedPercent: Double?
+        public var remainingPercent: Double?
+        public var resetsAt: String?
+        public var isActive: Bool?
+        /// Set by activation-state.sh when `resetsAt` already passed (percentages blanked).
+        public var resetPassed: Bool?
+
+        private enum CodingKeys: String, CodingKey {
+            case id, label
+            case usedPercent = "used_percent"
+            case remainingPercent = "remaining_percent"
+            case resetsAt = "resets_at"
+            case isActive = "is_active"
+            case resetPassed = "reset_passed"
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            let rawId = try c.decodeIfPresent(String.self, forKey: .id)
+            let rawLabel = try c.decodeIfPresent(String.self, forKey: .label)
+            id = rawId ?? rawLabel ?? "unknown"
+            label = rawLabel ?? rawId ?? "unknown"
+            usedPercent = try c.decodeIfPresent(Double.self, forKey: .usedPercent)
+            remainingPercent = try c.decodeIfPresent(Double.self, forKey: .remainingPercent)
+            resetsAt = try c.decodeIfPresent(String.self, forKey: .resetsAt)
+            isActive = try c.decodeIfPresent(Bool.self, forKey: .isActive)
+            resetPassed = try c.decodeIfPresent(Bool.self, forKey: .resetPassed)
+        }
+    }
+
+    /// Decodes one array element, yielding nil instead of throwing for a malformed bucket.
+    private struct LossyScopedBucket: Decodable {
+        let value: ScopedWeeklyBucket?
+        init(from decoder: Decoder) throws {
+            value = try? ScopedWeeklyBucket(from: decoder)
         }
     }
 
@@ -398,12 +449,23 @@ public struct AppSettings {
         let timesStr = values["SCHEDULE_TIMES"] ?? "07:00,12:00,17:00,22:00"
         scheduleTimes = ScheduleFormatter.times(from: timesStr)
         activationTool = values["ACTIVATION_TOOL"] ?? "all"
-        codexModel = values["CODEX_MODEL"] ?? "gpt-5.4-mini"
+        codexModel = AppSettings.migratedCodexModel(values["CODEX_MODEL"])
         enableStatusSnapshots = values["ENABLE_STATUS_SNAPSHOTS"] != "0"
         enableQuotaPreflight = values["ENABLE_QUOTA_PREFLIGHT"] != "0"
         quotaPreflightOnUnknown = values["QUOTA_PREFLIGHT_ON_UNKNOWN"] ?? "allow"
         keepAwakeMode = values["KEEP_AWAKE_MODE"] ?? "off"
         keepAwakeSeconds = values["KEEP_AWAKE_SECONDS"] ?? "900"
+    }
+
+    /// Current default Codex activation model (mirrors the engine's CODEX_DEFAULT_MODEL).
+    public static let defaultCodexModel = "gpt-5.6-luna"
+    /// Models retired for ChatGPT-account sign-ins (mirrors the engine's CODEX_RETIRED_MODELS).
+    public static let retiredCodexModels: Set<String> = ["gpt-5.4-mini"]
+
+    /// Missing or retired → the current default, so the next save rewrites a stale .env pin.
+    public static func migratedCodexModel(_ raw: String?) -> String {
+        guard let raw, !retiredCodexModels.contains(raw) else { return defaultCodexModel }
+        return raw
     }
 
     public var envValues: [String: String] {

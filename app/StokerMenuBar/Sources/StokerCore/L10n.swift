@@ -378,6 +378,20 @@ public enum L10n {
     public static var remaining: String {
         AppLanguage.current == .zh ? "剩余" : "Remaining"
     }
+    /// Suffix for a per-scope weekly bucket row (e.g. "Fable · 周").
+    public static func scopedWeeklyLabel(_ label: String) -> String {
+        AppLanguage.current == .zh ? "\(label) · 周" : "\(label) · weekly"
+    }
+    /// Marker for a scoped bucket the account isn't currently limited by (doesn't gate runs).
+    public static var scopedInactive: String {
+        AppLanguage.current == .zh ? "未生效" : "inactive"
+    }
+    /// Tooltip explaining what an inactive scoped bucket means.
+    public static var scopedInactiveHelp: String {
+        AppLanguage.current == .zh
+            ? "该分项周额度当前未生效，不影响定时激活"
+            : "This scoped weekly limit isn't active right now and doesn't block scheduled runs"
+    }
     /// Leading label for a tool's credit/overage balance on its gauge row.
     public static var creditsLabel: String {
         AppLanguage.current == .zh ? "额度" : "Credits"
@@ -478,14 +492,16 @@ public enum L10n {
         AppLanguage.current == .zh ? "回复" : "Reply"
     }
     /// Human-readable label for a usage row's machine `skip_reason`. The quota preflight only
-    /// emits a small known set; anything that isn't an outright "exhausted" verdict means the
-    /// preflight couldn't read quota, so it collapses to "quota unknown" rather than leaking a
+    /// emits a small known set; anything that isn't an outright "exhausted" verdict (or the Codex
+    /// idle-window policy's "already running") means the preflight couldn't read quota, so it collapses to "quota unknown" rather than leaking a
     /// raw token like `preflight_status_missing` into the UI.
     public static func skipReasonText(_ raw: String?) -> String {
         guard let raw, !raw.isEmpty else { return "" }
         switch raw {
         case "quota_exhausted":
             return AppLanguage.current == .zh ? "配额耗尽" : "Quota exhausted"
+        case "window_already_active":
+            return AppLanguage.current == .zh ? "周窗口已在计时" : "Weekly window already running"
         default:
             return AppLanguage.current == .zh ? "额度未知" : "Quota unknown"
         }

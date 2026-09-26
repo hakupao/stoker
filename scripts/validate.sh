@@ -29,11 +29,13 @@ fi
 ./install.sh app-status >/tmp/stoker-app-status.json
 tests/activation-state.test.sh
 tests/keep-awake-config.test.sh
+tests/caffeinate-reexec.test.sh
 tests/claude-oauth-token.test.sh
 tests/claude-status-cache.test.sh
 tests/codex-probe-command.test.sh
 tests/codex-native-source.test.sh
 tests/codex-appserver-source.test.sh
+tests/codex-idle-window.test.sh
 tests/swift-core.test.sh
 tests/release-packaging.test.sh
 tests/app-bundle-assets.test.sh

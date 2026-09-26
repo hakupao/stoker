@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- **Default Codex model is now `gpt-5.6-luna`.** `gpt-5.4-mini` was retired for ChatGPT-account
+  sign-ins in September 2026 — every scheduled Codex run returned HTTP 400 "not supported when
+  using Codex with a ChatGPT account". `CODEX_MODEL=default` still defers to the Codex CLI.
+  **Upgrade note:** existing installs usually have `CODEX_MODEL=gpt-5.4-mini` pinned in `.env`
+  (the old `.env.example` and every app save wrote it). The engine now logs a WARNING and uses
+  `gpt-5.6-luna` for any retired model, and the menu bar app migrates the setting on load, so the
+  next Save rewrites `.env`; CLI-only users should edit `CODEX_MODEL` in `.env` themselves.
+
+### Added
+- **Codex idle-window policy (`CODEX_ACTIVATE_ONLY_WHEN_IDLE`, default `1`).** Codex accounts
+  that now report only a 7-day window (no 5-hour window) no longer burn a prompt while that
+  window is already running: the quota preflight skips Codex with the new reason
+  `window_already_active` (not `quota_exhausted`) until the window is idle again. A window counts
+  as running when its reset is in the future and more than 15 minutes short of a full window,
+  measured from the snapshot's capture time (Codex status rows now carry `captured_at_epoch`;
+  an idle window reports capture time + window length). Accounts that still report a 5-hour window are
+  unaffected; `0` restores the old always-send behavior. The app labels the skip "Weekly window
+  already running" / "周窗口已在计时".
+- **Claude per-scope weekly buckets (`scoped_weekly`).** Status rows and `app-status` now carry
+  the plugin cache's `scopedWeeklyBuckets` (and, for `CLAUDE_STATUS_SOURCE=native`, every
+  non-null `seven_day_<scope>` limit the usage API reports other than `seven_day_sonnet`) as
+  `[{id, label, used_percent, remaining_percent, resets_at, is_active}]`, with passed resets
+  blanked like the other windows. The preflight counts a bucket toward exhaustion only when
+  `is_active` is `true` (reason `scoped_weekly:<id>_…`). The Activity tab shows each bucket as a
+  sub-row under the Claude gauge, dimmed and marked "inactive" when it doesn't gate runs.
+  `sonnet_weekly` is kept for back-compat.
+
+### Fixed
+- **`--tool` (and every other flag) now survives the keep-awake re-exec.** With
+  `KEEP_AWAKE_MODE` on, the engine re-execs itself under `caffeinate`, but the argument parser had
+  already shifted `"$@"` away — so `--once --tool codex` silently became a run of `.env`'s
+  `ACTIVATION_TOOL`. The original argv is now captured before parsing and forwarded. Covered by
+  the new `tests/caffeinate-reexec.test.sh`.
+
 ## 0.3.5 - 2026-07-21
 
 ### Fixed

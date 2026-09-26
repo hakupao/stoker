@@ -203,7 +203,7 @@ Copy `.env.example` to `.env` and adjust values:
 | `ACTIVATION_TOOL` | `all`, `claude`, or `codex` | `all` |
 | `ACTIVATION_PROMPT` | Low-cost prompt sent to Claude | `Reply exactly READY...` |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Long-lived token from `claude setup-token` for unattended auth (see below) | unset (uses Keychain login) |
-| `CODEX_MODEL` | Codex activation model; set `default` to let Codex CLI choose | `gpt-5.4-mini` |
+| `CODEX_MODEL` | Codex activation model; set `default` to let Codex CLI choose | `gpt-5.6-luna` |
 | `CODEX_WORK_DIR` | Tiny working directory used by Codex probe runs | `${ROOT_DIR}/codex-probe` |
 | `CODEX_ACTIVATION_PROMPT` | Read-only Codex probe prompt | `Read only ./probe.py...` |
 | `TIMEOUT_SECONDS` | Per-tool timeout | `120` |
@@ -211,6 +211,7 @@ Copy `.env.example` to `.env` and adjust values:
 | `ENABLE_QUOTA_PREFLIGHT` | Check quota before sending prompts | `1` |
 | `QUOTA_PREFLIGHT_ON_UNKNOWN` | `allow` or `skip` when quota cannot be checked | `allow` |
 | `QUOTA_EXHAUSTED_THRESHOLD_PERCENT` | Skip when remaining quota is at or below this percent | `0` |
+| `CODEX_ACTIVATE_ONLY_WHEN_IDLE` | `1` or `0`. On weekly-only Codex accounts (no 5-hour window), `1` skips the Codex prompt with reason `window_already_active` while the 7-day window is already running, and sends it only once the window is idle again; no effect when a 5-hour window is reported. Needs `ENABLE_QUOTA_PREFLIGHT=1` | `1` |
 | `CLAUDE_STATUS_SOURCE` | `cache` reads the oh-my-claudecode plugin's local usage cache (no credentials touched); `native` queries the usage API read-only with the Keychain token — no omc needed, skips when the token is expired, never refreshes; `omc` forces a live `omc wait status` query, which can rotate the shared Keychain OAuth login in headless runs | `cache` |
 | `CLAUDE_USAGE_CACHE_FILE` | Optional usage-cache path override | `~/.claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json` |
 | `CLAUDE_USAGE_USER_AGENT` | User-Agent for the `native` usage request; a claude-code-shaped UA avoids the endpoint's aggressive 429 bucket | `claude-code/0.3.5` |
@@ -397,7 +398,10 @@ script executes this sequence:
    trigger during an active run is skipped gracefully.
 3. **Quota preflight** (optional) — queries Claude and Codex quota status *before* sending any
    prompt. If a tool's quota is exhausted, that tool is skipped and the skip is recorded in
-   `logs/usage.jsonl`.
+   `logs/usage.jsonl`. Claude per-scope weekly buckets (`scoped_weekly`, e.g. a model-specific
+   limit) count only while the account is actively limited by them (`is_active: true`). On a
+   weekly-only Codex account, Codex is also skipped (`window_already_active`) while its 7-day
+   window is already running — see `CODEX_ACTIVATE_ONLY_WHEN_IDLE`.
 4. **Send prompt** — calls each enabled CLI with a minimal prompt. Claude replies `READY`;
    Codex runs a tiny read-only probe from `codex-probe/`. Codex uses the configured lightweight
    model with `--ephemeral`, `--skip-git-repo-check`, `--sandbox read-only`, and stripped-down
@@ -507,7 +511,7 @@ optimization).
 | `--ignore-user-config` | Skip `~/.codex/config.toml` — removes plugins, MCP servers, developer instructions |
 | `--ignore-rules` | Skip `.rules` files |
 | `--cd "$CODEX_WORK_DIR"` | Keep Codex scoped to the tiny probe folder |
-| `--model "$CODEX_MODEL"` | Use the configured lightweight activation model (`gpt-5.4-mini` by default) |
+| `--model "$CODEX_MODEL"` | Use the configured lightweight activation model (`gpt-5.6-luna` by default) |
 | `-c 'features.memories=false'` | Disable memories |
 | `-c 'features.multi_agent=false'` | Disable multi-agent |
 | `-c 'features.goals=false'` | Disable goals |
@@ -516,8 +520,14 @@ optimization).
 | `-c 'model_reasoning_effort="low"'` | Minimal reasoning effort |
 
 Result: **~22K input tokens** (vs ~32K without optimization). Codex's internal system prompt
-(~22K) is still the token floor, but `gpt-5.4-mini` spends the lighter local-message allowance
-for routine activation turns. Set `CODEX_MODEL=default` if you prefer the Codex CLI default.
+(~22K) is still the token floor. The default model is `gpt-5.6-luna`: the previous default,
+`gpt-5.4-mini`, was retired for ChatGPT-account sign-ins in September 2026 (every run returned
+HTTP 400 "not supported when using Codex with a ChatGPT account"). Set `CODEX_MODEL=default` if
+you prefer the Codex CLI default.
+
+> **Upgrading from ≤ 0.3.5:** your `.env` most likely still pins `CODEX_MODEL=gpt-5.4-mini`. The
+> engine now warns and uses `gpt-5.6-luna` instead, and the menu bar app migrates the value on
+> load (click Save to persist it). If you only use the CLI, change `CODEX_MODEL` in `.env`.
 
 ### Monthly cost estimate (4 activations/day)
 

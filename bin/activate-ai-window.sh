@@ -39,7 +39,11 @@ fi
 NODE_BIN="${NODE_BIN:-$(command -v node 2>/dev/null || true)}"
 OMC_BIN="${OMC_BIN:-$(command -v omc 2>/dev/null || true)}"
 ACTIVATION_PROMPT="${ACTIVATION_PROMPT:-Reply exactly READY. Do not inspect files, run tools, or modify anything.}"
-CODEX_MODEL="${CODEX_MODEL:-gpt-5.4-mini}"
+# Codex models the CLI no longer accepts for ChatGPT-account sign-ins (HTTP 400).
+# A pinned retired model falls back to CODEX_DEFAULT_MODEL at run time (see below).
+CODEX_DEFAULT_MODEL="gpt-5.6-luna"
+CODEX_RETIRED_MODELS="gpt-5.4-mini"
+CODEX_MODEL="${CODEX_MODEL:-$CODEX_DEFAULT_MODEL}"
 CODEX_WORK_DIR="${CODEX_WORK_DIR:-${ROOT_DIR}/codex-probe}"
 CODEX_ACTIVATION_PROMPT="${CODEX_ACTIVATION_PROMPT:-Read only ./probe.py. Do not inspect any other path. Do not modify files. In two short bullets, explain what activation_probe_score returns for SAMPLE_EVENTS, then end with READY.}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-120}"
@@ -48,6 +52,9 @@ ENABLE_STATUS_SNAPSHOTS="${ENABLE_STATUS_SNAPSHOTS:-1}"
 ENABLE_QUOTA_PREFLIGHT="${ENABLE_QUOTA_PREFLIGHT:-1}"
 QUOTA_PREFLIGHT_ON_UNKNOWN="${QUOTA_PREFLIGHT_ON_UNKNOWN:-allow}"
 QUOTA_EXHAUSTED_THRESHOLD_PERCENT="${QUOTA_EXHAUSTED_THRESHOLD_PERCENT:-0}"
+# Weekly-only Codex accounts (no 5-hour window): skip the prompt while the 7-day
+# window is already anchored/running — another prompt can't start a new one.
+CODEX_ACTIVATE_ONLY_WHEN_IDLE="${CODEX_ACTIVATE_ONLY_WHEN_IDLE:-1}"
 CLAUDE_STATUS_SOURCE="${CLAUDE_STATUS_SOURCE:-cache}"
 CLAUDE_USAGE_CACHE_FILE="${CLAUDE_USAGE_CACHE_FILE:-${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/plugins/oh-my-claudecode/.usage-cache-anthropic.json}"
 SECURITY_BIN="${SECURITY_BIN:-/usr/bin/security}"
@@ -84,6 +91,10 @@ fi
 
 MODE="once"
 TOOL="$ACTIVATION_TOOL"
+# The parse loop below shifts "$@" away, so keep the original argv for the
+# caffeinate re-exec — otherwise the re-exec'd run silently falls back to .env
+# defaults (e.g. `--tool codex` becomes ACTIVATION_TOOL).
+ORIGINAL_ARGS=("$@")
 
 usage() {
   cat <<'USAGE'
@@ -97,7 +108,7 @@ Environment overrides:
   CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...   # long-lived headless auth (claude setup-token)
   CODEX_BIN=/path/to/codex
   ACTIVATION_PROMPT='Reply exactly READY...'
-  CODEX_MODEL=gpt-5.4-mini
+  CODEX_MODEL=gpt-5.6-luna
   CODEX_WORK_DIR=/path/to/probe-dir
   CODEX_ACTIVATION_PROMPT='Read only ./probe.py...'
   TIMEOUT_SECONDS=120
@@ -106,6 +117,7 @@ Environment overrides:
   ENABLE_QUOTA_PREFLIGHT=1
   QUOTA_PREFLIGHT_ON_UNKNOWN=allow
   QUOTA_EXHAUSTED_THRESHOLD_PERCENT=0
+  CODEX_ACTIVATE_ONLY_WHEN_IDLE=1  # weekly-only Codex: skip while the 7-day window is already running
   CLAUDE_STATUS_SOURCE=cache       # cache (plugin cache) | native (read-only Keychain+API) | omc (legacy live query)
   CLAUDE_USAGE_CACHE_FILE=/path/to/.usage-cache-anthropic.json
   KEEP_AWAKE_MODE=off
@@ -170,6 +182,14 @@ case "$QUOTA_PREFLIGHT_ON_UNKNOWN" in
     ;;
 esac
 
+case "$CODEX_ACTIVATE_ONLY_WHEN_IDLE" in
+  0|1) ;;
+  *)
+    echo "CODEX_ACTIVATE_ONLY_WHEN_IDLE must be 0 or 1" >&2
+    exit 2
+    ;;
+esac
+
 case "$CLAUDE_STATUS_SOURCE" in
   cache|native|omc) ;;
   *)
@@ -213,6 +233,16 @@ log() {
   printf '[%s] %s\n' "$(timestamp)" "$*" | tee -a "${LOG_DIR}/activation.log"
 }
 
+# Older installs pinned CODEX_MODEL to a since-retired model in .env; every run
+# would 400. Swap it for the current default (dry-run shows the swapped model).
+for _retired_model in $CODEX_RETIRED_MODELS; do
+  if [[ "$CODEX_MODEL" == "$_retired_model" ]]; then
+    log "WARNING: CODEX_MODEL=${_retired_model} is retired for ChatGPT accounts; using ${CODEX_DEFAULT_MODEL} for this run. Update CODEX_MODEL in ${ENV_FILE}."
+    CODEX_MODEL="$CODEX_DEFAULT_MODEL"
+  fi
+done
+unset _retired_model
+
 require_bin() {
   local name="$1"
   local path="$2"
@@ -235,7 +265,8 @@ maybe_reexec_with_caffeinate() {
   fi
 
   log "Keep-awake enabled mode=${KEEP_AWAKE_MODE} seconds=${KEEP_AWAKE_SECONDS}"
-  STOKER_CAFFEINATED=1 exec "$caffeinate_bin" -i -t "$KEEP_AWAKE_SECONDS" "$BASH" "$0" "$@"
+  # ${arr[@]+...} keeps an empty argv safe under `set -u` on macOS bash 3.2.
+  STOKER_CAFFEINATED=1 exec "$caffeinate_bin" -i -t "$KEEP_AWAKE_SECONDS" "$BASH" "$0" ${ORIGINAL_ARGS[@]+"${ORIGINAL_ARGS[@]}"}
 }
 
 run_with_timeout() {
@@ -438,7 +469,27 @@ fetch_claude_usage_native() {
         weeklyPercent: (.seven_day.utilization // null),
         weeklyResetsAt: (.seven_day.resets_at // null),
         sonnetWeeklyPercent: (.seven_day_sonnet.utilization // null),
-        sonnetWeeklyResetsAt: (.seven_day_sonnet.resets_at // null)
+        sonnetWeeklyResetsAt: (.seven_day_sonnet.resets_at // null),
+        # Every other per-scope weekly limit (seven_day_<scope> with a utilization;
+        # seven_day_sonnet already maps to sonnet_weekly above),
+        # collected generically in the plugin-cache shape — scope names are not
+        # guessed. The API carries no active flag, so isActive stays null.
+        scopedWeeklyBuckets: (
+          to_entries
+          | map(select(
+              (.key | startswith("seven_day_"))
+              and .key != "seven_day_sonnet"
+              and (.value | type) == "object"
+              and .value.utilization != null
+            ))
+          | map((.key | ltrimstr("seven_day_")) as $scope | {
+              id: $scope,
+              label: $scope,
+              percent: .value.utilization,
+              resetsAt: (.value.resets_at // null),
+              isActive: null
+            })
+        )
       },
       subscriptionType: (if $subscription_type == "" then null else $subscription_type end),
       credits: (if (.extra_usage.is_enabled // false) then {
@@ -541,6 +592,23 @@ record_claude_status() {
             remaining_percent: (if $d.sonnetWeeklyPercent == null then null else (100 - $d.sonnetWeeklyPercent) end),
             resets_at: ($d.sonnetWeeklyResetsAt // null)
           },
+          # Per-scope weekly limits (e.g. a model-specific bucket). Only an
+          # is_active == true bucket counts toward the quota preflight.
+          scoped_weekly: (
+            if ($d.scopedWeeklyBuckets | type) == "array" then
+              $d.scopedWeeklyBuckets
+              | map(select(type == "object")
+                  | (if (.percent | type) == "number" then .percent else null end) as $pct
+                  | {
+                      id: ((.id // .label // "unknown") | tostring),
+                      label: ((.label // .id // "unknown") | tostring),
+                      used_percent: $pct,
+                      remaining_percent: (if $pct == null then null else (100 - $pct) end),
+                      resets_at: (.resetsAt // null),
+                      is_active: (if (.isActive | type) == "boolean" then .isActive else null end)
+                    })
+            else [] end
+          ),
           raw_log: $raw_log
         }
     ' >>"$STATUS_LOG" 2>/dev/null || {
@@ -665,6 +733,7 @@ record_codex_status() {
             run_id: $run_id,
             tool: $tool,
             ok: true,
+            captured_at_epoch: (now | floor),
             plan_type: ($r.plan_type // null),
             limit_id: null,
             limit_name: null,
@@ -816,6 +885,7 @@ NODE
           run_id: $run_id,
           tool: $tool,
           ok: ($record != null),
+          captured_at_epoch: (now | floor),
           plan_type: ($snapshot.planType // null),
           limit_id: ($snapshot.limitId // null),
           limit_name: ($snapshot.limitName // null),
@@ -887,6 +957,7 @@ quota_preflight_decision() {
     --arg tool "$tool" \
     --arg run_id "$RUN_ID" \
     --arg on_unknown "$QUOTA_PREFLIGHT_ON_UNKNOWN" \
+    --arg only_when_idle "$CODEX_ACTIVATE_ONLY_WHEN_IDLE" \
     --argjson threshold "$QUOTA_EXHAUSTED_THRESHOLD_PERCENT" '
       def unknown($reason):
         {
@@ -927,6 +998,23 @@ quota_preflight_decision() {
               empty
             end
         end;
+      # Weekly-only Codex account (five_hour == null): the 7-day window is
+      # "anchored" once its reset is fixed in the future. An idle (not yet
+      # started) window reports resets_at_epoch == query time + window length,
+      # drifting with each query, so anything more than 15 minutes short of a
+      # full window means a run already started it and another prompt only
+      # spends quota without moving the reset. Measured from the snapshot
+      # capture time (not the decision time, which follows the Claude run) so a
+      # slow run or clock skew cannot make an idle window look anchored.
+      def window_already_active($s):
+        ($s.weekly // null) as $w
+        | if $s.five_hour != null or $w == null then false
+          else
+            (n($w.resets_at_epoch // null)) as $e
+            | ((n($w.window_minutes // null)) // 10080) as $mins
+            | ((n($s.captured_at_epoch // null)) // now) as $captured
+            | ($e != null and $e > now and ($e - $captured) < ($mins * 60 - 900))
+          end;
 
       (map(select(.tool == $tool and .run_id == $run_id)) | last // null) as $s
       | if $s == null then
@@ -943,6 +1031,15 @@ quota_preflight_decision() {
               exhausted("weekly"; $weekly),
               (if $tool == "claude" then exhausted("sonnet_weekly"; $sonnet_weekly) else empty end),
               (
+                if $tool == "claude" and (($s.scoped_weekly // []) | type) == "array" then
+                  ($s.scoped_weekly // [])[]
+                  | select(type == "object" and .is_active == true)
+                  | exhausted("scoped_weekly:" + ((.id // "unknown") | tostring); .)
+                else
+                  empty
+                end
+              ),
+              (
                 if $tool == "codex" and $rate_limit_reached_type != "" and $rate_limit_reached_type != "null" then
                   "rate_limit_reached:" + $rate_limit_reached_type
                 else
@@ -950,16 +1047,25 @@ quota_preflight_decision() {
                 end
               )
             ] as $reasons
+          | (($reasons | length) == 0
+              and $tool == "codex"
+              and $only_when_idle == "1"
+              and window_already_active($s)) as $active
           | {
               tool: $tool,
-              action: (if ($reasons | length) > 0 then "skip" else "allow" end),
-              reason: (if ($reasons | length) > 0 then "quota_exhausted" else "quota_available" end),
+              action: (if ($reasons | length) > 0 or $active then "skip" else "allow" end),
+              reason: (
+                if ($reasons | length) > 0 then "quota_exhausted"
+                elif $active then "window_already_active"
+                else "quota_available" end
+              ),
               status_ok: true,
               exhausted: $reasons,
               status_timestamp: ($s.timestamp // null),
               rate_limit_reached_type: ($s.rate_limit_reached_type // null),
               five_hour_remaining_percent: ($five.remaining_percent // null),
               weekly_remaining_percent: ($weekly.remaining_percent // null),
+              weekly_resets_at: ($weekly.resets_at // null),
               sonnet_weekly_remaining_percent: ($sonnet_weekly.remaining_percent // null)
             }
         end
@@ -1204,7 +1310,7 @@ main() {
   fi
 
   if [[ "$MODE" != "dry-run" ]]; then
-    maybe_reexec_with_caffeinate "$@"
+    maybe_reexec_with_caffeinate
   fi
 
   if ! mkdir "$LOCK_DIR" 2>/dev/null; then

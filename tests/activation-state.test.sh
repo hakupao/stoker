@@ -15,7 +15,7 @@ cat >"$TMP_DIR/.env" <<'ENV'
 LABEL=com.example.stoker.test
 SCHEDULE_TIMES="06:15,13:15,21:15"
 ACTIVATION_TOOL=codex
-CODEX_MODEL=gpt-5.4-mini
+CODEX_MODEL=gpt-5.6-luna
 ENABLE_STATUS_SNAPSHOTS=0
 ENABLE_QUOTA_PREFLIGHT=1
 KEEP_AWAKE_MODE=during
@@ -43,9 +43,10 @@ jq -e '
   and .label == "com.example.stoker.test"
   and .schedule.times == ["06:15", "13:15", "21:15"]
   and .config.activation_tool == "codex"
-  and .config.codex_model == "gpt-5.4-mini"
+  and .config.codex_model == "gpt-5.6-luna"
   and .config.enable_status_snapshots == false
   and .config.enable_quota_preflight == true
+  and .config.codex_activate_only_when_idle == true
   and .keep_awake.mode == "during"
   and .keep_awake.seconds == 600
   and .quota.codex.five_hour.remaining_percent == 81
@@ -166,7 +167,7 @@ jq -e --arg ts "$expected_stamp" '
 # B) a NEWER live cache wins: quota.claude served from it, stamped with its own
 #    data time; codex untouched.
 cat >"$CLAUDE_USAGE_CACHE_FILE" <<JSON
-{"timestamp":${now_ms},"data":{"fiveHourPercent":4,"fiveHourResetsAt":"2099-01-01T00:00:00.422Z","weeklyPercent":33,"weeklyResetsAt":"2099-01-02T00:00:00Z","sonnetWeeklyPercent":0,"sonnetWeeklyResetsAt":null},"error":false,"source":"anthropic","lastSuccessAt":${now_ms}}
+{"timestamp":${now_ms},"data":{"fiveHourPercent":4,"fiveHourResetsAt":"2099-01-01T00:00:00.422Z","weeklyPercent":33,"weeklyResetsAt":"2099-01-02T00:00:00Z","sonnetWeeklyPercent":0,"sonnetWeeklyResetsAt":null,"scopedWeeklyBuckets":[{"id":"fable","label":"Fable","percent":61,"resetsAt":"2099-01-03T08:00:00.315Z","isActive":false},{"id":"old","label":"Old","percent":90,"resetsAt":"2026-01-01T00:00:00.315Z","isActive":true}]},"error":false,"source":"anthropic","lastSuccessAt":${now_ms}}
 JSON
 live_json="$(STOKER_ROOT="$TMP_DIR" STOKER_SKIP_LAUNCHCTL=1 "$ROOT_DIR/bin/activation-state.sh" --json)"
 live_stamp="$(date -r $(( now_ms / 1000 )) '+%Y-%m-%d %H:%M:%S %Z')"
@@ -178,6 +179,14 @@ jq -e --arg ts "$live_stamp" '
   and .quota.claude.weekly.used_percent == 33
   and (.quota.claude.five_hour.reset_passed // false) == false
   and .quota.codex.five_hour.remaining_percent == 99
+  and (.quota.claude.scoped_weekly | length) == 2
+  and .quota.claude.scoped_weekly[0].label == "Fable"
+  and .quota.claude.scoped_weekly[0].used_percent == 61
+  and .quota.claude.scoped_weekly[0].remaining_percent == 39
+  and .quota.claude.scoped_weekly[0].is_active == false
+  and (.quota.claude.scoped_weekly[0].reset_passed // false) == false
+  and .quota.claude.scoped_weekly[1].used_percent == null
+  and .quota.claude.scoped_weekly[1].reset_passed == true
 ' <<<"$live_json" >/dev/null
 
 # C) a live cache flagged error=true is ignored even when newer → snapshot wins.

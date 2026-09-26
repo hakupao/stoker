@@ -14,6 +14,8 @@ set -euo pipefail
 #      leaks the token (stdin header, not argv), never calls the API with an
 #      expired token (the no-refresh contract), degrades when the Keychain is
 #      unreadable, and honors the CLAUDE_CONFIG_DIR keychain-service suffix
+#   H) scoped weekly buckets (cache scopedWeeklyBuckets / API seven_day_<scope>)
+#      map to scoped_weekly; only an is_active == true bucket gates the preflight
 #
 # The engine derives ROOT_DIR from its own location, so it is copied into a temp
 # root to keep logs/locks hermetic and away from the real install.
@@ -44,22 +46,24 @@ chmod +x "$TMP_DIR/bin/omc-fake" "$TMP_DIR/bin/claude-fake"
 export SENTINEL_DIR="$TMP_DIR/sentinels"
 
 write_cache() {
-  local five_percent="$1" five_resets="$2" error="${3:-false}"
+  local five_percent="$1" five_resets="$2" error="${3:-false}" buckets="${4:-null}"
   jq -n \
+    --argjson buckets "$buckets" \
     --argjson now_ms "$(( $(date +%s) * 1000 ))" \
     --argjson five_percent "$five_percent" \
     --arg five_resets "$five_resets" \
     --argjson error "$error" '
       {
         timestamp: $now_ms,
-        data: {
+        data: ({
           fiveHourPercent: $five_percent,
           fiveHourResetsAt: $five_resets,
           weeklyPercent: 8,
           weeklyResetsAt: "2099-01-01T00:00:00.000Z",
           sonnetWeeklyPercent: 0,
           sonnetWeeklyResetsAt: null
-        },
+        }
+        + (if $buckets == null then {} else {scopedWeeklyBuckets: $buckets} end)),
         error: $error,
         source: "anthropic",
         lastSuccessAt: $now_ms
@@ -183,7 +187,7 @@ cat >"$TMP_DIR/bin/curl-fake" <<'SH'
 cat >/dev/null   # consume the stdin header block (-H @-)
 printf '%s\n' "$*" >>"${SENTINEL_DIR}/curl-args"
 touch "${SENTINEL_DIR}/curl-invoked"
-printf '{"five_hour":{"utilization":41,"resets_at":"2099-01-01T00:00:00Z"},"seven_day":{"utilization":7,"resets_at":"2099-01-02T00:00:00Z"},"extra_usage":{"is_enabled":true,"monthly_limit":100,"used_credits":25,"utilization":25}}'
+printf '{"five_hour":{"utilization":41,"resets_at":"2099-01-01T00:00:00Z"},"seven_day":{"utilization":7,"resets_at":"2099-01-02T00:00:00Z"},"seven_day_sonnet":{"utilization":3,"resets_at":"2099-01-02T00:00:00Z"},"seven_day_fable":{"utilization":61,"resets_at":"2099-01-03T00:00:00Z"},"seven_day_oauth_apps":null,"seven_day_opus":{"utilization":null,"resets_at":null},"extra_usage":{"is_enabled":true,"monthly_limit":100,"used_credits":25,"utilization":25}}'
 SH
 chmod +x "$TMP_DIR/bin/security-fake" "$TMP_DIR/bin/curl-fake"
 
@@ -214,6 +218,9 @@ jq -e '
     and .credits.is_enabled == true
     and .credits.used_credits == 25
     and .credits.monthly_limit == 100
+    and .sonnet_weekly.used_percent == 3
+    and (.scoped_weekly | map(.id)) == ["fable"]
+    and (.scoped_weekly[] | select(.id == "fable") | .used_percent == 61 and .remaining_percent == 39 and .is_active == null and .label == "fable")
   ' <<<"$row" >/dev/null \
   || { echo "unexpected native status row: $row" >&2; exit 1; }
 [[ -e "$SENTINEL_DIR/curl-invoked" ]] \
@@ -258,5 +265,64 @@ run_native env CRED_EXPIRES_AT="$future_ms" CLAUDE_CONFIG_DIR="$cfg_dir" \
   || { echo "expected native snapshot to succeed with CLAUDE_CONFIG_DIR" >&2; exit 1; }
 grep -qF -- "-s $expected_service -w" "$SENTINEL_DIR/security-args" \
   || { echo "expected keychain service '$expected_service' in security args" >&2; exit 1; }
+
+# ── H) scoped weekly buckets from the plugin cache ──────────────────────────
+future_iso="$(date -u -v+2d '+%Y-%m-%dT%H:%M:%S.315Z')"
+# H1: mapping, incl. an inactive exhausted bucket (the real-world "Fable" shape)
+rm -rf "$SENTINEL_DIR" && mkdir -p "$SENTINEL_DIR"
+write_cache 10 "2099-01-01T00:00:00.673Z" false \
+  "[{\"id\":\"fable\",\"label\":\"Fable\",\"percent\":100,\"resetsAt\":\"$future_iso\",\"isActive\":false},{\"id\":\"x\",\"label\":\"X\",\"percent\":20,\"resetsAt\":null,\"isActive\":true},{\"id\":7,\"percent\":\"n/a\",\"isActive\":true}]"
+run_status env || { echo "expected scoped-bucket snapshot to succeed" >&2; exit 1; }
+row="$(grep '"tool":"claude"' "$STATUS" | tail -1)"
+jq -e '
+    (.scoped_weekly | length) == 3
+    and .scoped_weekly[0].id == "fable"
+    and .scoped_weekly[2].id == "7"
+    and .scoped_weekly[2].used_percent == null
+    and .scoped_weekly[2].remaining_percent == null
+    and .scoped_weekly[0].label == "Fable"
+    and .scoped_weekly[0].used_percent == 100
+    and .scoped_weekly[0].remaining_percent == 0
+    and .scoped_weekly[0].is_active == false
+    and .scoped_weekly[1].is_active == true
+    and .scoped_weekly[1].remaining_percent == 80
+  ' <<<"$row" >/dev/null \
+  || { echo "unexpected scoped_weekly mapping: $row" >&2; exit 1; }
+
+# H2: cache without scopedWeeklyBuckets → empty array, not an error
+write_cache 10 "2099-01-01T00:00:00.673Z"
+run_status env || { echo "expected bucket-less snapshot to succeed" >&2; exit 1; }
+jq -e '.scoped_weekly == []' <<<"$(grep '"tool":"claude"' "$STATUS" | tail -1)" >/dev/null \
+  || { echo "expected an empty scoped_weekly without buckets" >&2; exit 1; }
+
+# H3: an INACTIVE exhausted bucket must not skip the run
+rm -rf "$SENTINEL_DIR" && mkdir -p "$SENTINEL_DIR"
+write_cache 10 "$future" false \
+  "[{\"id\":\"fable\",\"label\":\"Fable\",\"percent\":100,\"resetsAt\":\"$future_iso\",\"isActive\":false}]"
+run_once
+[[ -e "$SENTINEL_DIR/claude-invoked" ]] \
+  || { echo "an inactive exhausted scoped bucket must not skip the run" >&2; exit 1; }
+
+# H4: an ACTIVE exhausted bucket skips as quota_exhausted, naming the bucket
+rm -rf "$SENTINEL_DIR" && mkdir -p "$SENTINEL_DIR"
+write_cache 10 "$future" false \
+  "[{\"id\":\"fable\",\"label\":\"Fable\",\"percent\":100,\"resetsAt\":\"$future_iso\",\"isActive\":true}]"
+run_once
+[[ ! -e "$SENTINEL_DIR/claude-invoked" ]] \
+  || { echo "an active exhausted scoped bucket must skip the run" >&2; exit 1; }
+jq -e '
+    .skipped == true
+    and .skip_reason == "quota_exhausted"
+    and (.preflight.exhausted | index("scoped_weekly:fable_remaining_exhausted") != null)
+  ' <<<"$(grep '"tool":"claude"' "$USAGE" | tail -1)" >/dev/null \
+  || { echo "expected a scoped_weekly:fable exhaustion skip: $(grep '"tool":"claude"' "$USAGE" | tail -1)" >&2; exit 1; }
+
+# H5: an active exhausted bucket whose reset already passed does not skip
+rm -rf "$SENTINEL_DIR" && mkdir -p "$SENTINEL_DIR"
+write_cache 10 "$future" false \
+  "[{\"id\":\"fable\",\"label\":\"Fable\",\"percent\":100,\"resetsAt\":\"$past\",\"isActive\":true}]"
+run_once
+[[ -e "$SENTINEL_DIR/claude-invoked" ]] \
+  || { echo "a passed-reset scoped bucket must not skip the run" >&2; exit 1; }
 
 echo "claude status cache test passed"
