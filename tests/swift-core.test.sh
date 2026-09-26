@@ -572,6 +572,26 @@ if let savedLanguage4 {
     UserDefaults.standard.removeObject(forKey: "appLanguage")
 }
 
+// ---- Task 5: menu quota lines ----
+let savedLanguage5 = UserDefaults.standard.string(forKey: "appLanguage")
+for lang in [AppLanguage.en, .zh] {
+    AppLanguage.current = lang
+    let line = L10n.menuQuotaLine(tool: "Codex", windowLabel: L10n.weeklyShort, remaining: "1%", reset: "10-03")
+    precondition(line.contains("Codex") && line.contains("1%") && line.contains("10-03") && line.contains(L10n.weeklyShort))
+    let noReset = L10n.menuQuotaLine(tool: "Claude", windowLabel: L10n.fiveHourShort, remaining: "93%", reset: nil)
+    precondition(noReset == "Claude 5h 93%", "no reset → no trailing segment")
+    precondition(L10n.monthDay(stampDate) == stampMD)
+}
+AppLanguage.current = .en
+precondition(L10n.menuQuotaLine(tool: "Claude", windowLabel: "5h", remaining: "93%", reset: "00:10") == "Claude 5h 93% · resets 00:10")
+AppLanguage.current = .zh
+precondition(L10n.menuQuotaLine(tool: "Codex", windowLabel: "周", remaining: "1%", reset: "10-03") == "Codex 周 1% · 10-03 重置")
+if let savedLanguage5 {
+    UserDefaults.standard.set(savedLanguage5, forKey: "appLanguage")
+} else {
+    UserDefaults.standard.removeObject(forKey: "appLanguage")
+}
+
 SWIFT
 
 swiftc \

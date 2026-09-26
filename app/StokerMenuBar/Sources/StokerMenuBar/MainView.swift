@@ -20,7 +20,7 @@ struct MainView: View {
     @ObservedObject var model: StokerAppModel
 
     var body: some View {
-        MainPanel(model: model, root: model.root)
+        MainPanel(model: model)
     }
 }
 
@@ -28,14 +28,15 @@ private struct MainPanel: View {
     @ObservedObject var model: StokerAppModel
     @ObservedObject private var locale = LocaleStore.shared
     @Environment(\.colorScheme) private var colorScheme
-    @StateObject private var logStore: LogStore
+    @ObservedObject private var logStore: LogStore
     @State private var selectedTab = MainTab.activity
     @AppStorage("hideOnboarding") private var hideOnboarding = false
     @State private var showOnboarding = false
 
-    init(model: StokerAppModel, root: URL) {
+    init(model: StokerAppModel) {
         self._model = ObservedObject(wrappedValue: model)
-        self._logStore = StateObject(wrappedValue: LogStore(root: root))
+        // The model owns the one shared LogStore (the menu and alert dot read it too).
+        self._logStore = ObservedObject(wrappedValue: model.logStore)
     }
 
     private var isOn: Bool { model.state?.installed == true }
@@ -81,7 +82,7 @@ private struct MainPanel: View {
                 .environment(\.stokerTheme, theme)
         }
         .onAppear {
-            logStore.load()
+            // `refresh` reloads the shared logs before publishing state.
             Task { await model.refresh() }
             if model.requestToolCheck {
                 showOnboarding = true
@@ -100,7 +101,6 @@ private struct MainPanel: View {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(15))
                 if Task.isCancelled { break }
-                logStore.load()
                 await model.refresh(silent: true, reloadSettings: false)
             }
         }
@@ -200,15 +200,18 @@ private struct UnifiedHeader: View {
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(theme.textMuted)
                 // Claude shows its 5-hour window; Codex is weekly-only (7-day window).
+                let health = model.healthSnapshot
                 QuotaMiniBar(
-                    label: "Claude",
+                    label: "Claude \(L10n.fiveHourShort)",
                     window: model.state?.quota["claude"]?.window(tool: "claude", preferFiveHour: true),
-                    color: theme.seriesClaude
+                    color: theme.seriesClaude,
+                    health: health.claude.state
                 )
                 QuotaMiniBar(
-                    label: "Codex",
+                    label: "Codex \(L10n.weeklyShort)",
                     window: model.state?.quota["codex"]?.window(tool: "codex", preferFiveHour: true),
                     color: theme.seriesCodex,
+                    health: health.codex.state,
                     isWeeklyOnly: true
                 )
                 Spacer()
@@ -324,7 +327,9 @@ private struct QuotaMiniBar: View {
     var label: String
     var window: ActivationState.QuotaWindow?
     var color: Color
-    /// Weekly-only tool (Codex): tag the bar so its window is clear.
+    /// Activation health (same snapshot as the Activity cards) for the leading dot.
+    var health: ToolHealthState
+    /// Weekly-only tool (Codex): the label carries the window tag; this picks the tooltip wording.
     var isWeeklyOnly: Bool = false
     @Environment(\.stokerTheme) private var theme
 
@@ -335,10 +340,14 @@ private struct QuotaMiniBar: View {
 
     var body: some View {
         HStack(spacing: 6) {
+            Circle()
+                .fill(DS.healthColor(health, theme: theme))
+                .frame(width: 6, height: 6)
             Text(label)
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(color)
-                .frame(width: 42, alignment: .leading)
+                .lineLimit(1)
+                .frame(width: 60, alignment: .leading)
 
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
@@ -354,13 +363,6 @@ private struct QuotaMiniBar: View {
                 .font(.system(size: 10, weight: .bold, design: .rounded))
                 .foregroundStyle(quotaColor)
                 .frame(width: 30, alignment: .trailing)
-
-            if isWeeklyOnly {
-                Text(L10n.weeklyShort)
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(theme.textMuted)
-                    .lineLimit(1)
-            }
         }
         // Spell out remaining vs used so the bar's meaning is unambiguous on hover.
         .help(L10n.quotaMiniHelp(remaining: window?.remainingPercent, used: window?.usedPercent,

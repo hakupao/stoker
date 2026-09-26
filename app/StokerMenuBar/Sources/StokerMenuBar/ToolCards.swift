@@ -354,6 +354,7 @@ private struct ScopedWeeklyRow: View {
             resetText: ResetTime.parse(bucket.resetsAt).flatMap { L10n.resetsIn($0, now: Date()) },
             color: color,
             inactive: inactive,
+            resetPassed: bucket.resetPassed == true,
             help: inactive ? L10n.scopedInactiveHelp : nil
         )
     }
@@ -388,15 +389,7 @@ struct HealthLine: View {
     let health: ToolHealth
     @Environment(\.stokerTheme) private var theme
 
-    private var dotColor: Color {
-        switch health.state {
-        case .ok, .anchored: theme.positive
-        case .pending: theme.textSecondary
-        case .warning, .exhausted: theme.warning
-        case .alert: theme.danger
-        case .unknown, .disabled: theme.textMuted
-        }
-    }
+    private var dotColor: Color { DS.healthColor(health.state, theme: theme) }
 
     private var stateText: String {
         switch health.state {

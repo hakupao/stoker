@@ -45,6 +45,15 @@ public enum L10n {
     public static var weeklyShort: String {
         AppLanguage.current == .zh ? "周" : "wk"
     }
+    /// Short 5-hour window tag for compact labels ("Claude 5h 93%").
+    public static var fiveHourShort: String { "5h" }
+    /// One menu-bar dropdown summary line: "Claude 5h 93% · resets 00:10" / "Codex 周 1% · 10-03 重置".
+    /// `reset` is a preformatted clock or month-day stamp; nil drops the trailing segment.
+    public static func menuQuotaLine(tool: String, windowLabel: String, remaining: String, reset: String?) -> String {
+        let base = "\(tool) \(windowLabel) \(remaining)"
+        guard let reset else { return base }
+        return AppLanguage.current == .zh ? "\(base) · \(reset) 重置" : "\(base) · resets \(reset)"
+    }
     public static var noData: String {
         AppLanguage.current == .zh ? "暂无数据" : "No data"
     }
@@ -577,7 +586,8 @@ public enum L10n {
         f.dateFormat = "EEE"
         return f
     }()
-    private static func monthDay(_ date: Date) -> String {
+    /// "10-03" — fixed-format month-day stamp.
+    public static func monthDay(_ date: Date) -> String {
         monthDayFormatter.string(from: date)
     }
     /// Codex free rate-limit resets; the expiry is omitted when the source doesn't give one.

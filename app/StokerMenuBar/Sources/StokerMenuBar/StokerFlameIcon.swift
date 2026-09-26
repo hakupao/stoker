@@ -146,6 +146,27 @@ enum StokerMenuBarIcon {
             .padding(size * 0.06),
         template: false)
 
+    /// Alert variants (any tool's activation is in `.alert`): the same images with a small red
+    /// dot at the top-right, baked into the NSImage because `MenuBarExtra` labels only render
+    /// images faithfully. Fixed `Color.red` like the fixed ember colours — a pre-rendered image
+    /// has no theme environment.
+    static let liveFramesAlert: [NSImage] = (0..<3).map { frame in
+        render(withAlertDot(StokerFlameIcon(active: true, frame: frame, size: size)), template: false)
+    }
+    static let coldAlert: NSImage = render(
+        withAlertDot(FlameShape(frame: 0)
+            .stroke(StokerFlameIcon.flameOutline, style: StrokeStyle(lineWidth: size * 0.085, lineJoin: .round))
+            .padding(size * 0.06)),
+        template: false)
+
+    private static func withAlertDot(_ view: some View) -> some View {
+        ZStack(alignment: .topTrailing) {
+            view
+            Circle().fill(Color.red).frame(width: 5, height: 5)
+        }
+        .frame(width: size, height: size)
+    }
+
     private static func render(_ view: some View, template: Bool) -> NSImage {
         let renderer = ImageRenderer(content: view.frame(width: size, height: size))
         renderer.scale = 2   // crisp on Retina; downsamples cleanly on 1× displays

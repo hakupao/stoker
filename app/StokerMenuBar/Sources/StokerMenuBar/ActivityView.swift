@@ -10,7 +10,7 @@ struct ActivityTabContent: View {
 
     var body: some View {
         // One health evaluation per render, from the same logs + state every refresh publishes.
-        let health = ToolHealthEvaluator.snapshot(records: logStore.usageRecords, state: model.state)
+        let health = model.healthSnapshot
 
         VStack(spacing: 10) {
             if health.anyAlert {
@@ -238,7 +238,10 @@ private struct RunRow: View {
                             Text(LogTimestamp.display(date))
                                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                                 .foregroundStyle(theme.textSecondary)
-                                .frame(width: 52, alignment: .leading)
+                                // Non-today rows read "MM-dd HH:mm" (11 monospaced chars ≈ 73pt):
+                                // one line, fixed width so columns align across rows.
+                                .lineLimit(1)
+                                .frame(width: 78, alignment: .leading)
                         }
 
                         Text(record.toolDisplayName)

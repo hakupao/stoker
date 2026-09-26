@@ -59,13 +59,16 @@ struct MenuBarLabel: View {
     @ObservedObject var ticker: FlameTicker
 
     var body: some View {
+        // The alert dot is baked into pre-rendered images (see `StokerMenuBarIcon`), and
+        // `hasActivationAlert` only publishes when it flips, so it never drives re-layouts.
+        let alert = model.hasActivationAlert
         Group {
             if model.state?.installed == true {
-                let frames = StokerMenuBarIcon.liveFrames
+                let frames = alert ? StokerMenuBarIcon.liveFramesAlert : StokerMenuBarIcon.liveFrames
                 Image(nsImage: frames[ticker.frame % frames.count])
                     .renderingMode(.original)
             } else {
-                Image(nsImage: StokerMenuBarIcon.cold)
+                Image(nsImage: alert ? StokerMenuBarIcon.coldAlert : StokerMenuBarIcon.cold)
                     .renderingMode(.original)
             }
         }
@@ -91,6 +94,9 @@ final class StokerAppModel: ObservableObject {
     /// One-shot trigger: the header's auth chip sets this to jump the user to the background-auth
     /// row (switch to Settings, expand Advanced, scroll + highlight). SettingsTabContent resets it.
     @Published var focusBackgroundAuth = false
+    /// Any enabled tool's scheduled activation is in `.alert` — drives the menu-bar red dot.
+    /// Assigned only when the value flips (the label observes the model), on refresh only.
+    @Published var hasActivationAlert = false
     /// Drives the menu-bar flame flicker (see `StokerFlameIcon`). Deliberately a plain `let`
     /// holding a separate ObservableObject observed only by `MenuBarLabel` — never a
     /// @Published counter on this shared model, whose every tick would invalidate the whole
@@ -98,10 +104,20 @@ final class StokerAppModel: ObservableObject {
     let flameTicker = FlameTicker()
 
     let root: URL
+    /// The one usage/status log store shared by the main window and the menu, so the header,
+    /// menu, Activity tab and alert dot all derive health from the same records. Plain `let`:
+    /// its changes don't republish the model. Reloaded at the start of every `refresh`.
+    let logStore: LogStore
     private var keepAwakeProcess: Process?
+
+    /// Both tools' health from the shared log records + current state (one derivation).
+    var healthSnapshot: ToolHealthSnapshot {
+        ToolHealthEvaluator.snapshot(records: logStore.usageRecords, state: state)
+    }
 
     init() {
         root = ProjectLocator.findRoot()
+        logStore = LogStore(root: root)
         settings = AppSettings(values: EnvParser.parse(Self.readEnv(root: root)))
         launchAtLogin = SMAppService.mainApp.status == .enabled
         hasOAuthToken = Self.detectOAuthToken(root: root)
@@ -136,6 +152,8 @@ final class StokerAppModel: ObservableObject {
     func refresh(silent: Bool = false, reloadSettings: Bool = true) async {
         if !silent { isBusy = true }
         defer { if !silent { isBusy = false } }
+        // Load logs before `state` publishes so observers see a consistent records/state pair.
+        logStore.load()
 
         do {
             let output = try await runExecutable(root.appendingPathComponent("bin/activation-state.sh"), arguments: ["--json"])
@@ -151,6 +169,8 @@ final class StokerAppModel: ObservableObject {
             hasOAuthToken = !((values["CLAUDE_CODE_OAUTH_TOKEN"] ?? "").isEmpty)
             updateKeepAwakeProcess()
             updateFlameTicker()
+            let alert = healthSnapshot.anyAlert
+            if alert != hasActivationAlert { hasActivationAlert = alert }
         } catch {
             if !silent { showStatus(L10n.failedToReadStatus, isError: true) }
         }
@@ -434,6 +454,18 @@ enum DS {
         if pct > 20 { return theme.warning }
         return theme.danger
     }
+
+    /// Single source of truth for the activation-*health* dot color: the Activity cards'
+    /// health line and the header mini-bars both call this.
+    static func healthColor(_ state: ToolHealthState, theme: StokerTheme) -> Color {
+        switch state {
+        case .ok, .anchored: theme.positive
+        case .pending: theme.textSecondary
+        case .warning, .exhausted: theme.warning
+        case .alert: theme.danger
+        case .unknown, .disabled: theme.textMuted
+        }
+    }
 }
 
 // MARK: - Stoker "Forge" Theme (appearance × state aware)
@@ -582,8 +614,10 @@ struct MenuContentView: View {
         }
 
         if let state = model.state {
+            let health = model.healthSnapshot
             Text("\(L10n.schedule): \(state.schedule.times.joined(separator: ", "))")
-            Text(quotaSummary(state.quota))
+            Text(quotaLine(tool: "claude", quota: state.quota["claude"], health: health.claude))
+            Text(quotaLine(tool: "codex", quota: state.quota["codex"], health: health.codex))
         }
 
         Divider()
@@ -600,11 +634,23 @@ struct MenuContentView: View {
         Button(L10n.quit) { NSApplication.shared.terminate(nil) }
     }
 
-    private func quotaSummary(_ quota: [String: ActivationState.ToolQuota]) -> String {
-        // Claude reports its 5-hour window; Codex is weekly-only (7-day window).
-        let claudeH = DS.quotaLabel(quota["claude"]?.window(tool: "claude", preferFiveHour: true)?.remainingPercent)
-        let codexW = DS.quotaLabel(quota["codex"]?.window(tool: "codex", preferFiveHour: true)?.remainingPercent)
-        return "Claude 5h \(claudeH) · Codex wk \(codexW)"
+    /// "● Claude 5h 93% · resets 00:10" / "● Codex 周 1% · 10-03 重置". Claude reports its 5-hour
+    /// window (reset as a clock), Codex is weekly-only (reset as a month-day). A window whose reset
+    /// already passed says so instead of showing stale numbers; an alerting tool gets a ⚠︎ glyph.
+    private func quotaLine(tool: String, quota: ActivationState.ToolQuota?, health: ToolHealth) -> String {
+        let isCodex = tool == "codex"
+        let window = quota?.window(tool: tool, preferFiveHour: true)
+        let resetPassed = window?.hasResetPassed() == true
+        let reset = resetPassed ? nil : ResetTime.parse(window?.resetsAt).map {
+            isCodex ? L10n.monthDay($0) : ScheduleFormatter.clock($0)
+        }
+        let line = L10n.menuQuotaLine(
+            tool: isCodex ? "Codex" : "Claude",
+            windowLabel: isCodex ? L10n.weeklyShort : L10n.fiveHourShort,
+            remaining: resetPassed ? L10n.resetAwaitingRefresh : DS.quotaLabel(window?.remainingPercent),
+            reset: reset
+        )
+        return "\(health.isAlert ? "⚠︎" : "●") \(line)"
     }
 }
 
