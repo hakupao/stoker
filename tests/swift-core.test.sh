@@ -333,6 +333,102 @@ if let savedLanguage {
     UserDefaults.standard.removeObject(forKey: "appLanguage")
 }
 
+// ---- ToolHealth ----
+var utc = Calendar(identifier: .gregorian); utc.timeZone = TimeZone(identifier: "UTC")!
+func rec(_ ts: String, _ tool: String, ok: Bool? = nil, skipped: Bool? = nil,
+         superseded: Bool? = nil, result: String? = nil) -> UsageRecord {
+    var o: [String: Any] = ["timestamp": ts, "tool": tool]
+    if let ok { o["ok"] = ok }
+    if let skipped { o["skipped"] = skipped }
+    // UsageRecord's own CodingKeys carry camelCase raw values (no convertFromSnakeCase
+    // here, unlike the LogStore decoder above), so a plain JSONDecoder expects
+    // "supersededByFallback", not "superseded_by_fallback".
+    if let superseded { o["supersededByFallback"] = superseded }
+    if let result { o["result"] = result }
+    let d = try! JSONSerialization.data(withJSONObject: o)
+    return try! JSONDecoder().decode(UsageRecord.self, from: d)
+}
+func iso(_ s: String) -> Date { ResetTime.parse(s)! }
+let slots = ["07:00", "12:00", "17:00", "22:00"]
+let toolHealthNow = iso("2026-09-27T00:00:00Z")   // 00:00 UTC
+
+// Claude: no history → unknown
+precondition(ToolHealthEvaluator.claude(records: [], scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc).state == .unknown)
+// Claude: last real run ok → ok; skipped + superseded rows ignored
+let cOK = ToolHealthEvaluator.claude(records: [
+    rec("2026-09-26 22:00:05 UTC", "claude", ok: true),
+    rec("2026-09-26 23:00:00 UTC", "claude", skipped: true),
+    rec("2026-09-26 23:30:00 UTC", "claude", ok: false, superseded: true)],
+    scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc)
+precondition(cOK.state == .ok && cOK.lastRunOK == true && cOK.consecutiveFailures == 0)
+// Claude: one failure → warning; two → alert
+precondition(ToolHealthEvaluator.claude(records: [
+    rec("2026-09-26 17:00:00 UTC", "claude", ok: true),
+    rec("2026-09-26 22:00:00 UTC", "claude", ok: false, result: "401")],
+    scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc).state == .warning)
+let cAlert = ToolHealthEvaluator.claude(records: [
+    rec("2026-09-26 17:00:00 UTC", "claude", ok: false),
+    rec("2026-09-26 22:00:00 UTC", "claude", ok: false, result: "HTTP 401 unauthorized")],
+    scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc)
+precondition(cAlert.state == .alert && cAlert.consecutiveFailures == 2 && cAlert.lastError == "HTTP 401 unauthorized")
+// Claude: schedule on, last success > 24h ago → alert even without 2 failures
+precondition(ToolHealthEvaluator.claude(records: [rec("2026-09-25 12:00:00 UTC", "claude", ok: true)],
+    scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc).state == .alert)
+// ...but schedule off → no staleness alert, and nextActivation nil
+let cOff = ToolHealthEvaluator.claude(records: [rec("2026-09-25 12:00:00 UTC", "claude", ok: true)],
+    scheduleOn: false, times: slots, now: toolHealthNow, calendar: utc)
+precondition(cOff.state == .ok && cOff.nextActivation == nil)
+// Claude next activation = next slot
+precondition(cOK.nextActivation == iso("2026-09-27T07:00:00Z"))
+
+// Codex windows
+func win(_ used: Double?, _ resets: String?) -> ActivationState.QuotaWindow {
+    var o: [String: Any] = [:]
+    if let used { o["used_percent"] = used; o["remaining_percent"] = 100 - used }
+    if let resets { o["resets_at"] = resets }
+    return try! JSONDecoder().decode(ActivationState.QuotaWindow.self, from: try! JSONSerialization.data(withJSONObject: o))
+}
+// anchored (used>0, reset in future) → next activation = first slot AFTER the reset (next day 07:00)
+let xAnch = ToolHealthEvaluator.codex(records: [rec("2026-09-26 22:56:00 UTC", "codex", ok: true)],
+    weekly: win(8, "2026-10-03T22:49:45Z"), scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc)
+precondition(xAnch.state == .anchored)
+precondition(xAnch.nextActivation == iso("2026-10-04T07:00:00Z"))
+// anchored by a successful run this cycle even when used rounds to 0
+precondition(ToolHealthEvaluator.codex(records: [rec("2026-09-26 22:56:00 UTC", "codex", ok: true)],
+    weekly: win(0, "2026-10-03T22:49:45Z"), scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc).state == .anchored)
+// idle window (used 0, no run this cycle) → pending, next = next slot
+let xIdle = ToolHealthEvaluator.codex(records: [], weekly: win(0, "2026-10-04T00:00:00Z"),
+    scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc)
+precondition(xIdle.state == .pending && xIdle.nextActivation == iso("2026-09-27T07:00:00Z"))
+// reset already passed → pending
+precondition(ToolHealthEvaluator.codex(records: [], weekly: win(40, "2026-09-26T13:00:00Z"),
+    scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc).state == .pending)
+// exhausted
+precondition(ToolHealthEvaluator.codex(records: [rec("2026-09-26 22:56:00 UTC", "codex", ok: true)],
+    weekly: win(100, "2026-10-03T22:49:45Z"), scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc).state == .exhausted)
+// last real run failed → warning even though anchored (skipped rows in between ignored)
+precondition(ToolHealthEvaluator.codex(records: [
+    rec("2026-09-26 22:55:00 UTC", "codex", ok: false),
+    rec("2026-09-26 23:54:00 UTC", "codex", skipped: true)],
+    weekly: win(8, "2026-10-03T22:49:45Z"), scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc).state == .warning)
+// two consecutive real failures → alert, overriding anchored/exhausted
+let xAlert = ToolHealthEvaluator.codex(records: [
+    rec("2026-09-19 22:00:00 UTC", "codex", ok: false),
+    rec("2026-09-20 07:00:00 UTC", "codex", ok: false, result: "model is not supported")],
+    weekly: win(100, "2026-10-03T22:49:45Z"), scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc)
+precondition(xAlert.state == .alert && xAlert.consecutiveFailures == 2)
+// fallback-superseded failure followed by success → not a failure
+precondition(ToolHealthEvaluator.codex(records: [
+    rec("2026-09-26 22:55:00 UTC", "codex", ok: false, superseded: true),
+    rec("2026-09-26 22:55:30 UTC", "codex", ok: true)],
+    weekly: win(8, "2026-10-03T22:49:45Z"), scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc).state == .anchored)
+// other tool's rows ignored
+precondition(ToolHealthEvaluator.codex(records: [rec("2026-09-26 22:00:00 UTC", "claude", ok: false),
+    rec("2026-09-26 22:01:00 UTC", "claude", ok: false)],
+    weekly: nil, scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc).state == .pending)
+// empty times → nextActivation nil
+precondition(ToolHealthEvaluator.codex(records: [], weekly: nil, scheduleOn: true, times: [], now: toolHealthNow, calendar: utc).nextActivation == nil)
+
 SWIFT
 
 swiftc \
@@ -340,6 +436,7 @@ swiftc \
   "$ROOT_DIR/app/StokerMenuBar/Sources/StokerCore/FlameTicker.swift" \
   "$ROOT_DIR/app/StokerMenuBar/Sources/StokerCore/L10n.swift" \
   "$ROOT_DIR/app/StokerMenuBar/Sources/StokerCore/LogStore.swift" \
+  "$ROOT_DIR/app/StokerMenuBar/Sources/StokerCore/ToolHealth.swift" \
   "$TMP_DIR/main.swift" \
   -o "$TMP_DIR/swift-core-test"
 
