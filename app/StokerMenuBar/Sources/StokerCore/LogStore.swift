@@ -211,6 +211,25 @@ public struct QuotaChartPoint: Identifiable, Sendable {
 
 // MARK: - LogStore
 
+/// Size + modification date of one log file (nil when it doesn't exist). Used to skip a reload,
+/// and so a republish, when neither log changed since the last load.
+public struct LogFileSignature: Equatable, Sendable {
+    public var size: UInt64
+    public var modified: Date?
+}
+
+public struct LogSignatures: Equatable, Sendable {
+    public var usage: LogFileSignature?
+    public var status: LogFileSignature?
+}
+
+/// Parsed logs plus the file signatures they were read at — built off the main actor.
+public struct LogSnapshot: Sendable {
+    public let usage: [UsageRecord]
+    public let status: [StatusRecord]
+    public let signatures: LogSignatures
+}
+
 @MainActor
 public final class LogStore: ObservableObject {
     @Published public var usageRecords: [UsageRecord] = []
@@ -226,15 +245,46 @@ public final class LogStore: ObservableObject {
     @Published public private(set) var filteredUsage: [UsageRecord] = []
 
     private let root: URL
+    /// Signatures of the files behind the current records; nil until the first load.
+    public private(set) var signatures: LogSignatures?
 
     public init(root: URL) {
         self.root = root
     }
 
+    /// Reload both logs; a no-op (nothing publishes) when neither file changed.
     public func load() {
-        usageRecords = Self.parseJSONL(url: root.appendingPathComponent("logs/usage.jsonl"))
-        statusRecords = Self.parseJSONL(url: root.appendingPathComponent("logs/status.jsonl"))
+        if let snapshot = Self.read(root: root, unlessUnchangedFrom: signatures) { apply(snapshot) }
+    }
+
+    /// Install records read elsewhere (e.g. parsed on a background task by `read`).
+    public func apply(_ snapshot: LogSnapshot) {
+        usageRecords = snapshot.usage
+        statusRecords = snapshot.status
+        signatures = snapshot.signatures
         recomputeFiltered()
+    }
+
+    /// Parse both logs — callable off the main actor. Returns nil when both files still match
+    /// `previous` (same size and modification date), so the caller can skip the reassignment.
+    public nonisolated static func read(root: URL, unlessUnchangedFrom previous: LogSignatures?) -> LogSnapshot? {
+        let usageURL = root.appendingPathComponent("logs/usage.jsonl")
+        let statusURL = root.appendingPathComponent("logs/status.jsonl")
+        let current = LogSignatures(usage: signature(usageURL), status: signature(statusURL))
+        if let previous, previous == current { return nil }
+        return LogSnapshot(usage: parseJSONL(url: usageURL), status: parseJSONL(url: statusURL),
+                           signatures: current)
+    }
+
+    /// Just the usage rows, off the main actor — for the background alert re-check.
+    public nonisolated static func readUsage(root: URL) -> [UsageRecord] {
+        parseJSONL(url: root.appendingPathComponent("logs/usage.jsonl"))
+    }
+
+    private nonisolated static func signature(_ url: URL) -> LogFileSignature? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) else { return nil }
+        return LogFileSignature(size: (attrs[.size] as? NSNumber)?.uint64Value ?? 0,
+                                modified: attrs[.modificationDate] as? Date)
     }
 
     private func recomputeFiltered() {
@@ -316,7 +366,7 @@ public final class LogStore: ObservableObject {
         return field
     }
 
-    private static func parseJSONL<T: Decodable>(url: URL) -> [T] {
+    private nonisolated static func parseJSONL<T: Decodable>(url: URL) -> [T] {
         guard let contents = try? String(contentsOf: url, encoding: .utf8) else { return [] }
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase

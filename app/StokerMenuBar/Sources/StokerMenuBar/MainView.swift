@@ -82,7 +82,7 @@ private struct MainPanel: View {
                 .environment(\.stokerTheme, theme)
         }
         .onAppear {
-            // `refresh` reloads the shared logs before publishing state.
+            // `refresh` reloads the shared logs together with state.
             Task { await model.refresh() }
             if model.requestToolCheck {
                 showOnboarding = true
@@ -427,7 +427,7 @@ struct BottomActionBar: View {
                     model.saveSettingsAndReload()
                     Task {
                         try? await Task.sleep(for: .seconds(2))
-                        logStore.load()
+                        await model.refresh(silent: true, reloadSettings: false)
                     }
                 } label: {
                     Label(L10n.save, systemImage: "checkmark.circle.fill")
@@ -442,7 +442,7 @@ struct BottomActionBar: View {
                     model.runNowWithDelayedRefresh()
                     Task {
                         try? await Task.sleep(for: .seconds(12))
-                        logStore.load()
+                        await model.refresh(silent: true, reloadSettings: false)
                     }
                 } label: {
                     Label(L10n.runOnce, systemImage: "play.fill")

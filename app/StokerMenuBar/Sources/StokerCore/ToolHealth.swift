@@ -150,3 +150,16 @@ extension ToolHealthEvaluator {
                  now: now)
     }
 }
+
+// MARK: - Background alert re-check
+// The app's alert decision is `snapshot(records:state:).anyAlert`; time alone can flip it
+// (Claude staleness), so the app also re-evaluates it off a clock.
+
+extension ToolHealthSnapshot {
+    /// When to re-check after the next scheduled activation: the earliest `nextActivation`
+    /// plus the run's timeout plus a margin for the usage row to land. Nil when nothing is scheduled.
+    public func recheckAt(timeoutSeconds: TimeInterval, margin: TimeInterval = 60) -> Date? {
+        [claude.nextActivation, codex.nextActivation].compactMap { $0 }.min()?
+            .addingTimeInterval(timeoutSeconds + margin)
+    }
+}

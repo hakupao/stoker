@@ -159,10 +159,19 @@ enum StokerMenuBarIcon {
             .padding(size * 0.06)),
         template: false)
 
+    /// The dot sits 1pt in from the canvas edge (so the status item never clips it) inside a
+    /// 1pt ring. The ring is a fixed near-white like the gold outline — a baked image can't adapt
+    /// to the menu bar — and a light ring separates the red from both the ember flame beneath
+    /// and dark menu bars; on light bars it simply merges into the background.
     private static func withAlertDot(_ view: some View) -> some View {
         ZStack(alignment: .topTrailing) {
             view
-            Circle().fill(Color.red).frame(width: 5, height: 5)
+            Circle()
+                .fill(Color.red)
+                .frame(width: 5, height: 5)
+                .padding(1)
+                .background(Circle().fill(Color(white: 0.96)))
+                .padding(1)
         }
         .frame(width: size, height: size)
     }

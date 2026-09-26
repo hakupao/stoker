@@ -572,6 +572,50 @@ if let savedLanguage4 {
     UserDefaults.standard.removeObject(forKey: "appLanguage")
 }
 
+// ---- Task 5 fix 1: background alert re-check ----
+// Staleness alone flips the alert: last success at 07:00, schedule on — fine an hour later,
+// alerting once >24h pass with no new success (records unchanged, only `now` moves).
+// Exactly the app's decision (`applyAlert`): snapshot(...).anyAlert.
+func alertDecision(records: [UsageRecord], quota: [String: ActivationState.ToolQuota], installed: Bool,
+                   times: [String], activationTool: String, now: Date) -> Bool {
+    ToolHealthEvaluator.snapshot(records: records, quota: quota, installed: installed, times: times,
+                                 activationTool: activationTool, now: now).anyAlert
+}
+let staleRecords = [rec("2026-09-26 07:00:05 UTC", "claude", ok: true)]
+let staleBase = iso("2026-09-26T07:00:05Z")
+precondition(!alertDecision(records: staleRecords, quota: [:], installed: true, times: slots,
+    activationTool: "claude", now: staleBase.addingTimeInterval(3600)))
+precondition(alertDecision(records: staleRecords, quota: [:], installed: true, times: slots,
+    activationTool: "claude", now: staleBase.addingTimeInterval(25 * 3600)))
+// Disabled tool never alerts; schedule off → no staleness alert.
+precondition(!alertDecision(records: staleRecords, quota: [:], installed: true, times: slots,
+    activationTool: "codex", now: staleBase.addingTimeInterval(25 * 3600)))
+precondition(!alertDecision(records: staleRecords, quota: [:], installed: false, times: slots,
+    activationTool: "claude", now: staleBase.addingTimeInterval(25 * 3600)))
+// Two consecutive failures alert regardless of time.
+let twoFails = [rec("2026-09-26 07:00:05 UTC", "codex", ok: false), rec("2026-09-26 12:00:05 UTC", "codex", ok: false)]
+precondition(alertDecision(records: twoFails, quota: [:], installed: true, times: slots,
+    activationTool: "codex", now: staleBase.addingTimeInterval(6 * 3600)))
+// One-shot re-check: earliest next activation + run timeout + margin; nil with nothing scheduled.
+let recheckSnap = ToolHealthEvaluator.snapshot(records: [], quota: [:], installed: true, times: slots,
+    activationTool: "all", now: toolHealthNow, calendar: utc)
+let earliestNext = [recheckSnap.claude.nextActivation, recheckSnap.codex.nextActivation].compactMap { $0 }.min()!
+precondition(recheckSnap.recheckAt(timeoutSeconds: 120) == earliestNext.addingTimeInterval(180))
+precondition(recheckSnap.recheckAt(timeoutSeconds: 300, margin: 0) == earliestNext.addingTimeInterval(300))
+let offSnap = ToolHealthEvaluator.snapshot(records: [], quota: [:], installed: false, times: slots,
+    activationTool: "all", now: toolHealthNow, calendar: utc)
+precondition(offSnap.recheckAt(timeoutSeconds: 120) == nil)
+// Off-main reader parses usage.jsonl with the LogStore decoding (snake_case keys).
+let readerRoot = FileManager.default.temporaryDirectory.appendingPathComponent("stoker-reader-\(UUID().uuidString)")
+try! FileManager.default.createDirectory(at: readerRoot.appendingPathComponent("logs"), withIntermediateDirectories: true)
+try! #"{"timestamp":"2026-09-26 07:00:05 UTC","tool":"codex","ok":false,"superseded_by_fallback":true}"#
+    .appending("\n\n")
+    .write(to: readerRoot.appendingPathComponent("logs/usage.jsonl"), atomically: true, encoding: .utf8)
+let readBack = LogStore.readUsage(root: readerRoot)
+precondition(readBack.count == 1 && readBack[0].supersededByFallback == true)
+precondition(LogStore.readUsage(root: readerRoot.appendingPathComponent("missing")).isEmpty)
+try? FileManager.default.removeItem(at: readerRoot)
+
 // ---- Task 5: menu quota lines ----
 let savedLanguage5 = UserDefaults.standard.string(forKey: "appLanguage")
 for lang in [AppLanguage.en, .zh] {

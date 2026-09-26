@@ -106,9 +106,19 @@ final class StokerAppModel: ObservableObject {
     let root: URL
     /// The one usage/status log store shared by the main window and the menu, so the header,
     /// menu, Activity tab and alert dot all derive health from the same records. Plain `let`:
-    /// its changes don't republish the model. Reloaded at the start of every `refresh`.
+    /// its changes don't republish the model. `refresh` reloads it (parsed off the main actor)
+    /// together with `state`.
     let logStore: LogStore
     private var keepAwakeProcess: Process?
+    /// Background alert re-checks so the menu-bar dot doesn't go stale while the app sits idle
+    /// (launchd runs land in usage.jsonl with no UI open). A slow periodic pass plus a one-shot
+    /// just after the next scheduled activation. Neither publishes unless the alert flips.
+    private var periodicRecheckTask: Task<Void, Never>?
+    private var activationRecheckTask: Task<Void, Never>?
+    private var activationRecheckAt: Date?
+    /// The engine's per-tool `TIMEOUT_SECONDS` (from `.env`), bounding when a run's row lands.
+    private var runTimeoutSeconds: TimeInterval = 120
+    private static let alertRecheckInterval: Duration = .seconds(600)
 
     /// Both tools' health from the shared log records + current state (one derivation).
     var healthSnapshot: ToolHealthSnapshot {
@@ -127,10 +137,20 @@ final class StokerAppModel: ObservableObject {
         // opened (and the window's only when it's shown), so without this the
         // icon would sit in its "cold" state until the user first interacts.
         Task { await refresh(silent: true) }
+        periodicRecheckTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.alertRecheckInterval)
+                guard !Task.isCancelled, let self else { return }
+                await self.recheckAlert()
+            }
+        }
     }
 
     deinit {
         keepAwakeProcess?.terminate()
+        // Process exit reclaims these too; cancelling here covers any earlier teardown.
+        periodicRecheckTask?.cancel()
+        activationRecheckTask?.cancel()
         // The flame ticker's timer is torn down in `FlameTicker.setRunning(false)`
         // whenever the schedule goes idle; we don't touch it here because
         // `Timer.invalidate()` must run on the thread that installed it (the main
@@ -152,13 +172,20 @@ final class StokerAppModel: ObservableObject {
     func refresh(silent: Bool = false, reloadSettings: Bool = true) async {
         if !silent { isBusy = true }
         defer { if !silent { isBusy = false } }
-        // Load logs before `state` publishes so observers see a consistent records/state pair.
-        logStore.load()
+        // Parse the logs off the main actor while the state script runs (nil = files unchanged,
+        // so nothing republishes); install records and state together below.
+        let root = root
+        let previous = logStore.signatures
+        let logs = Task.detached(priority: .utility) {
+            LogStore.read(root: root, unlessUnchangedFrom: previous)
+        }
 
         do {
             let output = try await runExecutable(root.appendingPathComponent("bin/activation-state.sh"), arguments: ["--json"])
-            let data = Data(output.utf8)
-            state = try JSONDecoder().decode(ActivationState.self, from: data)
+            let decoded = try JSONDecoder().decode(ActivationState.self, from: Data(output.utf8))
+            // No suspension between these two, so observers never see a mismatched pair.
+            if let snapshot = await logs.value { logStore.apply(snapshot) }
+            state = decoded
             // Read `.env` once: refresh the auth indicator every tick (cheap, and reading
             // raw values never clobbers unsaved edits the user is typing into `settings`),
             // but only rehydrate `settings` when asked.
@@ -167,12 +194,44 @@ final class StokerAppModel: ObservableObject {
                 settings = AppSettings(values: values)
             }
             hasOAuthToken = !((values["CLAUDE_CODE_OAUTH_TOKEN"] ?? "").isEmpty)
+            runTimeoutSeconds = values["TIMEOUT_SECONDS"].flatMap(TimeInterval.init) ?? 120
             updateKeepAwakeProcess()
             updateFlameTicker()
-            let alert = healthSnapshot.anyAlert
-            if alert != hasActivationAlert { hasActivationAlert = alert }
+            applyAlert(healthSnapshot)
         } catch {
+            if let snapshot = await logs.value { logStore.apply(snapshot) }
             if !silent { showStatus(L10n.failedToReadStatus, isError: true) }
+        }
+    }
+
+    /// Re-evaluate only the alert: usage.jsonl parsed off the main actor, against the current
+    /// `state`. Never touches `logStore` or `state`, so nothing publishes unless the alert flips.
+    private func recheckAlert() async {
+        let root = root
+        let records = await Task.detached(priority: .utility) { LogStore.readUsage(root: root) }.value
+        applyAlert(ToolHealthEvaluator.snapshot(records: records, state: state))
+    }
+
+    /// Publish `hasActivationAlert` only on a flip, then (re)arm the post-activation re-check.
+    private func applyAlert(_ snapshot: ToolHealthSnapshot) {
+        if snapshot.anyAlert != hasActivationAlert { hasActivationAlert = snapshot.anyAlert }
+        scheduleActivationRecheck(at: snapshot.recheckAt(timeoutSeconds: runTimeoutSeconds))
+    }
+
+    /// One-shot re-check just after the next scheduled activation's row should have landed;
+    /// each run re-arms for the following activation.
+    private func scheduleActivationRecheck(at date: Date?) {
+        guard date != activationRecheckAt else { return }
+        activationRecheckTask?.cancel()
+        activationRecheckAt = date
+        guard let date else { activationRecheckTask = nil; return }
+        activationRecheckTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(max(0, date.timeIntervalSinceNow)))
+            guard !Task.isCancelled, let self else { return }
+            self.activationRecheckAt = nil
+            // Re-arming cancels this (already finishing) task: keep recheckAlert free of any
+            // suspension or cancellation check after its read, or the re-arm could cut it short.
+            await self.recheckAlert()
         }
     }
 
