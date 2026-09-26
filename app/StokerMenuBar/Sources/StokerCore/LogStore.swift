@@ -224,7 +224,6 @@ public final class LogStore: ObservableObject {
     }
 
     @Published public private(set) var filteredUsage: [UsageRecord] = []
-    @Published public private(set) var filteredStatus: [StatusRecord] = []
 
     private let root: URL
 
@@ -245,13 +244,6 @@ public final class LogStore: ObservableObject {
             return true
         }
         .sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }
-
-        filteredStatus = statusRecords.filter { record in
-            if toolFilter != .all, record.tool != toolFilter.rawValue { return false }
-            if let cutoff = dateRange.cutoff, let date = record.date, date < cutoff { return false }
-            return true
-        }
-        .sorted { ($0.date ?? .distantPast) < ($1.date ?? .distantPast) }
     }
 
     /// Build chart points for one series, tagging each with a `segment` that bumps whenever
@@ -283,7 +275,6 @@ public final class LogStore: ObservableObject {
 
     public var totalRuns: Int { filteredUsage.count }
     public var successCount: Int { filteredUsage.filter { $0.status == .success }.count }
-    public var skippedCount: Int { filteredUsage.filter { $0.status == .skipped }.count }
     public var errorCount: Int { filteredUsage.filter { $0.status == .error }.count }
     /// Skips the engine made on purpose (Codex's weekly window is already anchored) — neutral.
     public var plannedSkipCount: Int {
