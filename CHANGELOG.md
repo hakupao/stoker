@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+- **Per-tool schedules.** Claude and Codex are now scheduled independently:
+  `CLAUDE_SCHEDULE_TIMES` / `CODEX_SCHEDULE_TIMES` (`HH:MM`, falling back to `SCHEDULE_TIMES`)
+  and `CLAUDE_SCHEDULE_DAYS` / `CODEX_SCHEDULE_DAYS` (`mon..sun`; empty or `daily` = every day).
+  The engine rejects `daily` mixed with day names (e.g. `daily,mon`); the menu bar app normalizes
+  the value when it saves.
+  The single LaunchAgent is split into `<LABEL>.claude` and `<LABEL>.codex`, each running
+  `--once --scheduled --tool <tool>`; `install` also removes the old single `<LABEL>` agent and the
+  agent of a disabled tool. A legacy agent pointing at another Stoker checkout is kept with a
+  warning unless `STOKER_FORCE_MIGRATE=1`; the same applies to a `<LABEL>.claude`/`.codex` agent
+  installed from another checkout (install skips it and exits non-zero). A `--scheduled` run of a tool that `ACTIVATION_TOOL`
+  excludes exits without sending anything. `print-plist` prints every enabled tool's plist (`print-plist claude|codex`
+  prints just one). **Upgrade note:** re-run `./install.sh install` (or toggle the schedule in
+  the app) to replace the old agent.
+- `app-status` JSON adds `schedule.claude` / `schedule.codex` (`{times, days}`) and
+  `launchctl.agents` (with `stray` for a loaded agent of a disabled tool), `launchctl.legacy`
+  (loaded old-label agents) and `launchctl.needs_migration`; `schedule.times` is the union of the
+  enabled tools' times, `installed` requires every enabled tool's agent and nothing stray, and a
+  legacy agent — or a stray per-tool agent — from another root fills `launchctl.mismatch`.
+  `activation-state.sh` honors `LAUNCHCTL_BIN` like the installer.
+
+### Changed
+- **Concurrent runs wait instead of being dropped.** A run that finds the activation lock held
+  now polls for up to `LOCK_WAIT_SECONDS` (default `TIMEOUT_SECONDS × (1 +
+  CODEX_MODEL_FALLBACK_MAX_TRIES) + CODEX_UPDATE_TIMEOUT_SECONDS + 120`, 780 s) before skipping, so
+  two agents firing in the same second both run. `LOCK_WAIT_SECONDS=0` restores the immediate
+  skip. The lock records its owner's PID and a crashed run's lock is reclaimed (once, under a
+  reclaim mutex; a PID-less lock only after the longest possible run); keep-awake covers
+  the wait; dry-run no longer takes the lock; `TIMEOUT_SECONDS` is validated.
+- `install` exits non-zero (removing that agent's plist and naming what was installed) when a
+  bootstrap fails; `uninstall` no longer validates `ACTIVATION_TOOL` and reports only the agents
+  that existed.
+
 ## 0.3.6 - 2026-09-26
 
 ### Changed

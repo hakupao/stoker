@@ -22,7 +22,7 @@ shells out to the same scripts. The app contains no scheduler or activation logi
 # Validate / test — THE canonical gate. CONTRIBUTING.md mandates it pre-PR; CI runs it verbatim.
 ./scripts/validate.sh
 
-# Run a single test (all 13 are standalone executables; self-locate ROOT_DIR, run from anywhere; examples:)
+# Run a single test (all 17 are standalone executables; self-locate ROOT_DIR, run from anywhere; examples:)
 tests/swift-core.test.sh          # swiftc-compiles StokerCore (+L10n/LogStore) + a driver, asserts via precondition()
 tests/activation-state.test.sh    # bin/activation-state.sh --json output (needs jq)
 tests/keep-awake-config.test.sh   # rejects invalid KEEP_AWAKE_MODE / KEEP_AWAKE_SECONDS
@@ -38,17 +38,17 @@ swift build --package-path app/StokerMenuBar     # compile-check the SwiftUI app
 ./install.sh dry-run      # print the exact claude/codex command arrays, send nothing
 ./install.sh quota        # snapshot quota into logs/status.jsonl, send nothing
 ./install.sh app-status   # the JSON state the menu bar app consumes (bin/activation-state.sh --json)
-./install.sh print-plist  # regenerate + cat the launchd plist without installing
+./install.sh print-plist  # regenerate + cat the per-tool launchd plists without installing (print-plist claude|codex: one)
 
 # Shell engine (consumes real quota — sends model prompts)
-./install.sh install      # generate, plutil-lint, and load the LaunchAgent
+./install.sh install      # generate, plutil-lint, and load the per-tool LaunchAgents
 ./install.sh run-now      # trigger one real activation now
 bin/activate-ai-window.sh --once --tool claude   # single real run, one tool (--tool all|claude|codex)
 ```
 
 There is **no Makefile / npm / `swift test`**. `scripts/validate.sh` *is* the test runner: it
-runs `bash -n` + `shellcheck` on 7 scripts, `plutil -lint`s the plist, runs `dry-run` + `app-status`
-smoke checks, runs the 13 `tests/*.test.sh` in order, then `swift build`s the app. `shellcheck`,
+runs `bash -n` + `shellcheck` on 7 scripts, `plutil -lint`s both per-tool plists, runs `dry-run` + `app-status`
+smoke checks, runs the 17 `tests/*.test.sh` in order, then `swift build`s the app. `shellcheck`,
 `plutil`, and `swift` are skipped if absent; `jq`, `swiftc`, and `file` are **not** guarded and will
 hard-fail their test if missing.
 
@@ -59,7 +59,14 @@ is split across:
 - `bin/activate-ai-window.sh` — the activation runner (config load → lock → quota preflight →
   send prompt → record usage → post-run snapshot). Owns the Claude/Codex invocation arrays.
 - `scripts/install-launchd.sh` — owns plist generation + the `launchctl` lifecycle
-  (`bootstrap`/`bootout`/`kickstart` in the `gui/$UID` domain).
+  (`bootstrap`/`bootout`/`kickstart` in the `gui/$UID` domain). One agent per enabled tool
+  (`${LABEL}.claude` / `${LABEL}.codex`, each `--once --scheduled --tool <t>`; `--scheduled` makes
+  a run of a tool excluded by `ACTIVATION_TOOL` exit 0 untouched) with its own times
+  (`<TOOL>_SCHEDULE_TIMES` → `SCHEDULE_TIMES` → default) and days (`<TOOL>_SCHEDULE_DAYS`; daily
+  omits the plist `Weekday` key). Its schedule parsing is duplicated in `activation-state.sh` —
+  keep the two `load_tool_schedule` copies in sync. Legacy agents (`${LABEL}` + `LEGACY_LABELS`)
+  are removed at install only when their plist points at this root (`STOKER_FORCE_MIGRATE=1`
+  overrides); `LAUNCHCTL_BIN` lets tests substitute a fake launchctl.
 - `bin/activation-state.sh` — owns the JSON state contract consumed by the app. Claude quota
   prefers the live omc usage cache when it is newer than the last snapshot row, restamps
   `timestamp` with the data-capture time (not the snapshot-write time), and blanks any window
@@ -78,8 +85,11 @@ The full `.env` variable surface is documented in `README.md` (don't duplicate i
 `.env.example` is the committed template, `.env` is git-ignored.
 
 **Runtime flow** of a real `--once` run: `cd ROOT_DIR` → optional `caffeinate` re-exec → acquire
-lock via `mkdir run/activation.lock` (atomic; a concurrent trigger logs and exits 0) → trap
-`rmdir LOCK_DIR` on EXIT → quota preflight (if enabled) → per-tool `run_claude`/`run_codex` →
+lock via `mkdir run/activation.lock` (atomic; a concurrent trigger polls every 2s for up to
+`LOCK_WAIT_SECONDS` — default covers a worst-case Codex run — then logs and exits 0; the owner PID
+is written to `LOCK_DIR/pid` so a dead owner's lock is reclaimed, serialized by a
+`LOCK_DIR.reclaim` mutex; dry-run skips the lock) → trap
+`rm pid; rmdir LOCK_DIR` on EXIT → quota preflight (if enabled) → per-tool `run_claude`/`run_codex` →
 post-run quota snapshot → release lock. `run_codex` (real, preflight-allowed runs only) first runs a
 throttled `codex update` (`CODEX_AUTO_UPDATE`, stamp `run/codex-update.last`, non-fatal), and on a
 "model is not supported" failure retries the next cached candidate, up to

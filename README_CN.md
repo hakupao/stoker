@@ -125,7 +125,7 @@ cp .env.example .env
 ./install.sh status       # 查看 launchd 状态
 ./install.sh run-now      # 手动真实触发一次，会发送模型 prompt
 ./install.sh uninstall    # 卸载 LaunchAgent
-./install.sh print-plist  # 打印生成的 launchd plist
+./install.sh print-plist  # 打印生成的 launchd plist（`print-plist claude|codex` 只打印一个）
 ```
 
 也可以直接调用 runner：
@@ -185,13 +185,22 @@ codex job skipped by quota preflight reason=quota_exhausted
 
 | 变量 | 说明 | 默认值 |
 | --- | --- | --- |
-| `LABEL` | macOS LaunchAgent label | `com.stoker.ai-window` |
-| `SCHEDULE_TIMES` | 逗号分隔的 `HH:MM` 触发时间，每个时间点相互独立 | `"07:00,12:00,17:00,22:00"` |
-| `ACTIVATION_TOOL` | `all`、`claude` 或 `codex` | `all` |
+| `LABEL` | macOS LaunchAgent 基础 label；每个工具各有一个 agent：`<LABEL>.claude` / `<LABEL>.codex` | `com.stoker.ai-window` |
+| `CLAUDE_SCHEDULE_TIMES` | Claude 的逗号分隔 `HH:MM` 触发时间，每个时间点相互独立 | `SCHEDULE_TIMES` |
+| `CODEX_SCHEDULE_TIMES` | Codex 的逗号分隔 `HH:MM` 触发时间（如 `"07:00"`） | `SCHEDULE_TIMES` |
+| `CLAUDE_SCHEDULE_DAYS` | Claude 运行的星期：逗号分隔 `mon,tue,wed,thu,fri,sat,sun`；留空或 `daily` = 每天 | 空（每天） |
+| `CODEX_SCHEDULE_DAYS` | Codex 运行的星期，格式同上 | 空（每天） |
+| `SCHEDULE_TIMES` | 某工具的 `*_SCHEDULE_TIMES` 未设置或为空时的回退时间表 | `"07:00,12:00,17:00,22:00"` |
+| `ACTIVATION_TOOL` | `all`、`claude` 或 `codex`——决定安装哪些工具的 agent | `all` |
+
+修改任何 `*_SCHEDULE_*` 变量或 `ACTIVATION_TOOL` 后，需要重新执行 `./install.sh install` 让 LaunchAgent
+生效（菜单栏 App 保存时会自动重装）。`ACTIVATION_TOOL` 已不再启用的工具即使被定时触发，也会直接退出、不发送任何内容。
+
 | `ACTIVATION_PROMPT` | 发送给 CLI 的低消耗 prompt | `Reply exactly READY...` |
 | `CLAUDE_CODE_OAUTH_TOKEN` | 由 `claude setup-token` 生成的长效 token，供无人值守认证（见下） | 未设置（用钥匙串登录） |
 | `CODEX_MODEL` | Codex 激活模型；设为 `default` 则交给 Codex CLI 自行选择 | `gpt-5.6-luna` |
 | `TIMEOUT_SECONDS` | 每个工具的超时时间 | `120` |
+| `LOCK_WAIT_SECONDS` | 另一次运行持有锁时最多等待多久再跳过（`0` = 立即跳过）。开启防休眠时等待期间也保持唤醒（`caffeinate -t KEEP_AWAKE_SECONDS + LOCK_WAIT_SECONDS`） | `TIMEOUT_SECONDS × (1 + CODEX_MODEL_FALLBACK_MAX_TRIES) + CODEX_UPDATE_TIMEOUT_SECONDS + 120`（780） |
 | `ENABLE_STATUS_SNAPSHOTS` | 真实触发后是否记录额度快照 | `1` |
 | `ENABLE_QUOTA_PREFLIGHT` | 发送 prompt 前是否先检查额度 | `1` |
 | `QUOTA_PREFLIGHT_ON_UNKNOWN` | 无法确认额度时 `allow` 继续或 `skip` 跳过 | `allow` |
@@ -401,8 +410,11 @@ flowchart TB
 当 launchd 到达预定时间（或你手动执行 `./install.sh run-now`）时，激活脚本按以下顺序执行：
 
 1. **加载配置** —— 从 `.env` 读取 schedule、工具选择、额度设置和二进制路径。
-2. **获取锁** —— 创建 `run/activation.lock` 防止并发；如果已有运行中的触发，第二次触发会被
-   优雅跳过。
+2. **获取锁** —— 创建 `run/activation.lock` 防止并发。Claude 和 Codex 的 agent 可能在同一秒触发，
+   所以第二次触发会等待（每 2 秒轮询，最长 `LOCK_WAIT_SECONDS`）当前运行结束；超过上限锁仍被占用
+   才会被优雅跳过。锁里记录持有者 PID，崩溃遗留的锁（PID 已不存在，或没有 PID 且比单次运行的最长可能时长更旧）会被回收——通过单独的
+   `run/activation.lock.reclaim` 标记保证只有一个等待者执行回收。
+   `--dry-run` 不拿锁。
 3. **额度预检**（可选） —— 在发送任何 prompt *之前*查询 Claude 和 Codex 的额度状态。如果某个
    工具的额度已耗尽，该工具会被跳过，跳过记录写入 `logs/usage.jsonl`。Claude 的分项周额度
    （`scoped_weekly`，如某个模型专属的限额）仅在账号当前确实受其限制（`is_active: true`）时计入。
@@ -453,8 +465,11 @@ App 通过 Foundation 的 `Process()` 调用脚本，读取 stdout，再用 `JSO
   的目录。对于独立的 `.app`，会把 bundle 内的脚本拷贝到 Application Support 并以该副本作为工作
   根目录。
 
-安装脚本会为 macOS `launchd` 生成带绝对路径的 plist，放到 `~/Library/LaunchAgents/`。plist
-被 git ignore，因为它包含本机路径。
+安装脚本会为每个启用的工具生成一个带绝对路径的 plist（`<LABEL>.claude.plist`、
+`<LABEL>.codex.plist`，各自按该工具的时间和星期运行 `activate-ai-window.sh --once --tool <tool>`），
+放到 `~/Library/LaunchAgents/`。安装时也会移除未启用工具的 agent 以及旧版的单个 `<LABEL>` agent（和
+`LEGACY_LABELS`）；如果旧 agent 的 plist 指向另一个 Stoker 目录，会保留并给出警告，除非设置 `STOKER_FORCE_MIGRATE=1`。
+plist 被 git ignore，因为它包含本机路径。
 
 ### 项目结构
 

@@ -377,17 +377,33 @@ final class StokerAppModel: ObservableObject {
         }
     }
 
-    func addTime(_ time: String) {
+    func addTime(_ time: String, tool: String) {
         guard let normalized = ScheduleFormatter.normalize(time) else { return }
-        if !settings.scheduleTimes.contains(normalized) {
-            settings.scheduleTimes.append(normalized)
-            settings.scheduleTimes.sort()
+        var times = settings.scheduleTimes(tool)
+        if !times.contains(normalized) {
+            times.append(normalized)
+            times.sort()
+            settings.setScheduleTimes(times, for: tool)
         }
     }
 
-    func removeTime(at index: Int) {
-        guard settings.scheduleTimes.count > 1, settings.scheduleTimes.indices.contains(index) else { return }
-        settings.scheduleTimes.remove(at: index)
+    func removeTime(at index: Int, tool: String) {
+        var times = settings.scheduleTimes(tool)
+        guard times.count > 1, times.indices.contains(index) else { return }
+        times.remove(at: index)
+        settings.setScheduleTimes(times, for: tool)
+    }
+
+    /// Toggles one weekday (mon..sun) for a tool; `nil` selects every day. Selecting all seven
+    /// normalizes back to every day (`[]`).
+    func toggleDay(_ day: String?, tool: String) {
+        guard let day else {
+            settings.setScheduleDays([], for: tool)
+            return
+        }
+        var days = settings.scheduleDays(tool)
+        if let index = days.firstIndex(of: day) { days.remove(at: index) } else { days.append(day) }
+        settings.setScheduleDays(days, for: tool)
     }
 
     private func runInstallCommand(_ command: String, success: String) {
@@ -684,7 +700,12 @@ struct MenuContentView: View {
 
         if let state = model.state {
             let health = model.healthSnapshot
-            Text("\(L10n.schedule): \(state.schedule.times.joined(separator: ", "))")
+            ForEach(["claude", "codex"].filter {
+                ToolRequirements.requiredCLIs(activationTool: state.config.activationTool).contains($0)
+            }, id: \.self) { tool in
+                let schedule = state.schedule.forTool(tool)
+                Text("\(L10n.schedule): \(L10n.toolScheduleLine(tool: tool == "codex" ? "Codex" : "Claude", times: schedule.times, days: schedule.days, compact: false))")
+            }
             Text(quotaLine(tool: "claude", quota: state.quota["claude"], health: health.claude))
             Text(quotaLine(tool: "codex", quota: state.quota["codex"], health: health.codex))
         }
@@ -1132,8 +1153,6 @@ private struct ForgeBadgeMark: View {
 struct ScheduleCard: View {
     @ObservedObject var model: StokerAppModel
     @Environment(\.stokerTheme) private var theme
-    @State private var newHour = 8
-    @State private var newMinute = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -1145,22 +1164,15 @@ struct ScheduleCard: View {
                     .foregroundStyle(theme.accent)
             }
 
-            FlowLayout(spacing: 8) {
-                ForEach(Array(model.settings.scheduleTimes.enumerated()), id: \.offset) { index, time in
-                    TimePill(time: time, canDelete: model.settings.scheduleTimes.count > 1) {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            model.removeTime(at: index)
-                        }
-                    }
-                }
+            ScheduleRow(model: model, tool: "claude", title: "Claude", color: theme.seriesClaude,
+                        enabled: model.settings.enableClaude)
 
-                AddTimePill(hour: $newHour, minute: $newMinute) {
-                    let time = String(format: "%02d:%02d", newHour, newMinute)
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        model.addTime(time)
-                    }
-                }
-            }
+            Rectangle()
+                .fill(theme.hairline)
+                .frame(height: 1)
+
+            ScheduleRow(model: model, tool: "codex", title: "Codex", color: theme.seriesCodex,
+                        enabled: model.settings.enableCodex)
         }
         .padding(DS.cardPadding)
         .background(
@@ -1171,6 +1183,85 @@ struct ScheduleCard: View {
             RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous)
                 .strokeBorder(theme.hairline, lineWidth: 1)
         )
+    }
+}
+
+/// One tool's schedule: weekday chips ("Every day" + Mon…Sun; none selected = every day) and its
+/// time pills. Each row owns its add-time picker state so the two rows don't move together.
+private struct ScheduleRow: View {
+    @ObservedObject var model: StokerAppModel
+    var tool: String
+    var title: String
+    var color: Color
+    var enabled: Bool
+
+    @Environment(\.stokerTheme) private var theme
+    @State private var newHour = 8
+    @State private var newMinute = 0
+
+    var body: some View {
+        let times = model.settings.scheduleTimes(tool)
+        let days = model.settings.scheduleDays(tool)
+
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(color)
+
+            FlowLayout(spacing: 6) {
+                DayChip(label: L10n.everyDay, selected: days.isEmpty, color: color) {
+                    model.toggleDay(nil, tool: tool)
+                }
+                ForEach(ScheduleFormatter.weekdayOrder, id: \.self) { day in
+                    DayChip(label: L10n.weekdayShort(day), selected: days.contains(day), color: color) {
+                        model.toggleDay(day, tool: tool)
+                    }
+                }
+            }
+
+            FlowLayout(spacing: 8) {
+                ForEach(Array(times.enumerated()), id: \.offset) { index, time in
+                    TimePill(time: time, canDelete: times.count > 1) {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            model.removeTime(at: index, tool: tool)
+                        }
+                    }
+                }
+
+                AddTimePill(hour: $newHour, minute: $newMinute) {
+                    let time = String(format: "%02d:%02d", newHour, newMinute)
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        model.addTime(time, tool: tool)
+                    }
+                }
+            }
+        }
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.5)
+    }
+}
+
+private struct DayChip: View {
+    var label: String
+    var selected: Bool
+    var color: Color
+    var action: () -> Void
+
+    @Environment(\.stokerTheme) private var theme
+
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 11, weight: selected ? .semibold : .medium, design: .rounded))
+                .foregroundStyle(selected ? color : theme.textSecondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(selected ? color.opacity(0.14) : theme.fillSubtle)
+                .clipShape(Capsule())
+                .overlay(Capsule().strokeBorder(selected ? color.opacity(0.35) : theme.hairline, lineWidth: 1))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(PressButtonStyle())
     }
 }
 

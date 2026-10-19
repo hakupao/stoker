@@ -52,9 +52,13 @@ public enum ScheduleFormatter {
             .compactMap { normalize($0) }
     }
 
+    /// Accepts exactly the engine's `^[0-9]{1,2}:[0-9]{2}$` (then range-checks), so "7:05" is
+    /// valid but "7:5" / "+7:00" are not — the app never saves a time the engine would reject.
     public static func normalize(_ entry: String) -> String? {
-        let parts = entry.split(separator: ":")
+        let parts = entry.split(separator: ":", omittingEmptySubsequences: false)
         guard parts.count == 2,
+              (1...2).contains(parts[0].count), parts[1].count == 2,
+              (parts[0] + parts[1]).allSatisfy({ ("0"..."9").contains($0) }),
               let hour = Int(parts[0]), (0...23).contains(hour),
               let minute = Int(parts[1]), (0...59).contains(minute) else {
             return nil
@@ -77,6 +81,49 @@ public enum ScheduleFormatter {
             match.second = 0
             return calendar.nextDate(after: now, matching: match, matchingPolicy: .nextTime)
         }.min()
+    }
+
+    /// Weekday tokens in display/normalized order (Mon→Sun), as the engine writes them.
+    public static let weekdayOrder = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+    /// Parses a `*_SCHEDULE_DAYS` value: comma-separated, case-insensitive. Empty, `daily` (also
+    /// mixed with other days, e.g. `daily,mon`), or all seven days mean every day (`[]`), so the
+    /// next save writes the canonical empty value. Unknown tokens are dropped (the engine rejects them
+    /// with exit 2; the app only ever writes valid ones).
+    public static func days(from raw: String) -> [String] {
+        let tokens = raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+        if tokens.contains("daily") { return [] }
+        return normalizeDays(tokens)
+    }
+
+    /// Mon→Sun order, deduped, lowercase; all seven collapse to `[]` (every day).
+    public static func normalizeDays(_ days: [String]) -> [String] {
+        let set = Set(days.map { $0.lowercased() })
+        let ordered = weekdayOrder.filter { set.contains($0) }
+        return ordered.count == weekdayOrder.count ? [] : ordered
+    }
+
+    /// Like `nextFire(times:now:calendar:)`, limited to `days` (mon..sun; `[]` = every day).
+    public static func nextFire(times: [String], days: [String], now: Date = Date(),
+                                calendar: Calendar = .current) -> Date? {
+        let weekdays = normalizeDays(days).compactMap(calendarWeekday)
+        guard !weekdays.isEmpty else { return nextFire(times: times, now: now, calendar: calendar) }
+        return times.compactMap(hourMinute).flatMap { clock in
+            weekdays.compactMap { weekday -> Date? in
+                var match = DateComponents()
+                match.weekday = weekday
+                match.hour = clock.0
+                match.minute = clock.1
+                match.second = 0
+                return calendar.nextDate(after: now, matching: match, matchingPolicy: .nextTime)
+            }
+        }.min()
+    }
+
+    /// mon..sun → Foundation's `Calendar.weekday` (1 = Sunday … 7 = Saturday).
+    private static func calendarWeekday(_ day: String) -> Int? {
+        guard let index = weekdayOrder.firstIndex(of: day) else { return nil }
+        return index == 6 ? 1 : index + 2
     }
 
     /// Whole minutes from `now` until `date`, clamped at zero.
@@ -250,16 +297,82 @@ public struct ActivationState: Decodable {
         public var workingDirectory: String?
         public var matchesRoot: Bool?
         public var mismatch: String?
+        /// Per-tool LaunchAgents (`claude` / `codex`); nil from an older single-agent engine.
+        public var agents: [String: Agent]?
+        /// Old-label agents (pre per-tool) still loaded; nil when absent or malformed.
+        public var legacy: [LegacyAgent]?
+        /// The engine says the loaded agents predate the per-tool layout (re-install fixes it).
+        public var needsMigration: Bool?
+
+        /// The schedule must be re-installed: legacy agents need migrating, or a per-tool agent
+        /// is stray (loaded although its tool is not enabled / not current).
+        public var needsReinstall: Bool {
+            needsMigration == true || (agents ?? [:]).values.contains { $0.stray == true }
+        }
+
+        public struct Agent: Decodable {
+            public var label: String?
+            public var loaded: Bool?
+            public var state: String?
+            public var stray: Bool?
+        }
+
+        public struct LegacyAgent: Decodable {
+            public var label: String?
+            public var loaded: Bool?
+            public var matchesRoot: Bool?
+            public var program: String?
+            public var workingDirectory: String?
+
+            private enum CodingKeys: String, CodingKey {
+                case label, loaded, program
+                case matchesRoot = "matches_root"
+                case workingDirectory = "working_directory"
+            }
+        }
 
         private enum CodingKeys: String, CodingKey {
-            case state, error, program, mismatch
+            case state, error, program, mismatch, agents, legacy
+            case needsMigration = "needs_migration"
             case workingDirectory = "working_directory"
             case matchesRoot = "matches_root"
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            state = try c.decodeIfPresent(String.self, forKey: .state)
+            error = try c.decodeIfPresent(String.self, forKey: .error)
+            program = try c.decodeIfPresent(String.self, forKey: .program)
+            workingDirectory = try c.decodeIfPresent(String.self, forKey: .workingDirectory)
+            matchesRoot = try c.decodeIfPresent(Bool.self, forKey: .matchesRoot)
+            mismatch = try c.decodeIfPresent(String.self, forKey: .mismatch)
+            // Informational only: a surprise shape must not fail the whole decode.
+            agents = (try? c.decodeIfPresent([String: Agent].self, forKey: .agents)) ?? nil
+            legacy = (try? c.decodeIfPresent([LegacyAgent].self, forKey: .legacy)) ?? nil
+            needsMigration = (try? c.decodeIfPresent(Bool.self, forKey: .needsMigration)) ?? nil
         }
     }
 
     public struct Schedule: Decodable {
+        /// Union of the enabled tools' times (what older engines emitted as the only field).
         public var times: [String]
+        public var claude: ToolSchedule
+        public var codex: ToolSchedule
+
+        private enum CodingKeys: String, CodingKey { case times, claude, codex }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            times = try c.decode([String].self, forKey: .times)
+            // An older engine has no per-tool fields: both tools ran on `times`, every day.
+            let shared = ToolSchedule(times: times, days: [])
+            claude = try c.decodeIfPresent(ToolSchedule.self, forKey: .claude) ?? shared
+            codex = try c.decodeIfPresent(ToolSchedule.self, forKey: .codex) ?? shared
+        }
+
+        public func forTool(_ tool: String) -> ToolSchedule {
+            tool == "codex" ? codex : claude
+        }
     }
 
     public struct Config: Decodable {
@@ -510,8 +623,34 @@ public struct ActivationState: Decodable {
     }
 }
 
+/// One tool's schedule: "HH:MM" times plus weekdays (mon..sun; `[]` = every day).
+public struct ToolSchedule: Decodable, Equatable, Sendable {
+    public var times: [String]
+    public var days: [String]
+
+    public init(times: [String], days: [String]) {
+        self.times = times
+        self.days = days
+    }
+
+    private enum CodingKeys: String, CodingKey { case times, days }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        times = try c.decodeIfPresent([String].self, forKey: .times) ?? []
+        days = ScheduleFormatter.normalizeDays(try c.decodeIfPresent([String].self, forKey: .days) ?? [])
+    }
+
+    public func nextFire(now: Date = Date(), calendar: Calendar = .current) -> Date? {
+        ScheduleFormatter.nextFire(times: times, days: days, now: now, calendar: calendar)
+    }
+}
+
 public struct AppSettings {
-    public var scheduleTimes: [String]
+    public var claudeScheduleTimes: [String]
+    public var claudeScheduleDays: [String]
+    public var codexScheduleTimes: [String]
+    public var codexScheduleDays: [String]
     public var activationTool: String
     public var codexModel: String
     public var enableStatusSnapshots: Bool
@@ -544,8 +683,16 @@ public struct AppSettings {
     }
 
     public init(values: [String: String]) {
-        let timesStr = values["SCHEDULE_TIMES"] ?? "07:00,12:00,17:00,22:00"
-        scheduleTimes = ScheduleFormatter.times(from: timesStr)
+        // D1 fallback chain: per-tool → shared SCHEDULE_TIMES → default; empty counts as unset.
+        func nonEmpty(_ key: String) -> String? {
+            guard let value = values[key], !value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+            return value
+        }
+        let sharedTimes = nonEmpty("SCHEDULE_TIMES") ?? "07:00,12:00,17:00,22:00"
+        claudeScheduleTimes = ScheduleFormatter.times(from: nonEmpty("CLAUDE_SCHEDULE_TIMES") ?? sharedTimes)
+        codexScheduleTimes = ScheduleFormatter.times(from: nonEmpty("CODEX_SCHEDULE_TIMES") ?? sharedTimes)
+        claudeScheduleDays = ScheduleFormatter.days(from: values["CLAUDE_SCHEDULE_DAYS"] ?? "")
+        codexScheduleDays = ScheduleFormatter.days(from: values["CODEX_SCHEDULE_DAYS"] ?? "")
         activationTool = values["ACTIVATION_TOOL"] ?? "all"
         codexModel = AppSettings.migratedCodexModel(values["CODEX_MODEL"])
         enableStatusSnapshots = values["ENABLE_STATUS_SNAPSHOTS"] != "0"
@@ -576,9 +723,31 @@ public struct AppSettings {
         return raw
     }
 
+    public func scheduleTimes(_ tool: String) -> [String] {
+        tool == "codex" ? codexScheduleTimes : claudeScheduleTimes
+    }
+
+    public func scheduleDays(_ tool: String) -> [String] {
+        tool == "codex" ? codexScheduleDays : claudeScheduleDays
+    }
+
+    public mutating func setScheduleTimes(_ times: [String], for tool: String) {
+        if tool == "codex" { codexScheduleTimes = times } else { claudeScheduleTimes = times }
+    }
+
+    public mutating func setScheduleDays(_ days: [String], for tool: String) {
+        let normalized = ScheduleFormatter.normalizeDays(days)
+        if tool == "codex" { codexScheduleDays = normalized } else { claudeScheduleDays = normalized }
+    }
+
+    /// Writes the per-tool keys only; a legacy SCHEDULE_TIMES line in .env is left untouched
+    /// (it stays the engine's fallback).
     public var envValues: [String: String] {
         [
-            "SCHEDULE_TIMES": scheduleTimes.joined(separator: ","),
+            "CLAUDE_SCHEDULE_TIMES": claudeScheduleTimes.joined(separator: ","),
+            "CLAUDE_SCHEDULE_DAYS": claudeScheduleDays.joined(separator: ","),
+            "CODEX_SCHEDULE_TIMES": codexScheduleTimes.joined(separator: ","),
+            "CODEX_SCHEDULE_DAYS": codexScheduleDays.joined(separator: ","),
             "ACTIVATION_TOOL": activationTool,
             "CODEX_MODEL": codexModel,
             "ENABLE_STATUS_SNAPSHOTS": enableStatusSnapshots ? "1" : "0",

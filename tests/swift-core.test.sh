@@ -131,6 +131,107 @@ let fallMorning = nyCal.date(from: fallComps)!
 let fallNext = ScheduleFormatter.nextFire(times: ["12:00"], now: fallMorning, calendar: nyCal)!
 precondition(ScheduleFormatter.clock(fallNext, calendar: nyCal) == "12:00")
 
+// ---- Per-tool schedule: days + nextFire(times:days:) ----
+precondition(ScheduleFormatter.days(from: "Sun, mon,MON,fri") == ["mon", "fri", "sun"])
+precondition(ScheduleFormatter.days(from: "") == [] && ScheduleFormatter.days(from: "Daily") == [])
+precondition(ScheduleFormatter.days(from: "mon,bogus") == ["mon"], "unknown tokens are dropped")
+// NIT-10: `daily` mixed with days still means every day; the next save writes "".
+precondition(ScheduleFormatter.days(from: "daily,mon") == [] && ScheduleFormatter.days(from: "Mon, DAILY") == [])
+precondition(AppSettings(values: ["CODEX_SCHEDULE_DAYS": "daily,mon"]).envValues["CODEX_SCHEDULE_DAYS"] == "")
+// NIT-11: normalize matches the engine's ^[0-9]{1,2}:[0-9]{2}$ (then range-checks).
+precondition(ScheduleFormatter.normalize("7:05") == "07:05" && ScheduleFormatter.normalize("23:59") == "23:59")
+for bad in ["7:5", "+7:00", "07:00:00", "007:00", "7:", ":05", " 7:05", "24:00", "07:60", "-1:00", "7:+5", "٧:٠٥"] {
+    precondition(ScheduleFormatter.normalize(bad) == nil, "normalize must reject \(bad)")
+}
+precondition(ScheduleFormatter.times(from: "7:5,8:05") == ["08:05"])
+precondition(ScheduleFormatter.days(from: "mon,tue,wed,thu,fri,sat,sun") == [], "all seven = every day")
+precondition(ScheduleFormatter.normalizeDays(["SAT", "tue", "tue"]) == ["tue", "sat"])
+var dayCal = Calendar(identifier: .gregorian); dayCal.timeZone = TimeZone(identifier: "UTC")!
+var dayComps = DateComponents(); dayComps.year = 2026; dayComps.month = 6; dayComps.day = 1; dayComps.hour = 8
+let mon8 = dayCal.date(from: dayComps)!
+precondition(dayCal.component(.weekday, from: mon8) == 2, "2026-06-01 is a Monday")
+func utcDate(_ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
+    var c = DateComponents(); c.year = 2026; c.month = 6; c.day = day; c.hour = hour; c.minute = minute
+    return dayCal.date(from: c)!
+}
+// days [] matches the old daily signature.
+precondition(ScheduleFormatter.nextFire(times: ["07:00", "12:00"], days: [], now: mon8, calendar: dayCal)
+    == ScheduleFormatter.nextFire(times: ["07:00", "12:00"], now: mon8, calendar: dayCal))
+// Monday-only: 12:00 later today; 07:00 already passed → next Monday (crosses the week boundary).
+precondition(ScheduleFormatter.nextFire(times: ["07:00", "12:00"], days: ["mon"], now: mon8, calendar: dayCal) == utcDate(1, 12))
+precondition(ScheduleFormatter.nextFire(times: ["07:00"], days: ["mon"], now: mon8, calendar: dayCal) == utcDate(8, 7))
+// Sunday maps to Calendar.weekday 1 (not 7 = Saturday).
+precondition(ScheduleFormatter.nextFire(times: ["09:30"], days: ["sun"], now: mon8, calendar: dayCal) == utcDate(7, 9, 30))
+precondition(ScheduleFormatter.nextFire(times: ["09:30"], days: ["sat"], now: mon8, calendar: dayCal) == utcDate(6, 9, 30))
+// Earliest across days and times; Thursday beats next Monday.
+precondition(ScheduleFormatter.nextFire(times: ["07:00", "22:00"], days: ["thu", "mon"], now: utcDate(1, 23), calendar: dayCal) == utcDate(4, 7))
+precondition(ScheduleFormatter.nextFire(times: [], days: ["mon"], now: mon8, calendar: dayCal) == nil)
+precondition(ToolSchedule(times: ["07:00"], days: ["tue"]).nextFire(now: mon8, calendar: dayCal) == utcDate(2, 7))
+
+// AppSettings: D1 fallback chain (per-tool → SCHEDULE_TIMES → default; empty = unset).
+let sDefault = AppSettings(values: [:])
+precondition(sDefault.claudeScheduleTimes == ["07:00", "12:00", "17:00", "22:00"])
+precondition(sDefault.codexScheduleTimes == ["07:00", "12:00", "17:00", "22:00"])
+precondition(sDefault.claudeScheduleDays == [] && sDefault.codexScheduleDays == [])
+let sLegacy = AppSettings(values: ["SCHEDULE_TIMES": "06:15,13:15", "CODEX_SCHEDULE_TIMES": ""])
+precondition(sLegacy.claudeScheduleTimes == ["06:15", "13:15"] && sLegacy.codexScheduleTimes == ["06:15", "13:15"])
+let sPerTool = AppSettings(values: ["SCHEDULE_TIMES": "06:15", "CLAUDE_SCHEDULE_TIMES": "07:00,12:00",
+                                    "CODEX_SCHEDULE_TIMES": "7:30", "CODEX_SCHEDULE_DAYS": "Thu,mon",
+                                    "CLAUDE_SCHEDULE_DAYS": "daily"])
+precondition(sPerTool.claudeScheduleTimes == ["07:00", "12:00"] && sPerTool.claudeScheduleDays == [])
+precondition(sPerTool.codexScheduleTimes == ["07:30"] && sPerTool.codexScheduleDays == ["mon", "thu"])
+precondition(sPerTool.scheduleTimes("codex") == ["07:30"] && sPerTool.scheduleDays("claude") == [])
+// envValues writes the four per-tool keys (empty days → ""), never SCHEDULE_TIMES.
+let ev = sPerTool.envValues
+precondition(ev["CLAUDE_SCHEDULE_TIMES"] == "07:00,12:00" && ev["CLAUDE_SCHEDULE_DAYS"] == "")
+precondition(ev["CODEX_SCHEDULE_TIMES"] == "07:30" && ev["CODEX_SCHEDULE_DAYS"] == "mon,thu")
+precondition(ev["SCHEDULE_TIMES"] == nil)
+var sEdit = sPerTool
+sEdit.setScheduleDays(["sun", "mon", "tue", "wed", "thu", "fri", "sat"], for: "codex")
+precondition(sEdit.codexScheduleDays == [], "selecting all seven days normalizes to every day")
+sEdit.setScheduleDays(["fri", "mon"], for: "claude")
+sEdit.setScheduleTimes(["22:00"], for: "codex")
+// Round-trip through .env text: legacy SCHEDULE_TIMES line survives, empty days stay empty.
+let envText = EnvFile.updating("# c\nSCHEDULE_TIMES=06:15\nCODEX_SCHEDULE_DAYS=mon\n", values: sEdit.envValues)
+precondition(envText.contains("SCHEDULE_TIMES=06:15\n"))
+precondition(envText.contains("\nCODEX_SCHEDULE_DAYS=\n"), "empty days written as KEY=")
+let reparsed = AppSettings(values: EnvParser.parse(envText))
+precondition(reparsed.claudeScheduleTimes == ["07:00", "12:00"] && reparsed.claudeScheduleDays == ["mon", "fri"])
+precondition(reparsed.codexScheduleTimes == ["22:00"] && reparsed.codexScheduleDays == [])
+
+// Schedule decode: per-tool fields when present, `times` + every day when absent (older engine).
+let newSchedule = try! JSONDecoder().decode(ActivationState.Schedule.self, from: Data(#"""
+{"times":["07:00","12:00"],"claude":{"times":["07:00","12:00"],"days":[]},"codex":{"times":["07:00"],"days":["Thu","mon"]}}
+"""#.utf8))
+precondition(newSchedule.forTool("claude") == ToolSchedule(times: ["07:00", "12:00"], days: []))
+precondition(newSchedule.forTool("codex") == ToolSchedule(times: ["07:00"], days: ["mon", "thu"]))
+let oldSchedule = try! JSONDecoder().decode(ActivationState.Schedule.self, from: Data(#"{"times":["06:00","18:00"]}"#.utf8))
+precondition(oldSchedule.claude == ToolSchedule(times: ["06:00", "18:00"], days: []) && oldSchedule.codex == oldSchedule.claude)
+// launchctl.agents is optional and tolerated when malformed.
+let lcAgents = try! JSONDecoder().decode(ActivationState.Launchctl.self, from: Data(#"""
+{"state":"running","agents":{"claude":{"label":"com.stoker.ai-window.claude","loaded":true,"state":"waiting"},"codex":{"label":"com.stoker.ai-window.codex","loaded":false}}}
+"""#.utf8))
+precondition(lcAgents.agents?["claude"]?.loaded == true && lcAgents.agents?["codex"]?.loaded == false)
+precondition(try! JSONDecoder().decode(ActivationState.Launchctl.self, from: Data(#"{"state":"x"}"#.utf8)).agents == nil)
+precondition(try! JSONDecoder().decode(ActivationState.Launchctl.self, from: Data(#"{"agents":"bad"}"#.utf8)).agents == nil)
+// Fix round 1: legacy / needs_migration / stray are optional and tolerated when malformed.
+let lcMigrate = try! JSONDecoder().decode(ActivationState.Launchctl.self, from: Data(#"""
+{"needs_migration":true,"legacy":[{"label":"com.stoker.ai-window","loaded":true,"matches_root":false,"program":"/p","working_directory":"/w"}],
+ "agents":{"claude":{"label":"c","loaded":true,"stray":false}}}
+"""#.utf8))
+precondition(lcMigrate.needsMigration == true && lcMigrate.needsReinstall)
+precondition(lcMigrate.legacy?.first?.label == "com.stoker.ai-window" && lcMigrate.legacy?.first?.matchesRoot == false)
+precondition(lcMigrate.legacy?.first?.workingDirectory == "/w")
+let lcStray = try! JSONDecoder().decode(ActivationState.Launchctl.self, from: Data(#"""
+{"needs_migration":false,"agents":{"claude":{"loaded":true},"codex":{"loaded":true,"stray":true}}}
+"""#.utf8))
+precondition(lcStray.needsReinstall && lcStray.agents?["codex"]?.stray == true)
+let lcBad = try! JSONDecoder().decode(ActivationState.Launchctl.self, from: Data(#"""
+{"state":"x","needs_migration":"yes","legacy":{"label":"oops"}}
+"""#.utf8))
+precondition(lcBad.needsMigration == nil && lcBad.legacy == nil && !lcBad.needsReinstall)
+precondition(!lcAgents.needsReinstall, "plain loaded agents need no re-install")
+
 let tempRoot = URL(fileURLWithPath: NSTemporaryDirectory())
     .appendingPathComponent(UUID().uuidString)
 let resources = tempRoot.appendingPathComponent("Stoker.app/Contents/Resources")
@@ -753,6 +854,60 @@ precondition(ToolHealthEvaluator.claude(records: [
 let cNoTimes = ToolHealthEvaluator.claude(records: [rec("2026-09-20 12:00:00 UTC", "claude", ok: true)],
     scheduleOn: true, times: [], now: toolHealthNow, calendar: utc)
 precondition(cNoTimes.state == .ok && cNoTimes.nextActivation == nil)
+
+// Per-tool staleness: Claude's own times + days decide whether a slot was missed.
+let mondayOnly = ["mon"]   // toolHealthNow = 2026-09-27 00:00 UTC, a Sunday
+precondition(utc.component(.weekday, from: toolHealthNow) == 1)
+// Weekly-only (Mon 07:00), last run Thu 09-24 07:00 — 3 days ago, no Monday slot missed yet → no alert.
+let cWeekly = ToolHealthEvaluator.claude(records: [rec("2026-09-24 07:00:05 UTC", "claude", ok: true)],
+    scheduleOn: true, times: ["07:00"], days: mondayOnly, now: toolHealthNow, calendar: utc)
+precondition(cWeekly.state == .ok && !cWeekly.isAlert, "weekly Claude schedule is not stale between slots")
+precondition(cWeekly.nextActivation == iso("2026-09-28T07:00:00Z"))
+// Same history on a daily schedule → stale (>24h and slots missed).
+precondition(ToolHealthEvaluator.claude(records: [rec("2026-09-24 07:00:05 UTC", "claude", ok: true)],
+    scheduleOn: true, times: ["07:00"], now: toolHealthNow, calendar: utc).state == .alert)
+// Weekly schedule whose Monday slot passed (+grace) with no proof → alert.
+precondition(ToolHealthEvaluator.claude(records: [rec("2026-09-21 07:00:05 UTC", "claude", ok: true)],
+    scheduleOn: true, times: ["07:00"], days: mondayOnly, now: iso("2026-09-28T08:30:00Z"), calendar: utc).state == .alert)
+// ...but still within the grace after the slot → not yet.
+precondition(ToolHealthEvaluator.claude(records: [rec("2026-09-21 07:00:05 UTC", "claude", ok: true)],
+    scheduleOn: true, times: ["07:00"], days: mondayOnly, now: iso("2026-09-28T07:30:00Z"), calendar: utc).state == .ok)
+// Snapshot: each tool uses its own schedule; Codex nextActivation follows Codex's times.
+let perToolSnap = ToolHealthEvaluator.snapshot(records: [], quota: [:], installed: true,
+    claudeSchedule: ToolSchedule(times: slots, days: []),
+    codexSchedule: ToolSchedule(times: ["09:15"], days: ["tue"]),
+    activationTool: "all", now: toolHealthNow, calendar: utc)
+precondition(perToolSnap.claude.nextActivation == iso("2026-09-27T07:00:00Z"))
+precondition(perToolSnap.codex.nextActivation == iso("2026-09-29T09:15:00Z"))
+// The state-driven snapshot pulls the per-tool schedules out of app-status JSON.
+let perToolState = try! JSONDecoder().decode(ActivationState.self, from: Data("""
+{"root":"/r","label":"l","installed":true,"running":false,
+ "schedule":{"times":["07:00","12:00"],"claude":{"times":["12:00"],"days":[]},"codex":{"times":["07:00"],"days":["wed"]}},
+ "config":{"activation_tool":"all","codex_model":"m","enable_status_snapshots":true,
+   "enable_quota_preflight":true,"quota_preflight_on_unknown":"allow"},
+ "keep_awake":{"mode":"off","seconds":0},"quota":{}}
+""".utf8))
+let perToolStateSnap = ToolHealthEvaluator.snapshot(records: [], state: perToolState, now: stateNow)
+precondition(perToolStateSnap.claude.nextActivation == ScheduleFormatter.nextFire(times: ["12:00"], now: stateNow))
+precondition(perToolStateSnap.codex.nextActivation == ScheduleFormatter.nextFire(times: ["07:00"], days: ["wed"], now: stateNow))
+
+// L10n schedule strings.
+let savedLanguageSched = UserDefaults.standard.string(forKey: "appLanguage")
+AppLanguage.current = .en
+precondition(L10n.scheduleNeedsReinstall.hasPrefix("Schedule needs updating"))
+precondition(L10n.everyDay == "Every day" && L10n.weekdayShort("mon") == "Mon" && L10n.weekdayShort("sun") == "Sun")
+precondition(L10n.toolScheduleLine(tool: "Claude", times: slots, days: []) == "Claude 07·12·17·22")
+precondition(L10n.toolScheduleLine(tool: "Codex", times: ["07:30"], days: ["mon", "thu"]) == "Codex 07:30 (Mon, Thu)")
+precondition(L10n.toolScheduleLine(tool: "Codex", times: ["07:00", "12:30"], days: [], compact: false) == "Codex 07:00, 12:30")
+AppLanguage.current = .zh
+precondition(L10n.scheduleNeedsReinstall.hasPrefix("调度需要更新"))
+precondition(L10n.everyDay == "每天" && L10n.weekdayShort("sun") == "日")
+precondition(L10n.toolScheduleLine(tool: "Codex", times: ["07:00"], days: ["mon", "thu"]) == "Codex 07（周一、四）")
+if let savedLanguageSched {
+    UserDefaults.standard.set(savedLanguageSched, forKey: "appLanguage")
+} else {
+    UserDefaults.standard.removeObject(forKey: "appLanguage")
+}
 
 // M-3: Codex bools parse like the engine — absent (or empty) → on, otherwise only "1" is on.
 let s2 = AppSettings(values: ["CODEX_AUTO_UPDATE": "yes", "CODEX_MODEL_FALLBACK": "true", "CODEX_ACTIVATE_ONLY_WHEN_IDLE": ""])

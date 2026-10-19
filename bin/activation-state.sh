@@ -16,7 +16,8 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 LABEL="${LABEL:-com.stoker.ai-window}"
-SCHEDULE_TIMES="${SCHEDULE_TIMES:-07:00,12:00,17:00,22:00}"
+LEGACY_LABELS="${LEGACY_LABELS:-com.activation-timer.ai-window}"
+LAUNCHCTL_BIN="${LAUNCHCTL_BIN:-launchctl}"
 ACTIVATION_TOOL="${ACTIVATION_TOOL:-all}"
 CODEX_MODEL="${CODEX_MODEL:-gpt-5.6-luna}"
 ENABLE_STATUS_SNAPSHOTS="${ENABLE_STATUS_SNAPSHOTS:-1}"
@@ -37,7 +38,7 @@ CLAUDE_USAGE_CACHE_FILE="${CLAUDE_USAGE_CACHE_FILE:-${CLAUDE_CONFIG_DIR:-${HOME}
 LOG_DIR="${ROOT_DIR}/logs"
 USAGE_LOG="${LOG_DIR}/usage.jsonl"
 STATUS_LOG="${LOG_DIR}/status.jsonl"
-PLIST_INSTALLED="${HOME}/Library/LaunchAgents/${LABEL}.plist"
+LAUNCH_AGENTS_DIR="${HOME}/Library/LaunchAgents"
 EXPECTED_PROGRAM="${ROOT_DIR}/bin/activate-ai-window.sh"
 
 usage() {
@@ -66,26 +67,91 @@ bool_from_1() {
   fi
 }
 
-schedule_json() {
-  local raw_time trimmed
-  IFS=',' read -r -a times <<<"$SCHEDULE_TIMES"
-  for raw_time in "${times[@]}"; do
+tool_enabled() {
+  [[ "$ACTIVATION_TOOL" != "claude" && "$ACTIVATION_TOOL" != "codex" ]] || [[ "$ACTIVATION_TOOL" == "$1" ]]
+}
+
+# Mirrors load_tool_schedule in scripts/install-launchd.sh (keep behavior in
+# sync): sets SCHED_TIMES (sorted unique HH:MM) and SCHED_DAYS (mon..sun order;
+# empty = every day). Times fall back <TOOL>_SCHEDULE_TIMES -> SCHEDULE_TIMES ->
+# default. Invalid values exit 2.
+load_tool_schedule() {
+  local tool="$1" upper times_var days_var raw_times raw_days source_name entries
+  upper="$(printf '%s' "$tool" | tr '[:lower:]' '[:upper:]')"
+  times_var="${upper}_SCHEDULE_TIMES"
+  days_var="${upper}_SCHEDULE_DAYS"
+  raw_times="${!times_var:-}"
+  source_name="$times_var"
+  if [[ -z "${raw_times//[[:space:]]/}" ]]; then
+    raw_times="${SCHEDULE_TIMES:-}"
+    source_name="SCHEDULE_TIMES"
+  fi
+  if [[ -z "${raw_times//[[:space:]]/}" ]]; then
+    raw_times="07:00,12:00,17:00,22:00"
+  fi
+
+  local raw_time trimmed hour minute parsed_times=()
+  IFS=',' read -r -a entries <<<"$raw_times"
+  for raw_time in "${entries[@]}"; do
     trimmed="$(printf '%s' "$raw_time" | tr -d '[:space:]')"
     if ! [[ "$trimmed" =~ ^[0-9]{1,2}:[0-9]{2}$ ]]; then
-      echo "SCHEDULE_TIMES entries must be in HH:MM format" >&2
+      echo "${source_name} entries must be in HH:MM format" >&2
       exit 2
     fi
-    local hour="${trimmed%%:*}" minute="${trimmed##*:}"
+    hour="${trimmed%%:*}"
+    minute="${trimmed##*:}"
     if (( 10#$hour < 0 || 10#$hour > 23 )); then
-      echo "Hour must be 0-23 in SCHEDULE_TIMES entry: ${trimmed}" >&2
+      echo "Hour must be 0-23 in ${source_name} entry: ${trimmed}" >&2
       exit 2
     fi
     if (( 10#$minute < 0 || 10#$minute > 59 )); then
-      echo "Minute must be 0-59 in SCHEDULE_TIMES entry: ${trimmed}" >&2
+      echo "Minute must be 0-59 in ${source_name} entry: ${trimmed}" >&2
       exit 2
     fi
-    printf '%02d:%02d\n' "$((10#$hour))" "$((10#$minute))"
-  done | "$JQ_BIN" -R -s -c 'split("\n") | map(select(length > 0))'
+    parsed_times+=("$(printf '%02d:%02d' "$((10#$hour))" "$((10#$minute))")")
+  done
+  if (( ${#parsed_times[@]} == 0 )); then
+    echo "${source_name} must contain at least one time" >&2
+    exit 2
+  fi
+  SCHED_TIMES=()
+  while IFS= read -r trimmed; do
+    SCHED_TIMES+=("$trimmed")
+  done < <(printf '%s\n' "${parsed_times[@]}" | sort -u)
+
+  raw_days="$(printf '%s' "${!days_var:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+  local day seen=" " all_days=(mon tue wed thu fri sat sun)
+  SCHED_DAYS=()
+  if [[ -n "$raw_days" && "$raw_days" != "daily" ]]; then
+    IFS=',' read -r -a entries <<<"$raw_days"
+    for day in "${entries[@]}"; do
+      [[ -z "$day" ]] && continue
+      case "$day" in
+        mon|tue|wed|thu|fri|sat|sun) seen="${seen}${day} " ;;
+        *)
+          echo "${days_var} entries must be mon,tue,wed,thu,fri,sat,sun or daily: ${day}" >&2
+          exit 2
+          ;;
+      esac
+    done
+    for day in "${all_days[@]}"; do
+      [[ "$seen" == *" ${day} "* ]] && SCHED_DAYS+=("$day")
+    done
+    # All seven days selected is just "every day".
+    (( ${#SCHED_DAYS[@]} == 7 )) && SCHED_DAYS=()
+  fi
+  return 0
+}
+
+tool_schedule_json() {
+  load_tool_schedule "$1"
+  # shellcheck disable=SC2016 # jq variables are intentionally evaluated by jq.
+  "$JQ_BIN" -n -c \
+    --arg times "$(printf '%s\n' "${SCHED_TIMES[@]}")" \
+    --arg days "$(printf '%s\n' "${SCHED_DAYS[@]+"${SCHED_DAYS[@]}"}")" '
+      { times: ($times | split("\n") | map(select(length > 0))),
+        days: ($days | split("\n") | map(select(length > 0))) }
+    '
 }
 
 read_latest_by_tool() {
@@ -118,12 +184,12 @@ read_last_jsonl() {
 }
 
 plist_value() {
-  local key="$1"
-  if [[ ! -f "$PLIST_INSTALLED" ]]; then
+  local plist="$1" key="$2"
+  if [[ ! -f "$plist" ]]; then
     return 1
   fi
 
-  plutil -extract "$key" raw -o - "$PLIST_INSTALLED" 2>/dev/null
+  plutil -extract "$key" raw -o - "$plist" 2>/dev/null
 }
 
 loaded_program_from_launchctl() {
@@ -148,7 +214,53 @@ loaded_program_from_launchctl() {
   '
 }
 
-installed=false
+# Probes one tool's agent into AGENT_* globals.
+probe_agent() {
+  local label="$1" plist output probe_status
+  plist="${LAUNCH_AGENTS_DIR}/${label}.plist"
+  AGENT_LOADED=false
+  AGENT_STATE="not_loaded"
+  AGENT_ERROR=""
+  AGENT_PROGRAM=""
+  AGENT_WORKING_DIRECTORY=""
+  AGENT_MATCHES_ROOT=false
+  AGENT_MISMATCH=""
+
+  if [[ "${STOKER_SKIP_LAUNCHCTL:-0}" == "1" ]]; then
+    AGENT_STATE="skipped"
+    return 0
+  fi
+
+  output="$("$LAUNCHCTL_BIN" print "gui/${UID}/${label}" 2>&1)" && probe_status=0 || probe_status=$?
+  if [[ "$probe_status" != "0" ]]; then
+    AGENT_ERROR="$(printf '%s' "$output" | tr '\n' ' ' | cut -c 1-240)"
+    return 0
+  fi
+
+  AGENT_LOADED=true
+  AGENT_STATE="$(printf '%s\n' "$output" | awk -F'= ' '/state = / {print $2; exit}')"
+  [[ -z "$AGENT_STATE" ]] && AGENT_STATE="unknown"
+  AGENT_PROGRAM="$(plist_value "$plist" ProgramArguments.1 || true)"
+  AGENT_WORKING_DIRECTORY="$(plist_value "$plist" WorkingDirectory || true)"
+  if [[ -z "$AGENT_PROGRAM" ]]; then
+    AGENT_PROGRAM="$(printf '%s\n' "$output" | loaded_program_from_launchctl)"
+  fi
+  if [[ -z "$AGENT_WORKING_DIRECTORY" ]]; then
+    AGENT_WORKING_DIRECTORY="$(printf '%s\n' "$output" | awk -F'= ' '/working directory = / {print $2; exit}')"
+  fi
+  if [[ "$AGENT_PROGRAM" == "$EXPECTED_PROGRAM" && "$AGENT_WORKING_DIRECTORY" == "$ROOT_DIR" ]]; then
+    AGENT_MATCHES_ROOT=true
+  else
+    AGENT_MISMATCH="Loaded LaunchAgent ${label} points to ${AGENT_WORKING_DIRECTORY:-unknown root}; current root is ${ROOT_DIR}"
+  fi
+  return 0
+}
+
+# Top-level launchctl fields describe the first enabled tool's agent; installed
+# requires every enabled agent loaded from this root and nothing stray (a loaded
+# agent of a disabled tool, or a legacy agent of this root, both fixed by a
+# reinstall); mismatch is the first enabled or legacy agent that points elsewhere.
+installed=true
 running=false
 launchctl_state="unavailable"
 launchctl_error=""
@@ -156,38 +268,77 @@ launchctl_program=""
 launchctl_working_directory=""
 launchctl_matches_root=false
 launchctl_mismatch=""
+first_enabled=1
+agents='{}'
 
-if [[ "${STOKER_SKIP_LAUNCHCTL:-0}" == "1" ]]; then
-  launchctl_state="skipped"
-else
-  launchctl_output="$(launchctl print "gui/${UID}/${LABEL}" 2>&1)" && launchctl_status=0 || launchctl_status=$?
-  if [[ "$launchctl_status" == "0" ]]; then
-    launchctl_state="$(printf '%s\n' "$launchctl_output" | awk -F'= ' '/state = / {print $2; exit}')"
-    [[ -z "$launchctl_state" ]] && launchctl_state="unknown"
-    launchctl_program="$(plist_value ProgramArguments.1 || true)"
-    launchctl_working_directory="$(plist_value WorkingDirectory || true)"
-    if [[ -z "$launchctl_program" ]]; then
-      launchctl_program="$(printf '%s\n' "$launchctl_output" | loaded_program_from_launchctl)"
-    fi
-    if [[ -z "$launchctl_working_directory" ]]; then
-      launchctl_working_directory="$(printf '%s\n' "$launchctl_output" | awk -F'= ' '/working directory = / {print $2; exit}')"
-    fi
-    if [[ "$launchctl_program" == "$EXPECTED_PROGRAM" && "$launchctl_working_directory" == "$ROOT_DIR" ]]; then
-      installed=true
-      launchctl_matches_root=true
-    else
-      launchctl_mismatch="Loaded LaunchAgent points to ${launchctl_working_directory:-unknown root}; current root is ${ROOT_DIR}"
-    fi
-    if [[ "$launchctl_state" == "running" ]]; then
-      running=true
-    fi
-  else
-    launchctl_state="not_loaded"
-    launchctl_error="$(printf '%s' "$launchctl_output" | tr '\n' ' ' | cut -c 1-240)"
+for tool in claude codex; do
+  label="${LABEL}.${tool}"
+  probe_agent "$label"
+  stray=false
+  if ! tool_enabled "$tool" && [[ "$AGENT_LOADED" == "true" ]]; then
+    stray=true
+    installed=false
+    # A disabled tool's agent from another root is someone else's schedule.
+    [[ -z "$launchctl_mismatch" && -n "$AGENT_MISMATCH" ]] && launchctl_mismatch="$AGENT_MISMATCH"
   fi
-fi
+  # shellcheck disable=SC2016 # jq variables are intentionally evaluated by jq.
+  agents="$("$JQ_BIN" -c --arg tool "$tool" --arg label "$label" --arg state "$AGENT_STATE" \
+    --argjson loaded "$AGENT_LOADED" --argjson stray "$stray" \
+    '.[$tool] = {label: $label, loaded: $loaded, state: $state, stray: $stray}' <<<"$agents")"
+  tool_enabled "$tool" || continue
 
-schedule="$(schedule_json)"
+  if (( first_enabled == 1 )); then
+    first_enabled=0
+    launchctl_state="$AGENT_STATE"
+    launchctl_error="$AGENT_ERROR"
+    launchctl_program="$AGENT_PROGRAM"
+    launchctl_working_directory="$AGENT_WORKING_DIRECTORY"
+    launchctl_matches_root="$AGENT_MATCHES_ROOT"
+  fi
+  [[ "$AGENT_MATCHES_ROOT" == "true" ]] || installed=false
+  [[ -z "$launchctl_mismatch" && -n "$AGENT_MISMATCH" ]] && launchctl_mismatch="$AGENT_MISMATCH"
+  [[ "$AGENT_STATE" == "running" ]] && running=true
+done
+(( first_enabled == 1 )) && installed=false
+
+# The pre-per-tool single agent (${LABEL}) and renamed-project agents: only loaded
+# ones are listed. One from another root is a schedule installed elsewhere
+# (mismatch); one from this root still runs here and needs a reinstall.
+legacy='[]'
+needs_migration=false
+for label in "$LABEL" $LEGACY_LABELS; do
+  [[ "$label" == "${LABEL}.claude" || "$label" == "${LABEL}.codex" ]] && continue
+  probe_agent "$label"
+  [[ "$AGENT_LOADED" == "true" ]] || continue
+  # shellcheck disable=SC2016 # jq variables are intentionally evaluated by jq.
+  legacy="$("$JQ_BIN" -c --arg label "$label" --argjson matches "$AGENT_MATCHES_ROOT" \
+    --arg program "$AGENT_PROGRAM" --arg wd "$AGENT_WORKING_DIRECTORY" \
+    '. + [{label: $label, loaded: true, matches_root: $matches,
+           program: (if $program == "" then null else $program end),
+           working_directory: (if $wd == "" then null else $wd end)}]' <<<"$legacy")"
+  if [[ "$AGENT_MATCHES_ROOT" == "true" ]]; then
+    needs_migration=true
+    installed=false
+  elif [[ -z "$launchctl_mismatch" ]]; then
+    launchctl_mismatch="$AGENT_MISMATCH"
+  fi
+done
+
+claude_schedule="$(tool_schedule_json claude)"
+codex_schedule="$(tool_schedule_json codex)"
+# shellcheck disable=SC2016 # jq variables are intentionally evaluated by jq.
+schedule="$("$JQ_BIN" -n -c \
+  --argjson claude "$claude_schedule" \
+  --argjson codex "$codex_schedule" \
+  --argjson claude_on "$(tool_enabled claude && printf true || printf false)" \
+  --argjson codex_on "$(tool_enabled codex && printf true || printf false)" '
+    {
+      times: ((if $claude_on then $claude.times else [] end)
+              + (if $codex_on then $codex.times else [] end) | unique),
+      claude: $claude,
+      codex: $codex
+    }
+  ')"
 quota="$(read_latest_by_tool "$STATUS_LOG")"
 
 # ── Claude quota freshness ────────────────────────────────────────────────────
@@ -316,6 +467,9 @@ codex_activate_only_when_idle="$(bool_from_1 "$CODEX_ACTIVATE_ONLY_WHEN_IDLE")"
   --argjson running "$running" \
   --argjson launchctl_matches_root "$launchctl_matches_root" \
   --argjson schedule "$schedule" \
+  --argjson agents "$agents" \
+  --argjson legacy "$legacy" \
+  --argjson needs_migration "$needs_migration" \
   --argjson quota "$quota" \
   --argjson last_usage "$last_usage" \
   --argjson enable_status_snapshots "$enable_status_snapshots" \
@@ -331,11 +485,12 @@ codex_activate_only_when_idle="$(bool_from_1 "$CODEX_ACTIVATE_ONLY_WHEN_IDLE")"
         program: (if $launchctl_program == "" then null else $launchctl_program end),
         working_directory: (if $launchctl_working_directory == "" then null else $launchctl_working_directory end),
         matches_root: $launchctl_matches_root,
-        mismatch: (if $launchctl_mismatch == "" then null else $launchctl_mismatch end)
+        mismatch: (if $launchctl_mismatch == "" then null else $launchctl_mismatch end),
+        agents: $agents,
+        legacy: $legacy,
+        needs_migration: $needs_migration
       },
-      schedule: {
-        times: $schedule
-      },
+      schedule: $schedule,
       config: {
         activation_tool: $activation_tool,
         codex_model: $codex_model,

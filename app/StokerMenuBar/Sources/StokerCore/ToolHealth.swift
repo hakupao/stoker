@@ -17,6 +17,10 @@ public struct ToolHealth: Equatable, Sendable {
 /// (Claude's staleness check still counts skips as proof the schedule is running).
 public enum ToolHealthEvaluator {
     static let staleAfter: TimeInterval = 24 * 3600
+    /// How long after a scheduled fire its usage row may take to land before the slot counts as
+    /// missed: the run's timeout (~10 min with retries/fallbacks) plus an hour of slack for a
+    /// Mac that slept through the slot and fires late on wake.
+    static let missedFireGrace: TimeInterval = 70 * 60
 
     static func realRuns(_ records: [UsageRecord], tool: String) -> [UsageRecord] {
         records
@@ -37,21 +41,28 @@ public enum ToolHealthEvaluator {
                   lastRunOK: s.last.map { $0.ok == true }, lastError: s.lastError, nextActivation: nextActivation)
     }
 
-    public static func claude(records: [UsageRecord], scheduleOn: Bool, times: [String],
+    public static func claude(records: [UsageRecord], scheduleOn: Bool, times: [String], days: [String] = [],
                               now: Date = Date(), calendar: Calendar = .current) -> ToolHealth {
         let runs = realRuns(records, tool: "claude")
         let s = summary(runs)
-        let next = scheduleOn ? ScheduleFormatter.nextFire(times: times, now: now, calendar: calendar) : nil
+        let next = scheduleOn ? ScheduleFormatter.nextFire(times: times, days: days, now: now, calendar: calendar) : nil
 
-        // Stale = no real success AND no preflight skip (any reason) within 24h. A skip proves the
-        // scheduler ran (e.g. weekly quota exhausted), so it isn't a stalled schedule. "No
-        // success ever" counts as stale too, hence the explicit lookups.
+        // Stale = no real success AND no preflight skip (any reason) within 24h, AND Claude's own
+        // schedule (times + days) had a slot after that proof which is past its grace — so a
+        // weekly-only schedule isn't flagged between its slots, while a daily one behaves as the
+        // plain 24h rule. A skip proves the scheduler ran (e.g. weekly quota exhausted), so it
+        // isn't a stalled schedule. "No success ever" counts as stale too.
         let lastOK = runs.first(where: { $0.ok == true })?.date
         let lastSkip = records
             .filter { $0.tool == "claude" && $0.skipped == true }
             .compactMap(\.date).max()
         let lastProof = [lastOK, lastSkip].compactMap { $0 }.max()
-        let stale = lastProof.map { now.timeIntervalSince($0) > staleAfter } ?? true
+        let stale = lastProof.map { proof in
+            guard now.timeIntervalSince(proof) > staleAfter,
+                  let missed = ScheduleFormatter.nextFire(times: times, days: days, now: proof, calendar: calendar)
+            else { return false }
+            return missed < now.addingTimeInterval(-missedFireGrace)
+        } ?? true
 
         let state: ToolHealthState
         if runs.isEmpty {
@@ -71,7 +82,7 @@ public enum ToolHealthEvaluator {
     /// `preflight` / `idleOnly` / `exhaustedThreshold` mirror the engine's ENABLE_QUOTA_PREFLIGHT,
     /// CODEX_ACTIVATE_ONLY_WHEN_IDLE and QUOTA_EXHAUSTED_THRESHOLD_PERCENT (engine defaults: on, on, 0).
     public static func codex(records: [UsageRecord], weekly: ActivationState.QuotaWindow?,
-                             windowMinutes: Int = 10080, scheduleOn: Bool, times: [String],
+                             windowMinutes: Int = 10080, scheduleOn: Bool, times: [String], days: [String] = [],
                              preflight: Bool = true, idleOnly: Bool = true, exhaustedThreshold: Double = 0,
                              now: Date = Date(), calendar: Calendar = .current) -> ToolHealth {
         let runs = realRuns(records, tool: "codex")
@@ -100,7 +111,7 @@ public enum ToolHealthEvaluator {
         var next: Date? = nil
         if scheduleOn {
             let from = engineSkips ? max(now, resetAt ?? now) : now
-            next = ScheduleFormatter.nextFire(times: times, now: from, calendar: calendar)
+            next = ScheduleFormatter.nextFire(times: times, days: days, now: from, calendar: calendar)
         }
         return build(state: state, summary: s, nextActivation: next)
     }
@@ -130,7 +141,8 @@ extension ToolHealthEvaluator {
     /// A tool excluded by `ACTIVATION_TOOL` isn't scheduled: it becomes `.disabled` (last-run info
     /// kept, no next activation) and so never alerts — card, banner and menu always agree.
     public static func snapshot(records: [UsageRecord], quota: [String: ActivationState.ToolQuota],
-                                installed: Bool, times: [String], activationTool: String,
+                                installed: Bool, claudeSchedule: ToolSchedule, codexSchedule: ToolSchedule,
+                                activationTool: String,
                                 preflight: Bool = true, idleOnly: Bool = true, exhaustedThreshold: Double = 0,
                                 now: Date = Date(), calendar: Calendar = .current) -> ToolHealthSnapshot {
         let enabled = ToolRequirements.requiredCLIs(activationTool: activationTool)
@@ -142,10 +154,12 @@ extension ToolHealthEvaluator {
             return d
         }
         let claudeHealth = Self.claude(records: records, scheduleOn: installed && enabled.contains("claude"),
-                                       times: times, now: now, calendar: calendar)
+                                       times: claudeSchedule.times, days: claudeSchedule.days,
+                                       now: now, calendar: calendar)
         let codexHealth = Self.codex(records: records, weekly: quota["codex"]?.weekly,
                                      scheduleOn: installed && enabled.contains("codex"),
-                                     times: times, preflight: preflight, idleOnly: idleOnly,
+                                     times: codexSchedule.times, days: codexSchedule.days,
+                                     preflight: preflight, idleOnly: idleOnly,
                                      exhaustedThreshold: exhaustedThreshold, now: now, calendar: calendar)
         let claudeFinal = gated(claudeHealth, "claude")
         let codexFinal = gated(codexHealth, "codex")
@@ -155,12 +169,25 @@ extension ToolHealthEvaluator {
         return ToolHealthSnapshot(claude: claudeFinal, codex: codexFinal, alertTools: alertTools)
     }
 
+    /// Both tools on one shared, every-day schedule (the pre-per-tool shape).
+    public static func snapshot(records: [UsageRecord], quota: [String: ActivationState.ToolQuota],
+                                installed: Bool, times: [String], activationTool: String,
+                                preflight: Bool = true, idleOnly: Bool = true, exhaustedThreshold: Double = 0,
+                                now: Date = Date(), calendar: Calendar = .current) -> ToolHealthSnapshot {
+        let shared = ToolSchedule(times: times, days: [])
+        return snapshot(records: records, quota: quota, installed: installed, claudeSchedule: shared,
+                        codexSchedule: shared, activationTool: activationTool, preflight: preflight,
+                        idleOnly: idleOnly, exhaustedThreshold: exhaustedThreshold, now: now, calendar: calendar)
+    }
+
     /// Convenience over the app's decoded state; the schedule counts as on exactly when the
     /// header toggle does (`state.installed`).
     public static func snapshot(records: [UsageRecord], state: ActivationState?,
                                 now: Date = Date()) -> ToolHealthSnapshot {
-        snapshot(records: records, quota: state?.quota ?? [:], installed: state?.installed == true,
-                 times: state?.schedule.times ?? [], activationTool: state?.config.activationTool ?? "all",
+        let none = ToolSchedule(times: [], days: [])
+        return snapshot(records: records, quota: state?.quota ?? [:], installed: state?.installed == true,
+                 claudeSchedule: state?.schedule.claude ?? none, codexSchedule: state?.schedule.codex ?? none,
+                 activationTool: state?.config.activationTool ?? "all",
                  preflight: state?.config.enableQuotaPreflight ?? true,
                  idleOnly: state?.config.codexActivateOnlyWhenIdle ?? true,
                  exhaustedThreshold: state?.config.quotaExhaustedThresholdPercent ?? 0,

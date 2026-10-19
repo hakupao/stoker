@@ -47,6 +47,10 @@ CODEX_MODEL="${CODEX_MODEL:-$CODEX_DEFAULT_MODEL}"
 CODEX_WORK_DIR="${CODEX_WORK_DIR:-${ROOT_DIR}/codex-probe}"
 CODEX_ACTIVATION_PROMPT="${CODEX_ACTIVATION_PROMPT:-Read only ./probe.py. Do not inspect any other path. Do not modify files. In two short bullets, explain what activation_probe_score returns for SAMPLE_EVENTS, then end with READY.}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-120}"
+# How long a run waits for another run's lock (per-tool agents can fire in the
+# same second). Empty = cover a worst-case Codex run (computed after validation
+# below); 0 skips immediately.
+LOCK_WAIT_SECONDS="${LOCK_WAIT_SECONDS:-}"
 ACTIVATION_TOOL="${ACTIVATION_TOOL:-all}"
 ENABLE_STATUS_SNAPSHOTS="${ENABLE_STATUS_SNAPSHOTS:-1}"
 ENABLE_QUOTA_PREFLIGHT="${ENABLE_QUOTA_PREFLIGHT:-1}"
@@ -101,6 +105,7 @@ fi
 
 MODE="once"
 TOOL="$ACTIVATION_TOOL"
+SCHEDULED=0
 # The parse loop below shifts "$@" away, so keep the original argv for the
 # caffeinate re-exec — otherwise the re-exec'd run silently falls back to .env
 # defaults (e.g. `--tool codex` becomes ACTIVATION_TOOL).
@@ -108,10 +113,14 @@ ORIGINAL_ARGS=("$@")
 
 usage() {
   cat <<'USAGE'
-Usage: activate-ai-window.sh [--once] [--dry-run] [--check] [--status] [--tool all|claude|codex]
+Usage: activate-ai-window.sh [--once] [--dry-run] [--check] [--status] [--scheduled] [--tool all|claude|codex]
 
 Runs a tiny scheduled check-in against Claude Code and Codex to start usage
 windows at predictable times. The default mode is --once.
+
+--scheduled marks a launchd-triggered run (the per-tool plists pass it): a
+--once --scheduled run for a tool that ACTIVATION_TOOL excludes exits 0 without
+doing anything, so a stale agent of a disabled tool cannot send prompts.
 
 Environment overrides:
   CLAUDE_BIN=/path/to/claude
@@ -122,6 +131,8 @@ Environment overrides:
   CODEX_WORK_DIR=/path/to/probe-dir
   CODEX_ACTIVATION_PROMPT='Read only ./probe.py...'
   TIMEOUT_SECONDS=120
+  LOCK_WAIT_SECONDS=780            # wait this long for a concurrent run's lock; 0 = skip at once. Default
+                                   # TIMEOUT_SECONDS*(1+CODEX_MODEL_FALLBACK_MAX_TRIES)+CODEX_UPDATE_TIMEOUT_SECONDS+120
   ACTIVATION_TOOL=all
   ENABLE_STATUS_SNAPSHOTS=1
   ENABLE_QUOTA_PREFLIGHT=1
@@ -160,6 +171,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --status)
       MODE="status"
+      shift
+      ;;
+    --scheduled)
+      SCHEDULED=1
       shift
       ;;
     --tool)
@@ -214,6 +229,21 @@ for _num in CODEX_AUTO_UPDATE_INTERVAL_HOURS CODEX_UPDATE_TIMEOUT_SECONDS CODEX_
   fi
 done
 unset _flag _num
+
+if ! [[ "$TIMEOUT_SECONDS" =~ ^[0-9]+$ ]]; then
+  echo "TIMEOUT_SECONDS must be a non-negative integer" >&2
+  exit 2
+fi
+if [[ -z "$LOCK_WAIT_SECONDS" ]]; then
+  # Long enough for the other agent's worst-case run: a Codex update, the first
+  # attempt plus every model fallback, and slack for preflight/snapshots.
+  LOCK_WAIT_SECONDS=$(( 10#$TIMEOUT_SECONDS * (1 + 10#$CODEX_MODEL_FALLBACK_MAX_TRIES) + 10#$CODEX_UPDATE_TIMEOUT_SECONDS + 120 ))
+fi
+if ! [[ "$LOCK_WAIT_SECONDS" =~ ^[0-9]+$ ]]; then
+  echo "LOCK_WAIT_SECONDS must be a non-negative integer" >&2
+  exit 2
+fi
+LOCK_WAIT_SECONDS=$((10#$LOCK_WAIT_SECONDS))
 
 case "$CODEX_ACTIVATE_ONLY_WHEN_IDLE" in
   0|1) ;;
@@ -297,9 +327,12 @@ maybe_reexec_with_caffeinate() {
     return 0
   fi
 
-  log "Keep-awake enabled mode=${KEEP_AWAKE_MODE} seconds=${KEEP_AWAKE_SECONDS}"
+  # The run may first wait up to LOCK_WAIT_SECONDS for the other agent's lock, so
+  # keep the Mac awake for that wait on top of the configured run budget.
+  local awake_seconds=$(( 10#$KEEP_AWAKE_SECONDS + LOCK_WAIT_SECONDS ))
+  log "Keep-awake enabled mode=${KEEP_AWAKE_MODE} seconds=${awake_seconds} (KEEP_AWAKE_SECONDS=${KEEP_AWAKE_SECONDS} + LOCK_WAIT_SECONDS=${LOCK_WAIT_SECONDS})"
   # ${arr[@]+...} keeps an empty argv safe under `set -u` on macOS bash 3.2.
-  STOKER_CAFFEINATED=1 exec "$caffeinate_bin" -i -t "$KEEP_AWAKE_SECONDS" "$BASH" "$0" ${ORIGINAL_ARGS[@]+"${ORIGINAL_ARGS[@]}"}
+  STOKER_CAFFEINATED=1 exec "$caffeinate_bin" -i -t "$awake_seconds" "$BASH" "$0" ${ORIGINAL_ARGS[@]+"${ORIGINAL_ARGS[@]}"}
 }
 
 run_with_timeout() {
@@ -1532,6 +1565,74 @@ run_check() {
   return "$status"
 }
 
+# A lock is stale when its recorded owner is gone, or (no readable pid file, e.g.
+# a lock from an older engine or a crash between mkdir and the pid write) when
+# the directory is older than the longest possible run, so a live pid-less owner
+# is never mistaken for a dead one.
+lock_is_stale() {
+  local pid="" mtime age threshold
+  [[ -f "${LOCK_DIR}/pid" ]] && pid="$(tr -cd '0-9' <"${LOCK_DIR}/pid" 2>/dev/null)"
+  if [[ -n "$pid" ]]; then
+    if kill -0 "$pid" 2>/dev/null; then
+      return 1
+    fi
+    STALE_REASON="owner pid ${pid} is not running"
+    return 0
+  fi
+  mtime="$(stat -f %m "$LOCK_DIR" 2>/dev/null)" || return 1
+  age=$(( $(date +%s) - mtime ))
+  threshold=$(( 10#$TIMEOUT_SECONDS * (1 + 10#$CODEX_MODEL_FALLBACK_MAX_TRIES) + 10#$CODEX_UPDATE_TIMEOUT_SECONDS ))
+  (( threshold < 60 )) && threshold=60
+  if (( age > threshold )); then
+    STALE_REASON="no owner pid and lock is ${age}s old"
+    return 0
+  fi
+  return 1
+}
+
+# Reclaims a stale lock under a separate mutex so concurrent waiters cannot both
+# reclaim: the first re-checks staleness and removes it; the rest see a live (or
+# absent) lock. A mutex left by a killed reclaimer expires after 60s.
+reclaim_stale_lock() {
+  local mutex="${LOCK_DIR}.reclaim" mtime reclaimed=1
+  if ! mkdir "$mutex" 2>/dev/null; then
+    mtime="$(stat -f %m "$mutex" 2>/dev/null)" || return 1
+    if (( $(date +%s) - mtime > 60 )) && rmdir "$mutex" 2>/dev/null; then
+      log "Removed stale lock-reclaim marker ${mutex}."
+    fi
+    return 1
+  fi
+  if [[ -d "$LOCK_DIR" ]] && lock_is_stale && rm -f "${LOCK_DIR}/pid" && rmdir "$LOCK_DIR" 2>/dev/null; then
+    log "Reclaimed stale activation lock (${STALE_REASON})."
+    reclaimed=0
+  fi
+  rmdir "$mutex" 2>/dev/null || true
+  return "$reclaimed"
+}
+
+acquire_lock() {
+  local lock_waited=0
+  STALE_REASON=""
+  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+    if lock_is_stale && reclaim_stale_lock; then
+      continue
+    fi
+    if (( lock_waited >= LOCK_WAIT_SECONDS )); then
+      log "Another activation run is already active; skipping after waiting ${lock_waited}s (LOCK_WAIT_SECONDS=${LOCK_WAIT_SECONDS})."
+      return 1
+    fi
+    (( lock_waited == 0 )) && log "Another activation run is active; waiting up to ${LOCK_WAIT_SECONDS}s for its lock."
+    sleep 2
+    lock_waited=$((lock_waited + 2))
+  done
+  printf '%s\n' "$$" >"${LOCK_DIR}/pid"
+  trap 'rm -f "${LOCK_DIR}/pid"; rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+  if (( lock_waited > 0 )); then
+    log "Acquired activation lock after waiting ${lock_waited}s."
+  fi
+  return 0
+}
+
 main() {
   cd "$ROOT_DIR" || return 1
 
@@ -1545,15 +1646,19 @@ main() {
     return $?
   fi
 
-  if [[ "$MODE" != "dry-run" ]]; then
-    maybe_reexec_with_caffeinate
-  fi
-
-  if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-    log "Another activation run is already active; skipping."
+  # A launchd run of a tool that ACTIVATION_TOOL no longer enables comes from a
+  # stale agent (reinstall removes it): do nothing rather than send a prompt.
+  if [[ "$MODE" == "once" && "$SCHEDULED" == "1" && "$TOOL" != "all" \
+        && "$ACTIVATION_TOOL" != "all" && "$ACTIVATION_TOOL" != "$TOOL" ]]; then
+    log "${TOOL} disabled by ACTIVATION_TOOL=${ACTIVATION_TOOL}; skipping scheduled run. Re-run ./install.sh install to remove its LaunchAgent."
     return 0
   fi
-  trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+
+  # Dry-run sends nothing, so it neither keeps the Mac awake nor takes the lock.
+  if [[ "$MODE" != "dry-run" ]]; then
+    maybe_reexec_with_caffeinate
+    acquire_lock || return 0
+  fi
 
   local status=0
   local sent_prompt=0

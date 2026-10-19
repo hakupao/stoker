@@ -17,7 +17,7 @@ app-status   Print the menu bar app JSON status snapshot.
 status       Show LaunchAgent status.
 run-now      Trigger the installed LaunchAgent once. This sends model prompts.
 uninstall    Unload and remove the LaunchAgent.
-print-plist  Print the generated launchd plist.
+print-plist  Print the generated launchd plists (print-plist claude|codex: one tool).
 USAGE
 }
 
@@ -49,7 +49,7 @@ case "$cmd" in
     "${ROOT_DIR}/scripts/install-launchd.sh" uninstall
     ;;
   print-plist)
-    "${ROOT_DIR}/scripts/install-launchd.sh" print-plist
+    "${ROOT_DIR}/scripts/install-launchd.sh" print-plist "${@:2}"
     ;;
   -h|--help|help)
     usage

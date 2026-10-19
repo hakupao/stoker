@@ -136,8 +136,8 @@ See [INSTALL.md](INSTALL.md) for complete beginner and advanced installation ste
 ./install.sh app-status   # print JSON status for the menu bar app
 ./install.sh status       # show launchd status
 ./install.sh run-now      # trigger once; this sends model prompts
-./install.sh uninstall    # unload and remove the LaunchAgent
-./install.sh print-plist  # print the generated launchd plist
+./install.sh uninstall    # unload and remove the LaunchAgents
+./install.sh print-plist  # print the generated launchd plists (`print-plist claude|codex` for one)
 ```
 
 You can also call the runner directly:
@@ -199,15 +199,25 @@ Copy `.env.example` to `.env` and adjust values:
 
 | Variable | Description | Default |
 | --- | --- | --- |
-| `LABEL` | macOS LaunchAgent label | `com.stoker.ai-window` |
-| `SCHEDULE_TIMES` | Comma-separated `HH:MM` schedule entries; each time point is independent | `"07:00,12:00,17:00,22:00"` |
-| `ACTIVATION_TOOL` | `all`, `claude`, or `codex` | `all` |
+| `LABEL` | Base macOS LaunchAgent label; each tool gets its own agent `<LABEL>.claude` / `<LABEL>.codex` | `com.stoker.ai-window` |
+| `CLAUDE_SCHEDULE_TIMES` | Claude's comma-separated `HH:MM` schedule; each time point is independent | `SCHEDULE_TIMES` |
+| `CODEX_SCHEDULE_TIMES` | Codex's comma-separated `HH:MM` schedule (e.g. `"07:00"`) | `SCHEDULE_TIMES` |
+| `CLAUDE_SCHEDULE_DAYS` | Days Claude runs: comma-separated `mon,tue,wed,thu,fri,sat,sun`; empty or `daily` = every day | empty (daily) |
+| `CODEX_SCHEDULE_DAYS` | Days Codex runs, same format | empty (daily) |
+| `SCHEDULE_TIMES` | Fallback schedule for a tool whose `*_SCHEDULE_TIMES` is unset or empty | `"07:00,12:00,17:00,22:00"` |
+| `ACTIVATION_TOOL` | `all`, `claude`, or `codex` — which tools' agents are installed | `all` |
+
+After changing any `*_SCHEDULE_*` variable or `ACTIVATION_TOOL`, re-run `./install.sh install` so
+the LaunchAgents pick it up (the menu bar app reinstalls automatically when you save). A scheduled
+run of a tool that `ACTIVATION_TOOL` no longer enables exits without sending anything.
+
 | `ACTIVATION_PROMPT` | Low-cost prompt sent to Claude | `Reply exactly READY...` |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Long-lived token from `claude setup-token` for unattended auth (see below) | unset (uses Keychain login) |
 | `CODEX_MODEL` | Codex activation model; set `default` to let Codex CLI choose | `gpt-5.6-luna` |
 | `CODEX_WORK_DIR` | Tiny working directory used by Codex probe runs | `${ROOT_DIR}/codex-probe` |
 | `CODEX_ACTIVATION_PROMPT` | Read-only Codex probe prompt | `Read only ./probe.py...` |
 | `TIMEOUT_SECONDS` | Per-tool timeout | `120` |
+| `LOCK_WAIT_SECONDS` | How long a run waits for another run's lock before skipping (`0` = skip at once). Keep-awake runs stay awake for this wait too (`caffeinate -t KEEP_AWAKE_SECONDS + LOCK_WAIT_SECONDS`) | `TIMEOUT_SECONDS × (1 + CODEX_MODEL_FALLBACK_MAX_TRIES) + CODEX_UPDATE_TIMEOUT_SECONDS + 120` (780) |
 | `ENABLE_STATUS_SNAPSHOTS` | Record quota snapshots after real activation | `1` |
 | `ENABLE_QUOTA_PREFLIGHT` | Check quota before sending prompts | `1` |
 | `QUOTA_PREFLIGHT_ON_UNKNOWN` | `allow` or `skip` when quota cannot be checked | `allow` |
@@ -435,8 +445,12 @@ script executes this sequence:
 
 1. **Load config** — reads `.env` for schedule, tool selection, quota settings, and binary
    paths.
-2. **Acquire lock** — creates `run/activation.lock` to prevent concurrent runs; a second
-   trigger during an active run is skipped gracefully.
+2. **Acquire lock** — creates `run/activation.lock` to prevent concurrent runs. The Claude and
+   Codex agents can fire in the same second, so a second trigger waits (polling every 2 s, up to
+   `LOCK_WAIT_SECONDS`) for the active run to finish; only if the lock is still held after that
+   is it skipped gracefully. The lock records its owner's PID, so a lock left by a crashed run
+   (dead PID, or no PID and older than the longest possible run) is reclaimed — by exactly one
+   waiter, under a separate `run/activation.lock.reclaim` marker. `--dry-run` never takes it.
 3. **Quota preflight** (optional) — queries Claude and Codex quota status *before* sending any
    prompt. If a tool's quota is exhausted, that tool is skipped and the skip is recorded in
    `logs/usage.jsonl`. Claude per-scope weekly buckets (`scoped_weekly`, e.g. a model-specific
@@ -492,8 +506,12 @@ How the directory is resolved:
   `bin/activate-ai-window.sh`. For a standalone `.app`, it falls back to copying bundled scripts
   into Application Support and using that copy as the root.
 
-The installer writes an absolute-path plist for macOS `launchd` and places it under
-`~/Library/LaunchAgents/`. The plist is intentionally git-ignored because it contains
+The installer writes one absolute-path plist per enabled tool (`<LABEL>.claude.plist`,
+`<LABEL>.codex.plist`, each running `activate-ai-window.sh --once --tool <tool>` on that tool's
+own times and days) and places them under `~/Library/LaunchAgents/`. Installing also removes the
+agent of a disabled tool and the pre-per-tool single `<LABEL>` agent (plus `LEGACY_LABELS`); a
+legacy agent whose plist points at a different Stoker checkout is kept with a warning unless you
+set `STOKER_FORCE_MIGRATE=1`. The plists are intentionally git-ignored because they contain
 machine-specific paths.
 
 ### Project Structure
@@ -507,7 +525,7 @@ stoker/
 │   └── install-launchd.sh      ← launchd install/uninstall
 ├── app/
 │   └── StokerMenuBar/          ← SwiftUI menu bar app
-├── launchd/                    ← generated plist (git-ignored)
+├── launchd/                    ← generated plists (git-ignored)
 ├── logs/                       ← generated logs
 │   ├── activation.log
 │   ├── usage.jsonl

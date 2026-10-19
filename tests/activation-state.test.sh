@@ -42,6 +42,11 @@ jq -e '
   and .running == false
   and .label == "com.example.stoker.test"
   and .schedule.times == ["06:15", "13:15", "21:15"]
+  and .schedule.codex == {"times": ["06:15", "13:15", "21:15"], "days": []}
+  and .schedule.claude == {"times": ["06:15", "13:15", "21:15"], "days": []}
+  and .launchctl.state == "skipped"
+  and .launchctl.agents.codex == {"label": "com.example.stoker.test.codex", "loaded": false, "state": "skipped", "stray": false}
+  and .launchctl.agents.claude.label == "com.example.stoker.test.claude"
   and .config.activation_tool == "codex"
   and .config.codex_model == "gpt-5.6-luna"
   and .config.enable_status_snapshots == false
@@ -55,6 +60,42 @@ jq -e '
   and .last_usage.tool == "codex"
   and .last_usage.result == "READY"
 ' <<<"$json" >/dev/null
+
+# Per-tool schedules: each tool falls back to SCHEDULE_TIMES on its own, days are
+# normalized to mon..sun order, and schedule.times is the union over ENABLED tools.
+json="$(
+  STOKER_ROOT="$TMP_DIR" \
+  STOKER_SKIP_LAUNCHCTL=1 \
+  ACTIVATION_TOOL=all \
+  CLAUDE_SCHEDULE_TIMES="22:00, 7:00,12:00,07:00" \
+  CLAUDE_SCHEDULE_DAYS="" \
+  CODEX_SCHEDULE_TIMES="07:30" \
+  CODEX_SCHEDULE_DAYS="Thu,mon,THU" \
+  "$ROOT_DIR/bin/activation-state.sh" --json
+)"
+jq -e '
+  .schedule.claude == {"times": ["07:00", "12:00", "22:00"], "days": []}
+  and .schedule.codex == {"times": ["07:30"], "days": ["mon", "thu"]}
+  and .schedule.times == ["07:00", "07:30", "12:00", "22:00"]
+' <<<"$json" >/dev/null
+
+json="$(
+  STOKER_ROOT="$TMP_DIR" \
+  STOKER_SKIP_LAUNCHCTL=1 \
+  CODEX_SCHEDULE_TIMES="07:30" \
+  CLAUDE_SCHEDULE_DAYS="daily" \
+  "$ROOT_DIR/bin/activation-state.sh" --json
+)"
+jq -e '
+  .schedule.times == ["07:30"]
+  and .schedule.claude == {"times": ["06:15", "13:15", "21:15"], "days": []}
+' <<<"$json" >/dev/null
+
+if STOKER_ROOT="$TMP_DIR" STOKER_SKIP_LAUNCHCTL=1 CODEX_SCHEDULE_DAYS="mon,funday" \
+  "$ROOT_DIR/bin/activation-state.sh" --json >/dev/null 2>&1; then
+  echo "expected an invalid CODEX_SCHEDULE_DAYS to be rejected" >&2
+  exit 1
+fi
 
 # The app's Codex next-activation mirrors the engine's skip toggles, so both must reach
 # the config block (caller env wins over .env).
@@ -72,24 +113,34 @@ jq -e '
   and .config.quota_exhausted_threshold_percent == 5
 ' <<<"$json" >/dev/null
 
-mkdir -p "$TMP_DIR/bin" "$TMP_DIR/home/Library/LaunchAgents"
+mkdir -p "$TMP_DIR/bin" "$TMP_DIR/home/Library/LaunchAgents" "$TMP_DIR/loaded"
 
+# Fake launchctl: `print gui/<uid>/<label>` succeeds only for labels that have a
+# file in $FAKE_LOADED_DIR (its content is the print output); everything else is
+# "not loaded".
 cat >"$TMP_DIR/bin/launchctl" <<'SH'
 #!/usr/bin/env bash
-cat "$FAKE_LAUNCHCTL_OUTPUT"
+label="${2##*/}"
+if [[ "$1" == "print" && -f "$FAKE_LOADED_DIR/$label" ]]; then
+  cat "$FAKE_LOADED_DIR/$label"
+  exit 0
+fi
+echo "Could not find service \"$label\"" >&2
+exit 113
 SH
 chmod +x "$TMP_DIR/bin/launchctl"
 
-write_test_plist() {
-  local root="$1"
-  cat >"$TMP_DIR/home/Library/LaunchAgents/com.example.stoker.test.plist" <<PLIST
+# load_agent <label> <root>: installed plist + "loaded" launchctl output for it.
+load_agent() {
+  local label="$1" root="$2"
+  cat >"$TMP_DIR/home/Library/LaunchAgents/${label}.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.example.stoker.test</string>
+  <string>${label}</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
@@ -101,13 +152,8 @@ write_test_plist() {
 </dict>
 </plist>
 PLIST
-}
-
-write_launchctl_output() {
-  local root="$1"
-  local output="$2"
-  cat >"$output" <<OUTPUT
-gui/501/com.example.stoker.test = {
+  cat >"$TMP_DIR/loaded/${label}" <<OUTPUT
+gui/501/${label} = {
 	state = not running
 	arguments = {
 		/bin/bash
@@ -119,42 +165,113 @@ gui/501/com.example.stoker.test = {
 OUTPUT
 }
 
-write_test_plist "$TMP_DIR"
-write_launchctl_output "$TMP_DIR" "$TMP_DIR/launchctl.match"
+reset_agents() {
+  rm -f "$TMP_DIR/loaded/"* "$TMP_DIR/home/Library/LaunchAgents/"*
+}
 
-matching_json="$(
-  HOME="$TMP_DIR/home" \
-  PATH="$TMP_DIR/bin:$PATH" \
-  FAKE_LAUNCHCTL_OUTPUT="$TMP_DIR/launchctl.match" \
-  STOKER_ROOT="$TMP_DIR" \
-  "$ROOT_DIR/bin/activation-state.sh" --json
-)"
+state_json() {
+  env HOME="$TMP_DIR/home" \
+    LAUNCHCTL_BIN="$TMP_DIR/bin/launchctl" \
+    FAKE_LOADED_DIR="$TMP_DIR/loaded" \
+    STOKER_ROOT="$TMP_DIR" \
+    "$@" "$ROOT_DIR/bin/activation-state.sh" --json
+}
 
+OTHER_ROOT="$TMP_DIR/other-stoker"
+mkdir -p "$OTHER_ROOT/bin"
+
+# ACTIVATION_TOOL=codex (.env): the Codex agent from this root is all it takes.
+load_agent com.example.stoker.test.codex "$TMP_DIR"
+matching_json="$(state_json)"
 jq -e '
   .installed == true
   and .launchctl.matches_root == true
   and .launchctl.mismatch == null
-' <<<"$matching_json" >/dev/null
+  and .launchctl.agents.codex.loaded == true
+  and .launchctl.agents.codex.state == "not running"
+  and .launchctl.agents.codex.stray == false
+  and .launchctl.agents.claude.loaded == false
+  and .launchctl.legacy == []
+  and .launchctl.needs_migration == false
+' <<<"$matching_json" >/dev/null || { echo "matching: $matching_json" >&2; exit 1; }
 
-OTHER_ROOT="$TMP_DIR/other-stoker"
-mkdir -p "$OTHER_ROOT/bin"
-write_test_plist "$OTHER_ROOT"
-write_launchctl_output "$OTHER_ROOT" "$TMP_DIR/launchctl.mismatch"
+# With both tools enabled, installed needs BOTH agents.
+partial_json="$(state_json ACTIVATION_TOOL=all)"
+jq -e '
+  .installed == false
+  and .launchctl.state == "not_loaded"
+  and .launchctl.agents.claude.loaded == false
+  and .launchctl.agents.codex.loaded == true
+' <<<"$partial_json" >/dev/null || { echo "partial: $partial_json" >&2; exit 1; }
 
-mismatch_json="$(
-  HOME="$TMP_DIR/home" \
-  PATH="$TMP_DIR/bin:$PATH" \
-  FAKE_LAUNCHCTL_OUTPUT="$TMP_DIR/launchctl.mismatch" \
-  STOKER_ROOT="$TMP_DIR" \
-  "$ROOT_DIR/bin/activation-state.sh" --json
-)"
+# A loaded agent of a disabled tool is stray and keeps installed false.
+load_agent com.example.stoker.test.claude "$TMP_DIR"
+stray_json="$(state_json)"
+jq -e '
+  .installed == false
+  and .launchctl.agents.claude.stray == true
+  and .launchctl.agents.codex.stray == false
+  and .launchctl.mismatch == null
+' <<<"$stray_json" >/dev/null || { echo "stray: $stray_json" >&2; exit 1; }
+both_json="$(state_json ACTIVATION_TOOL=all)"
+jq -e '.installed == true and .launchctl.agents.claude.stray == false' <<<"$both_json" >/dev/null \
+  || { echo "both: $both_json" >&2; exit 1; }
 
+# A stray agent of a disabled tool from ANOTHER root is someone else's schedule:
+# it fills mismatch too.
+reset_agents
+load_agent com.example.stoker.test.codex "$TMP_DIR"
+load_agent com.example.stoker.test.claude "$OTHER_ROOT"
+stray_elsewhere_json="$(state_json)"
+jq -e '
+  .installed == false
+  and .launchctl.agents.claude.stray == true
+  and (.launchctl.mismatch | contains("com.example.stoker.test.claude"))
+' <<<"$stray_elsewhere_json" >/dev/null || { echo "stray elsewhere: $stray_elsewhere_json" >&2; exit 1; }
+
+# The enabled agent pointing at another root → mismatch.
+reset_agents
+load_agent com.example.stoker.test.codex "$OTHER_ROOT"
+mismatch_json="$(state_json)"
 jq -e --arg expected "$OTHER_ROOT/bin/activate-ai-window.sh" '
   .installed == false
   and .launchctl.matches_root == false
   and .launchctl.program == $expected
   and (.launchctl.mismatch | contains("current root"))
-' <<<"$mismatch_json" >/dev/null
+' <<<"$mismatch_json" >/dev/null || { echo "mismatch: $mismatch_json" >&2; exit 1; }
+
+# Old single-label agent from THIS root: listed, needs_migration, not installed
+# (even with the new agent also loaded).
+reset_agents
+load_agent com.example.stoker.test "$TMP_DIR"
+load_agent com.example.stoker.test.codex "$TMP_DIR"
+migrate_json="$(state_json)"
+jq -e --arg root "$TMP_DIR" '
+  .installed == false
+  and .launchctl.needs_migration == true
+  and .launchctl.mismatch == null
+  and .launchctl.legacy == [{"label": "com.example.stoker.test", "loaded": true, "matches_root": true,
+                             "program": ($root + "/bin/activate-ai-window.sh"), "working_directory": $root}]
+' <<<"$migrate_json" >/dev/null || { echo "migrate: $migrate_json" >&2; exit 1; }
+
+# A LEGACY_LABELS agent from ANOTHER root: mismatch (the app's "installed
+# elsewhere" guard), no migration.
+reset_agents
+load_agent com.example.old.timer "$OTHER_ROOT"
+elsewhere_json="$(state_json LEGACY_LABELS=com.example.old.timer)"
+jq -e '
+  .installed == false
+  and .launchctl.needs_migration == false
+  and (.launchctl.mismatch | contains("com.example.old.timer"))
+  and .launchctl.legacy[0].label == "com.example.old.timer"
+  and .launchctl.legacy[0].matches_root == false
+' <<<"$elsewhere_json" >/dev/null || { echo "elsewhere: $elsewhere_json" >&2; exit 1; }
+
+# Skipped probing lists no legacy agents.
+skipped_json="$(state_json STOKER_SKIP_LAUNCHCTL=1 LEGACY_LABELS=com.example.old.timer)"
+jq -e '.launchctl.legacy == [] and .launchctl.needs_migration == false and .launchctl.agents.claude.stray == false' \
+  <<<"$skipped_json" >/dev/null || { echo "skipped: $skipped_json" >&2; exit 1; }
+reset_agents
 
 # ── Claude quota freshness: restamp, reset blanking, live-cache override ─────
 

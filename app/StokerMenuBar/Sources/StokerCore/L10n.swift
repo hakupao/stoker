@@ -97,6 +97,29 @@ public enum L10n {
     public static var add: String {
         AppLanguage.current == .zh ? "添加" : "Add"
     }
+    public static var everyDay: String {
+        AppLanguage.current == .zh ? "每天" : "Every day"
+    }
+    /// Short weekday label for a mon..sun token: "一" … "日" / "Mon" … "Sun".
+    public static func weekdayShort(_ day: String) -> String {
+        let zh = ["mon": "一", "tue": "二", "wed": "三", "thu": "四", "fri": "五", "sat": "六", "sun": "日"]
+        if AppLanguage.current == .zh { return zh[day] ?? day }
+        return day.prefix(1).uppercased() + day.dropFirst()
+    }
+    /// Compact days suffix: "" for every day, else "(Mon, Thu)" / "（周一、四）".
+    public static func scheduleDaysSuffix(_ days: [String]) -> String {
+        guard !days.isEmpty else { return "" }
+        if AppLanguage.current == .zh {
+            return "（周" + days.map(weekdayShort).joined(separator: "、") + "）"
+        }
+        return " (" + days.map(weekdayShort).joined(separator: ", ") + ")"
+    }
+    /// One tool's schedule on one line. Compact (header): "Claude 07·12·17·22" / "Codex 07:30 (Mon)",
+    /// whole-hour times shortened to the hour; full (menu): "Claude 07:00, 12:00".
+    public static func toolScheduleLine(tool: String, times: [String], days: [String], compact: Bool = true) -> String {
+        let clocks = compact ? times.map { $0.hasSuffix(":00") ? String($0.prefix(2)) : $0 } : times
+        return "\(tool) \(clocks.joined(separator: compact ? "·" : ", "))\(scheduleDaysSuffix(days))"
+    }
     public static var nextRunPrefix: String {
         AppLanguage.current == .zh ? "下次" : "Next"
     }
@@ -236,6 +259,11 @@ public enum L10n {
     }
     public static var disabled: String {
         AppLanguage.current == .zh ? "已关闭" : "Disabled"
+    }
+    public static var scheduleNeedsReinstall: String {
+        AppLanguage.current == .zh
+            ? "调度需要更新——请点一下开关或保存设置以重新安装"
+            : "Schedule needs updating — toggle it or save settings to re-install"
     }
     public static var scheduleElsewhere: String {
         AppLanguage.current == .zh

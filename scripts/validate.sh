@@ -19,8 +19,10 @@ else
 fi
 
 if command -v plutil >/dev/null 2>&1; then
-  ./install.sh print-plist >/tmp/stoker-validate.plist
-  plutil -lint /tmp/stoker-validate.plist >/dev/null
+  for tool in claude codex; do
+    ./install.sh print-plist "$tool" >"/tmp/stoker-validate.${tool}.plist"
+    plutil -lint "/tmp/stoker-validate.${tool}.plist" >/dev/null
+  done
 else
   echo "plutil not found; skipped"
 fi
@@ -37,6 +39,10 @@ tests/codex-native-source.test.sh
 tests/codex-appserver-source.test.sh
 tests/codex-idle-window.test.sh
 tests/codex-update-fallback.test.sh
+tests/launchd-per-tool-plist.test.sh
+tests/lock-wait.test.sh
+tests/launchd-install-lifecycle.test.sh
+tests/scheduled-tool-gate.test.sh
 tests/swift-core.test.sh
 tests/release-packaging.test.sh
 tests/app-bundle-assets.test.sh

@@ -122,6 +122,14 @@ private struct UnifiedHeader: View {
 
     private var isOn: Bool { model.state?.installed == true }
 
+    /// The tools ACTIVATION_TOOL schedules, each with its own times + days.
+    private static func enabledSchedules(_ state: ActivationState) -> [(title: String, schedule: ToolSchedule)] {
+        let enabled = ToolRequirements.requiredCLIs(activationTool: state.config.activationTool)
+        return [("claude", "Claude"), ("codex", "Codex")]
+            .filter { enabled.contains($0.0) }
+            .map { (title: $0.1, schedule: state.schedule.forTool($0.0)) }
+    }
+
     var body: some View {
         VStack(spacing: 8) {
             HStack(spacing: 12) {
@@ -132,14 +140,16 @@ private struct UnifiedHeader: View {
                         .font(.system(size: 18, weight: .bold, design: .rounded))
                         .foregroundStyle(theme.onSurface)
                     if let state = model.state {
-                        Text(state.schedule.times.joined(separator: " · "))
+                        let schedules = Self.enabledSchedules(state)
+                        Text(schedules.map { L10n.toolScheduleLine(tool: $0.title, times: $0.schedule.times, days: $0.schedule.days) }
+                            .joined(separator: " · "))
                             .font(.system(size: 11, weight: .medium, design: .monospaced))
                             .foregroundStyle(theme.textSecondary)
-                        if isOn, !state.schedule.times.isEmpty {
-                            // Self-updating countdown to the next fire: re-evaluates every
-                            // minute and rolls over to the following time on its own.
+                        if isOn, schedules.contains(where: { !$0.schedule.times.isEmpty }) {
+                            // Self-updating countdown to the next fire across enabled tools:
+                            // re-evaluates every minute and rolls over on its own.
                             TimelineView(.periodic(from: .now, by: 60)) { context in
-                                if let next = ScheduleFormatter.nextFire(times: state.schedule.times, now: context.date) {
+                                if let next = schedules.compactMap({ $0.schedule.nextFire(now: context.date) }).min() {
                                     let total = ScheduleFormatter.minutesRemaining(until: next, now: context.date)
                                     Text("\(L10n.nextRunPrefix) \(ScheduleFormatter.clock(next)) · \(L10n.nextRunCountdown(hours: total / 60, minutes: total % 60))")
                                         .font(.system(size: 10, weight: .semibold, design: .rounded))
@@ -225,6 +235,10 @@ private struct UnifiedHeader: View {
                 // root, so `installed` reads false and the toggle shows OFF.
                 // Explain why instead of leaving the user with a silent OFF.
                 NotificationBanner(message: L10n.scheduleElsewhere, isError: true)
+            } else if model.state?.launchctl?.needsReinstall == true {
+                // Legacy single-label agent or a stray per-tool agent: re-installing
+                // (toggle / save) rewrites the per-tool agents and cleans up the rest.
+                NotificationBanner(message: L10n.scheduleNeedsReinstall, isError: true)
             }
 
             if !model.statusMessage.isEmpty {
