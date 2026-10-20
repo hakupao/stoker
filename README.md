@@ -511,7 +511,8 @@ The installer writes one absolute-path plist per enabled tool (`<LABEL>.claude.p
 own times and days) and places them under `~/Library/LaunchAgents/`. Installing also removes the
 agent of a disabled tool and the pre-per-tool single `<LABEL>` agent (plus `LEGACY_LABELS`); a
 legacy agent whose plist points at a different Stoker checkout is kept with a warning unless you
-set `STOKER_FORCE_MIGRATE=1`. The plists are intentionally git-ignored because they contain
+set `STOKER_FORCE_MIGRATE=1`; `uninstall` likewise keeps (and exits non-zero on) a
+`<LABEL>.claude`/`.codex` agent installed from another checkout. The plists are intentionally git-ignored because they contain
 machine-specific paths.
 
 ### Project Structure

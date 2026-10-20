@@ -14,7 +14,7 @@ All notable changes to this project will be documented in this file.
   `--once --scheduled --tool <tool>`; `install` also removes the old single `<LABEL>` agent and the
   agent of a disabled tool. A legacy agent pointing at another Stoker checkout is kept with a
   warning unless `STOKER_FORCE_MIGRATE=1`; the same applies to a `<LABEL>.claude`/`.codex` agent
-  installed from another checkout (install skips it and exits non-zero). A `--scheduled` run of a tool that `ACTIVATION_TOOL`
+  installed from another checkout (install and uninstall skip it and exit non-zero). A `--scheduled` run of a tool that `ACTIVATION_TOOL`
   excludes exits without sending anything. `print-plist` prints every enabled tool's plist (`print-plist claude|codex`
   prints just one). **Upgrade note:** re-run `./install.sh install` (or toggle the schedule in
   the app) to replace the old agent.

@@ -468,7 +468,8 @@ App 通过 Foundation 的 `Process()` 调用脚本，读取 stdout，再用 `JSO
 安装脚本会为每个启用的工具生成一个带绝对路径的 plist（`<LABEL>.claude.plist`、
 `<LABEL>.codex.plist`，各自按该工具的时间和星期运行 `activate-ai-window.sh --once --tool <tool>`），
 放到 `~/Library/LaunchAgents/`。安装时也会移除未启用工具的 agent 以及旧版的单个 `<LABEL>` agent（和
-`LEGACY_LABELS`）；如果旧 agent 的 plist 指向另一个 Stoker 目录，会保留并给出警告，除非设置 `STOKER_FORCE_MIGRATE=1`。
+`LEGACY_LABELS`）；如果旧 agent 的 plist 指向另一个 Stoker 目录，会保留并给出警告，除非设置 `STOKER_FORCE_MIGRATE=1`；
+`uninstall` 同样会保留另一个目录安装的 `<LABEL>.claude`/`.codex` agent（并以非零退出）。
 plist 被 git ignore，因为它包含本机路径。
 
 ### 项目结构

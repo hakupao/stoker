@@ -63,7 +63,8 @@ is split across:
   (`<TOOL>_SCHEDULE_TIMES` → `SCHEDULE_TIMES` → default) and days (`<TOOL>_SCHEDULE_DAYS`; daily
   omits the plist `Weekday` key). Its schedule parsing is duplicated in `activation-state.sh` —
   keep the two `load_tool_schedule` copies in sync. Legacy agents (`${LABEL}` + `LEGACY_LABELS`)
-  are removed at install only when their plist points at this root (`STOKER_FORCE_MIGRATE=1`
+  are removed at install only when their plist points at this root, and `uninstall` likewise skips
+  per-tool agents owned by another root (`STOKER_FORCE_MIGRATE=1`
   overrides); `LAUNCHCTL_BIN` lets tests substitute a fake launchctl.
 - `bin/activation-state.sh` — owns the JSON state contract consumed by the app. Claude quota
   prefers the live omc usage cache when it is newer than the last snapshot row, restamps

@@ -14,6 +14,8 @@ set -euo pipefail
 #      reports agents that existed
 #   E) a per-tool agent from another root is kept (warning, non-zero exit) while
 #      the other tool still installs, unless STOKER_FORCE_MIGRATE=1
+#   F) uninstall keeps a per-tool agent from another root (warning, non-zero
+#      exit) while removing this root's, unless STOKER_FORCE_MIGRATE=1
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
@@ -139,5 +141,18 @@ run_script ACTIVATION_TOOL=all STOKER_FORCE_MIGRATE=1 "$SCRIPT" install >/dev/nu
 plutil -extract WorkingDirectory raw -o - "$AGENTS/$BASE.codex.plist" | grep -qx "$ROOT" \
   || fail "E: forced install did not replace the foreign agent"
 run_script "$SCRIPT" uninstall >/dev/null
+
+# F) uninstall must not remove another root's per-tool agent.
+seed_agent "$BASE.claude" "$ROOT"
+seed_agent "$BASE.codex" "$OTHER_ROOT"
+status=0
+run_script "$SCRIPT" uninstall >"$TMP_DIR/out" 2>"$TMP_DIR/err" || status=$?
+[[ "$status" != "0" ]] || fail "F: expected non-zero exit when a foreign agent is kept"
+grep -q "WARNING: kept agent $BASE.codex" "$TMP_DIR/err" || fail "F: missing warning: $(cat "$TMP_DIR/err")"
+{ loaded "$BASE.codex" && [[ -f "$AGENTS/$BASE.codex.plist" ]]; } || fail "F: foreign codex agent was removed"
+{ ! loaded "$BASE.claude" && [[ ! -f "$AGENTS/$BASE.claude.plist" ]]; } || fail "F: own claude agent not removed"
+[[ "$(cat "$TMP_DIR/out")" == "Uninstalled $BASE.claude" ]] || fail "F: unexpected output: $(cat "$TMP_DIR/out")"
+run_script STOKER_FORCE_MIGRATE=1 "$SCRIPT" uninstall >/dev/null 2>&1 || fail "F: forced uninstall failed"
+{ ! loaded "$BASE.codex" && [[ ! -f "$AGENTS/$BASE.codex.plist" ]]; } || fail "F: forced uninstall kept the foreign agent"
 
 echo "launchd install lifecycle test passed"

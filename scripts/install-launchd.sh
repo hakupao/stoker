@@ -35,7 +35,8 @@ usage() {
 Usage: install-launchd.sh install|uninstall|status|run-now|print-plist [claude|codex]
 
 install     Generate, validate, and load one LaunchAgent per enabled tool.
-uninstall   Unload and remove the LaunchAgents.
+uninstall   Unload and remove this root's LaunchAgents (agents installed from
+            another Stoker root are kept unless STOKER_FORCE_MIGRATE=1).
 status      Print launchd status for each agent.
 run-now     Trigger each enabled agent immediately.
 print-plist Regenerate and print the plists without installing
@@ -398,11 +399,15 @@ install_agent() {
 }
 
 uninstall_agent() {
-  local tool label
+  local tool label foreign=()
   REMOVED_AGENTS=()
   for tool in "${TOOLS[@]}"; do
     label="$(tool_label "$tool")"
     agent_present "$label" || continue
+    if agent_is_foreign "$label"; then
+      foreign+=("$label")
+      continue
+    fi
     remove_agent "$label"
     REMOVED_AGENTS+=("$label")
   done
@@ -411,6 +416,10 @@ uninstall_agent() {
     echo "No Stoker LaunchAgents were installed."
   else
     echo "Uninstalled ${REMOVED_AGENTS[*]}"
+  fi
+  if (( ${#foreign[@]} > 0 )); then
+    echo "ERROR: kept ${foreign[*]} (installed from another Stoker root)." >&2
+    exit 1
   fi
 }
 
