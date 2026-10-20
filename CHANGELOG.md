@@ -37,6 +37,16 @@ All notable changes to this project will be documented in this file.
   bootstrap fails; `uninstall` no longer validates `ACTIVATION_TOOL` and reports only the agents
   that existed.
 
+### Docs
+- README / README_CN / INSTALL / INSTALL_CN and the landing page gain a step-by-step "first launch
+  on a new Mac" guide (Done → Privacy & Security › Open Anyway, the ~1-hour button window, the
+  Sonoma right-click path, and the `xattr -dr com.apple.quarantine` fallback), plus a landing-page
+  FAQ entry; schedule wording now reflects per-tool Claude/Codex schedules.
+- App screenshots refreshed for the per-tool schedule UI. New 40-second promo film (EN/中, source
+  in `promo/`) embedded on the landing page and linked from both READMEs.
+- README cost figures now match the landing page's measured averages (Claude ~1.6K tokens ≈
+  $0.0025/activation, ≈ $0.30/month at 4/day; Codex ~38K tokens/activation).
+
 ## 0.3.6 - 2026-09-26
 
 ### Changed

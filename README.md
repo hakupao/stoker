@@ -22,7 +22,7 @@ fixed times, then records activation logs, per-run token usage, and quota status
 ![SwiftUI](https://img.shields.io/badge/SwiftUI-2396F3?logo=swift&logoColor=white)
 ![launchd](https://img.shields.io/badge/launchd-scheduler-555555)
 
-[Website](https://stoker.bojiangz.com/) · [Features](#features) · [Quick Start](#quick-start) · [Menu Bar App](#menu-bar-app) · [How It Works](#how-it-works) · [Cost](#cost-optimization) · [Configuration](#configuration) · [Download](https://github.com/hakupao/stoker/releases/latest)
+[Website](https://stoker.bojiangz.com/) · [Features](#features) · [Quick Start](#quick-start) · [First Launch](#first-launch-allow-stoker-to-open) · [Menu Bar App](#menu-bar-app) · [How It Works](#how-it-works) · [Cost](#cost-optimization) · [Configuration](#configuration) · [Download](https://github.com/hakupao/stoker/releases/latest)
 
 <br/>
 
@@ -32,6 +32,9 @@ fixed times, then records activation logs, per-run token usage, and quota status
     <td align="center"><sub><b>Activity · Dark</b></sub><br/><img src="docs/images/activity-en-dark.png" width="390" alt="Stoker activity dashboard (dark)" /></td>
   </tr>
 </table>
+
+<a href="https://stoker.bojiangz.com/#film"><img src="docs/assets/stoker-promo-en.jpg" width="640" alt="Watch the 40-second Stoker film" /></a><br/>
+<sub>▶ <a href="https://stoker.bojiangz.com/#film">Watch the 40-second film</a> · <a href="docs/assets/stoker-promo-en.mp4">MP4</a></sub>
 
 </div>
 
@@ -47,13 +50,16 @@ goes out. That is exactly what this tool does for your AI usage windows: it keep
 a schedule you choose. Claude has a 5-hour and a weekly window; Codex, as of September 2026, has
 only a 7-day window, which Stoker anchors once per week (see `CODEX_ACTIVATE_ONLY_WHEN_IDLE`).
 
-The default schedule is `07:00`, `12:00`, `17:00`, and `22:00` local macOS time.
+Claude and Codex each have their own schedule (times and, optionally, weekdays). Out of the box
+both use `07:00`, `12:00`, `17:00`, and `22:00` local macOS time, every day, until you set a
+different one per tool in the app's Settings or with `CLAUDE_SCHEDULE_TIMES` / `CODEX_SCHEDULE_TIMES`
+and `CLAUDE_SCHEDULE_DAYS` / `CODEX_SCHEDULE_DAYS` in `.env`.
 
 ## Features
 
 | | Feature |
 | :---: | :--- |
-| ⏰ | **Scheduled activation** of Claude Code and Codex through macOS `launchd`. |
+| ⏰ | **Scheduled activation** of Claude Code and Codex through macOS `launchd` — each tool on its own times and days. |
 | 🪶 | **A minimal prompt** that tells both CLIs not to inspect files, run tools, or modify anything. |
 | 📜 | **Human-readable run history** in `logs/activation.log`. |
 | 📊 | **Structured per-run usage records** in `logs/usage.jsonl`. |
@@ -120,12 +126,47 @@ current macOS GUI session.
 
 ### Menu bar app
 
-Download the GUI DMG, drag `Stoker.app` to `Applications`, open it, then use the status-bar
+Download the GUI DMG, drag `Stoker.app` to `Applications`, open it (the first launch needs a
+one-time approval — see below), then use the status-bar
 menu to install/reload the schedule, refresh quota, run once, pause the schedule, and edit
 settings. The app bundles the same CLI engine and installs its working copy under
 `~/Library/Application Support/Stoker/stoker`.
 
 See [INSTALL.md](INSTALL.md) for complete beginner and advanced installation steps.
+
+### First launch: allow Stoker to open
+
+Stoker is open source and only ad-hoc signed — it isn't notarized with a paid Apple Developer ID —
+so on a fresh Mac, macOS blocks it the first time you open it. The app runs entirely on your Mac
+and its full source is on GitHub. You approve it **once**:
+
+1. **Move it to Applications first.** Open the DMG and drag `Stoker.app` onto the `Applications`
+   folder. Launch it from there, not from inside the DMG.
+2. **Double-click `Stoker.app`.** A dialog appears: *“Stoker” Not Opened* — *Apple could not
+   verify “Stoker” is free of malware…*. Click **Done** (on macOS 14 the button
+   is **Cancel**) — not **Move to Trash**.
+3. **macOS 15 Sequoia / macOS 26 and later:**
+   1. Open **System Settings › Privacy & Security**.
+   2. Scroll down to the **Security** section. You'll see *“Stoker” was blocked to protect your
+      Mac.* Click **Open Anyway**.
+   3. Confirm with Touch ID or your login password.
+   4. A final dialog appears — click **Open Anyway** again. Stoker starts.
+
+   The **Open Anyway** button only shows for about an hour after the blocked attempt. If it's
+   missing, double-click `Stoker.app` again, then go back to Privacy & Security.
+4. **macOS 14 Sonoma:** right-click (or Control-click) `Stoker.app` → **Open**, then click
+   **Open** in the dialog.
+5. **Still blocked?** If macOS says *“Stoker” is damaged and can't be opened*, or the
+   **Open Anyway** button never appears, run this in Terminal and then open the app again:
+
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/Stoker.app
+   ```
+
+   This only removes the "downloaded from the internet" quarantine flag from this one app; it
+   doesn't change any system-wide security setting.
+6. **That's it.** Later launches open normally. After you replace Stoker with a newer version,
+   macOS may ask you to approve it once more the same way.
 
 ## Commands
 
@@ -334,9 +375,11 @@ Highlights:
   menu-bar dropdown shows one summary line per tool; the menu-bar flame icon gets a small red dot
   while either tool is alerting, rechecked every 10 minutes and again shortly after each scheduled
   activation, even while the window is closed.
-- **Settings** — a Claude card (enable + background auth) and a Codex card (enable, model,
-  auto-update CLI, model fallback, activate-only-when-idle), plus shared advanced options (quota
-  preflight, post-run snapshots, keep-awake, launch at login).
+- **Settings** — a Schedule card with one row per tool (Claude and Codex each pick their own
+  days — "Every day" or any of Mon–Sun — and their own times), then a Claude card (enable +
+  background auth) and a Codex card (enable, model, auto-update CLI, model fallback,
+  activate-only-when-idle), plus shared advanced options (quota preflight, post-run snapshots,
+  keep-awake, launch at login).
 - **Background auth** (in the Claude settings card) — at-a-glance status of how scheduled runs
   authenticate, plus one-click setup of a long-lived `CLAUDE_CODE_OAUTH_TOKEN` so they never fall
   back to the rotating Keychain login (with a manual paste fallback).
@@ -561,8 +604,8 @@ The runner strips both CLIs down to the absolute minimum context required:
 | `--tools ""` | Disable all built-in tools |
 | `--disable-slash-commands` | Disable skills |
 
-Result: **~170 input tokens, ~$0.001 per activation** (vs ~40K tokens / ~$0.15 without
-optimization).
+Result: **~1.6K input tokens, ≈ $0.0025 per activation** on average over recent logged runs
+(vs ~40K tokens / ~$0.15 without optimization).
 
 ### Codex
 
@@ -579,8 +622,8 @@ optimization).
 | `-c 'features.child_agents_md=false'` | Disable AGENTS.md loading |
 | `-c 'model_reasoning_effort="low"'` | Minimal reasoning effort |
 
-Result: **~22K input tokens** (vs ~32K without optimization). Codex's internal system prompt
-(~22K) is still the token floor. The default model is `gpt-5.6-luna`: the previous default,
+Result: **~38K input tokens per activation** on average over recent logged runs (~55% cache
+reads). Codex's internal system prompt is still the token floor. The default model is `gpt-5.6-luna`: the previous default,
 `gpt-5.4-mini`, was retired for ChatGPT-account sign-ins in September 2026 (every run returned
 HTTP 400 "not supported when using Codex with a ChatGPT account"). Set `CODEX_MODEL=default` if
 you prefer the Codex CLI default.
@@ -608,8 +651,8 @@ rewritten.
 
 | Tool | Before | After |
 | --- | --- | --- |
-| Claude | ~$18/month | **~$0.16/month** |
-| Codex | Quota-based, ~32K tokens/call | Quota-based, **~22K tokens/call (−31%)** |
+| Claude | ~$18/month | **≈ $0.30/month** |
+| Codex | Quota-based | Quota-based, **~38K tokens/call (~55% cache reads)** |
 
 ## Safety Notes
 

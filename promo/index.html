@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1920, height=1080">
+<title>Stoker Promo</title>
+<link rel="stylesheet" href="promo.css">
+</head>
+<body>
+<div id="stage">
+  <!-- Background: cool stage that warms as the fire is lit -->
+  <div id="bg"></div>
+  <div id="glowCold" class="glow"></div>
+  <div id="glowWarm" class="glow"></div>
+  <div id="vignette"></div>
+
+  <!-- 1 · Ignition -->
+  <section id="s1" class="scene center">
+    <div class="s1-iconwrap">
+      <div id="s1Halo" class="halo"></div>
+      <img id="s1Icon" class="appicon" src="../docs/assets/app-icon/stoker-app-icon-1024.png" alt="">
+    </div>
+    <h1 id="s1Title" class="wordmark">Stoker</h1>
+    <p id="s1Tag" class="tagline" data-k="tagline"></p>
+    <p id="s1Eyebrow" class="eyebrow" data-k="eyebrow"></p>
+  </section>
+
+  <!-- 2 · Problem -->
+  <section id="s2" class="scene">
+    <div class="s2-head">
+      <p id="s2Eyebrow" class="eyebrow" data-k="s2.eyebrow"></p>
+      <h2 id="s2Title" class="headline" data-k="s2.title"></h2>
+      <p id="s2Sub" class="sub" data-k="s2.sub"></p>
+    </div>
+    <div id="s2Chart" class="chart">
+      <div class="axis" id="s2Axis"></div>
+      <div class="row" id="rowA">
+        <div class="rowlabel cool"><span class="dot cooldot"></span><span data-k="s2.rowA"></span></div>
+        <div class="track">
+          <div id="barA" class="bar coolbar"><span id="barALbl" class="barlbl mono"></span></div>
+          <div id="markA" class="mark coolmark"><span class="mono" data-k="s2.markA"></span></div>
+          <div id="shiftA" class="shift"><span data-k="s2.shift"></span></div>
+        </div>
+      </div>
+      <div class="row" id="rowB">
+        <div class="rowlabel warm"><span class="dot emberdot"></span><span data-k="s2.rowB"></span></div>
+        <div class="track">
+          <div id="barB" class="bar emberbar"><span class="barlbl mono">07:00 → 12:00</span></div>
+          <div id="barB2" class="bar emberbar2"><span class="barlbl mono">12:00 → 17:00</span></div>
+          <div id="markB" class="mark embermark"><span class="mono">07:00</span></div>
+          <div id="sparkB" class="spark"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 · Schedule -->
+  <section id="s3" class="scene">
+    <div class="col-text left" id="s3Text">
+      <p class="eyebrow" data-k="s3.eyebrow"></p>
+      <h2 class="headline" data-k="s3.title"></h2>
+      <p class="sub" data-k="s3.sub"></p>
+      <div class="sched" id="s3c1">
+        <div class="sched-head"><span class="dot claudedot"></span><b>Claude</b><span class="pill" data-k="everyday"></span></div>
+        <div class="sched-times mono">07:00 · 12:00 · 17:00 · 22:00</div>
+      </div>
+      <div class="sched" id="s3c2">
+        <div class="sched-head"><span class="dot codexdot"></span><b>Codex</b><span class="pill" data-k="everyday"></span></div>
+        <div class="sched-times mono">07:00</div>
+        <div class="sched-note" data-k="s3.codexnote"></div>
+      </div>
+    </div>
+    <div class="shot" id="s3Shot">
+      <img id="s3Img" alt="">
+      <div class="spot" id="s3Spot"></div>
+    </div>
+  </section>
+
+  <!-- 4 · Activity -->
+  <section id="s4" class="scene">
+    <div class="shot" id="s4Shot">
+      <img id="s4Img" alt="">
+      <div class="spot" id="s4Spot"></div>
+    </div>
+    <div class="col-text right" id="s4Text">
+      <p class="eyebrow" data-k="s4.eyebrow"></p>
+      <div class="beats">
+        <div class="beat" id="b1"><h2 class="headline" data-k="s4.b1.t"></h2><p class="sub" data-k="s4.b1.d"></p></div>
+        <div class="beat" id="b2"><h2 class="headline" data-k="s4.b2.t"></h2><p class="sub" data-k="s4.b2.d"></p></div>
+        <div class="beat" id="b3"><h2 class="headline" data-k="s4.b3.t"></h2><p class="sub" data-k="s4.b3.d"></p></div>
+        <div class="beat" id="b4">
+          <h2 class="headline" data-k="s4.b4.t"></h2>
+          <div class="cost"><span class="cost-num">≈ $0.0025</span><span class="cost-unit" data-k="s4.b4.unit"></span></div>
+          <p class="sub" data-k="s4.b4.d"></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 · Light/dark + bilingual -->
+  <section id="s5" class="scene">
+    <div class="col-text left" id="s5Text">
+      <p class="eyebrow" data-k="s5.eyebrow"></p>
+      <h2 class="headline" data-k="s5.title"></h2>
+      <div class="chips" id="s5Chips">
+        <span class="chip" id="chip1" data-k="s5.c1"></span>
+        <span class="chip" id="chip2" data-k="s5.c2"></span>
+        <span class="chip" id="chip3" data-k="s5.c3"></span>
+      </div>
+      <div class="modes mono" id="s5Mode"></div>
+    </div>
+    <div class="shot stack" id="s5Shot">
+      <img id="s5i0" alt=""><img id="s5i1" alt=""><img id="s5i2" alt=""><img id="s5i3" alt="">
+    </div>
+  </section>
+
+  <!-- 6 · End card -->
+  <section id="s6" class="scene center">
+    <div class="s1-iconwrap small">
+      <div id="s6Halo" class="halo"></div>
+      <img id="s6Icon" class="appicon" src="../docs/assets/app-icon/stoker-app-icon-1024.png" alt="">
+    </div>
+    <h1 id="s6Title" class="wordmark">Stoker</h1>
+    <p id="s6Eyebrow" class="eyebrow big" data-k="eyebrow"></p>
+    <div id="s6Cta" class="cta" data-k="cta"></div>
+    <p id="s6Links" class="links mono">stoker.bojiangz.com <i>·</i> github.com/hakupao/stoker</p>
+    <p id="s6Free" class="free" data-k="free"></p>
+    <p id="s6Disc" class="disc" data-k="disc"></p>
+  </section>
+</div>
+<script src="promo.js"></script>
+</body>
+</html>

@@ -106,14 +106,14 @@
     <p class="hero__meta reveal" data-i18n="hero.meta">v0.3.6 · macOS 14+ · Free &amp; open source (MIT)</p>
 
     <div class="schedule reveal">
-      <span class="schedule__label" data-i18n="hero.schedule_label">Default schedule</span>
+      <span class="schedule__label" data-i18n="hero.schedule_label">Default schedule · per tool</span>
       <div class="schedule__track" aria-hidden="true">
         <div class="schedule__marquee">
           <span>07:00</span><i>·</i><span>12:00</span><i>·</i><span>17:00</span><i>·</i><span>22:00</span><i>·</i>
           <span>07:00</span><i>·</i><span>12:00</span><i>·</i><span>17:00</span><i>·</i><span>22:00</span><i>·</i>
         </div>
       </div>
-      <span class="sr-only" data-i18n="hero.schedule_sr">Default schedule: 07:00, 12:00, 17:00 and 22:00 — fully customizable.</span>
+      <span class="sr-only" data-i18n="hero.schedule_sr">Default schedule for both Claude and Codex: 07:00, 12:00, 17:00 and 22:00 — set each tool's own times and days.</span>
     </div>
 
     <figure class="hero__shot reveal">
@@ -121,6 +121,18 @@
         <img id="heroShot" class="window__img" width="760" height="720" alt="Stoker activity dashboard" data-alt-i18n="alt.activity" loading="eager" decoding="async" src="./images/activity-en.png" data-shot="activity" />
       </div>
     </figure>
+  </div>
+</section>
+
+<!-- ============ FILM ============ -->
+<section class="section film" id="film">
+  <div class="container">
+    <h2 class="section__title reveal" data-i18n="film.title">Stoker in 40 seconds.</h2>
+    <p class="section__sub reveal" data-i18n="film.sub">What it does, how the schedule works, and what you see in the app.</p>
+    <div class="film__frame window reveal">
+      <video id="promoVideo" class="film__video" controls muted playsinline preload="none" width="1920" height="1080"
+        poster="./assets/stoker-promo-en.jpg" src="./assets/stoker-promo-en.mp4" aria-label="Stoker promo video"></video>
+    </div>
   </div>
 </section>
 
@@ -132,7 +144,7 @@
     <div class="grid grid--3">
       <article class="card reveal" style="--i:0">
         <h3 class="card__t" data-i18n="problem.c1.t">Fixed start times</h3>
-        <p class="card__d" data-i18n="problem.c1.d">Pick the hours that match your day; each time fires independently.</p>
+        <p class="card__d" data-i18n="problem.c1.d">Pick the hours and days that match your week — separately for Claude and Codex; each time fires independently.</p>
       </article>
       <article class="card reveal" style="--i:1">
         <h3 class="card__t" data-i18n="problem.c2.t">Quota you can see</h3>
@@ -152,7 +164,7 @@
     <h2 class="section__title reveal" data-i18n="how.title">How it works</h2>
     <p class="section__sub reveal" data-i18n="how.sub">Every run is the same calm, four-beat loop.</p>
     <ol class="steps">
-      <li class="step reveal" style="--i:0"><span class="step__n">1</span><h3 class="step__t" data-i18n="how.s1.t">Load &amp; lock</h3><p class="step__d" data-i18n="how.s1.d">Reads .env, then takes a lock so concurrent triggers skip safely.</p></li>
+      <li class="step reveal" style="--i:0"><span class="step__n">1</span><h3 class="step__t" data-i18n="how.s1.t">Load &amp; lock</h3><p class="step__d" data-i18n="how.s1.d">Reads .env, then takes a lock — a trigger that fires at the same moment waits its turn.</p></li>
       <li class="step reveal" style="--i:1"><span class="step__n">2</span><h3 class="step__t" data-i18n="how.s2.t">Quota preflight</h3><p class="step__d" data-i18n="how.s2.d">Checks quota before sending. Exhausted tools are skipped and logged.</p></li>
       <li class="step reveal" style="--i:2"><span class="step__n">3</span><h3 class="step__t" data-i18n="how.s3.t">Send a tiny prompt</h3><p class="step__d" data-i18n="how.s3.d">Each CLI gets a tiny check-in, kept to its own folder — no tools run, your real projects never touched.</p></li>
       <li class="step reveal" style="--i:3"><span class="step__n">4</span><h3 class="step__t" data-i18n="how.s4.t">Record &amp; release</h3><p class="step__d" data-i18n="how.s4.d">Appends usage + quota snapshots, then releases the lock for next time.</p></li>
@@ -228,7 +240,7 @@
           <i class="ficon__dot"></i>
         </span>
         <h3 class="bento__t" data-i18n="feat.f7.t">Clone-friendly config</h3>
-        <p class="bento__d" data-i18n="feat.f7.d">Schedule, tools, prompts, timeouts and paths — all in one .env.</p>
+        <p class="bento__d" data-i18n="feat.f7.d">Per-tool schedules, tools, prompts, timeouts and paths — all in one .env.</p>
       </article>
     </div>
   </div>
@@ -295,6 +307,7 @@
       <details class="qa"><summary data-i18n="faq.q3">Is it safe? Does it touch my projects?</summary><p data-i18n="faq.a3">No. It runs in its own folder with a tiny read-only check-in, and never reads or modifies your real projects. dry-run and quota send nothing.</p></details>
       <details class="qa"><summary data-i18n="faq.q4">Is this official?</summary><p data-i18n="faq.a4">No. Stoker is an independent open-source project, not affiliated with Anthropic, OpenAI, or Apple. You are responsible for following their terms.</p></details>
       <details class="qa"><summary data-i18n="faq.q5">How do I uninstall?</summary><p data-i18n="faq.a5">Run ./install.sh uninstall (or use the menu bar app) to unload and remove the LaunchAgents.</p></details>
+      <details class="qa"><summary data-i18n="faq.q6">macOS says Stoker can’t be opened — what do I do?</summary><p data-i18n="faq.a6">That’s expected on first launch: the app is open source and ad-hoc signed, not notarized. Click Done, then open System Settings › Privacy &amp; Security and click Open Anyway (on macOS 14, right-click the app ▸ Open). If it says the app is damaged, run xattr -dr com.apple.quarantine /Applications/Stoker.app in Terminal. You only do this once.</p></details>
     </div>
   </div>
 </section>
@@ -310,7 +323,7 @@
         <span class="dlcard__tag" data-i18n="dl.gui.t">Menu bar app</span>
         <p class="dlcard__d" data-i18n="dl.gui.d">For most people. A GUI monitor + settings over the bundled engine.</p>
         <a class="btn btn--primary magnetic" href="https://github.com/hakupao/stoker/releases" target="_blank" rel="noopener" data-i18n="dl.gui.btn">Download .dmg</a>
-        <p class="dlcard__note" data-i18n="dl.gui.note">Ad-hoc signed — first launch needs Right-click ▸ Open (or System Settings ▸ Privacy ▸ Open Anyway).</p>
+        <p class="dlcard__note"><span data-i18n="dl.gui.note">Ad-hoc signed, not notarized — macOS asks you to approve it once on first launch.</span> <a class="dlcard__link" href="#first-launch" data-i18n="dl.gui.note_link">See the first-launch steps ↓</a></p>
       </article>
       <article class="dlcard reveal" style="--i:1">
         <span class="dlcard__tag" data-i18n="dl.cli.t">CLI / launchd</span>
@@ -320,6 +333,18 @@ cd stoker &amp;&amp; cp .env.example .env
 ./install.sh</code></pre>
         <a class="btn btn--ghost" href="https://github.com/hakupao/stoker#quick-start" target="_blank" rel="noopener" data-i18n="dl.cli.btn">View install steps</a>
       </article>
+    </div>
+    <div class="firstrun reveal" id="first-launch" style="--i:2">
+      <h3 class="firstrun__t" data-i18n="fl.title">First launch on a new Mac</h3>
+      <p class="firstrun__sub" data-i18n="fl.sub">Stoker is open source and only ad-hoc signed (no paid Apple notarization), so macOS blocks it the first time. It runs entirely on your Mac and the full source is on GitHub. Approve it once:</p>
+      <ol class="firstrun__list">
+        <li class="firstrun__item"><span class="step__n">1</span><div><h4 class="firstrun__h" data-i18n="fl.s1.t">Drag it to Applications</h4><p class="firstrun__d" data-i18n="fl.s1.d">Open the DMG and drag Stoker.app onto the Applications folder. Launch it from there, not from the DMG.</p></div></li>
+        <li class="firstrun__item"><span class="step__n">2</span><div><h4 class="firstrun__h" data-i18n="fl.s2.t">Double-click, then click Done</h4><p class="firstrun__d" data-i18n="fl.s2.d">macOS shows “Stoker” Not Opened — Apple could not verify… Click Done (on macOS 14: Cancel) — not Move to Trash.</p></div></li>
+        <li class="firstrun__item"><span class="step__n">3</span><div><h4 class="firstrun__h" data-i18n="fl.s3.t">macOS 15 Sequoia / 26 and later</h4><p class="firstrun__d" data-i18n="fl.s3.d">Open System Settings › Privacy &amp; Security, scroll to Security, and click Open Anyway next to “Stoker” was blocked… Confirm with Touch ID or your password, then click Open Anyway once more. The button only shows for about an hour — if it’s missing, double-click the app again.</p></div></li>
+        <li class="firstrun__item"><span class="step__n">4</span><div><h4 class="firstrun__h" data-i18n="fl.s4.t">macOS 14 Sonoma</h4><p class="firstrun__d" data-i18n="fl.s4.d">Right-click (or Control-click) Stoker.app ▸ Open, then click Open in the dialog.</p></div></li>
+        <li class="firstrun__item"><span class="step__n">5</span><div><h4 class="firstrun__h" data-i18n="fl.s5.t">Still blocked, or “damaged”?</h4><p class="firstrun__d" data-i18n="fl.s5.d">Run this in Terminal, then open the app again. It only removes the download quarantine flag from this one app.</p><pre class="dlcard__code firstrun__code mono"><code>xattr -dr com.apple.quarantine /Applications/Stoker.app</code></pre></div></li>
+      </ol>
+      <p class="firstrun__foot" data-i18n="fl.foot">Only needed once. Later launches open normally — after updating to a newer version, macOS may ask you to approve it once more.</p>
     </div>
     <p class="download__outro reveal" data-i18n="dl.outro">Keep the fire lit.</p>
   </div>

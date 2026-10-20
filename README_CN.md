@@ -22,7 +22,7 @@
 ![SwiftUI](https://img.shields.io/badge/SwiftUI-2396F3?logo=swift&logoColor=white)
 ![launchd](https://img.shields.io/badge/launchd-scheduler-555555)
 
-[网站](https://stoker.bojiangz.com/) · [功能](#功能) · [快速开始](#快速开始) · [菜单栏-app](#菜单栏-app) · [工作方式](#工作方式) · [成本优化](#成本优化) · [配置](#配置) · [下载](https://github.com/hakupao/stoker/releases/latest)
+[网站](https://stoker.bojiangz.com/) · [功能](#功能) · [快速开始](#快速开始) · [首次打开](#首次打开放行-stoker) · [菜单栏-app](#菜单栏-app) · [工作方式](#工作方式) · [成本优化](#成本优化) · [配置](#配置) · [下载](https://github.com/hakupao/stoker/releases/latest)
 
 <br/>
 
@@ -33,6 +33,9 @@
   </tr>
 </table>
 
+<a href="https://stoker.bojiangz.com/#film"><img src="docs/assets/stoker-promo-zh.jpg" width="640" alt="观看 40 秒 Stoker 宣传片" /></a><br/>
+<sub>▶ <a href="https://stoker.bojiangz.com/#film">观看 40 秒宣传片</a> · <a href="docs/assets/stoker-promo-zh.mp4">MP4</a></sub>
+
 </div>
 
 ## 项目简介
@@ -41,13 +44,15 @@ Stoker（司炉——锅炉房里负责不停添煤、让炉火长燃不灭的�
 固定到自己作息时间的人。它就像替你守着那簇火：通过 macOS `launchd` 定时运行，在一个专用轻量目录里
 让两个 CLI 只回复 `READY`，并明确要求不要扫描真实项目、不要运行工具、不要修改文件。
 
-默认触发时间是本机时间 `07:00`、`12:00`、`17:00`、`22:00`。
+Claude 和 Codex 各有一套独立的运行时间（时间点，以及可选的星期几）。默认两者都是本机时间 `07:00`、
+`12:00`、`17:00`、`22:00`、每天触发；可以在 App 的设置里按工具分别修改，或在 `.env` 里用
+`CLAUDE_SCHEDULE_TIMES` / `CODEX_SCHEDULE_TIMES` 与 `CLAUDE_SCHEDULE_DAYS` / `CODEX_SCHEDULE_DAYS` 设置。
 
 ## 功能
 
 | | 功能 |
 | :---: | :--- |
-| ⏰ | **定时触发** —— 使用 macOS `launchd` 定时触发 Claude Code 和 Codex。 |
+| ⏰ | **定时触发** —— 使用 macOS `launchd` 定时触发 Claude Code 和 Codex，每个工具各自设定时间和星期。 |
 | 🪶 | **极短 prompt** —— 要求两个 CLI 不读文件、不运行工具、不修改内容。 |
 | 📜 | **可读运行历史** —— `logs/activation.log` 记录人类可读的运行历史。 |
 | 📊 | **结构化 usage** —— `logs/usage.jsonl` 记录每次真实触发返回的 token/usage 信息。 |
@@ -109,11 +114,41 @@ cp .env.example .env
 
 ### 菜单栏 App
 
-下载 GUI DMG，把 `Stoker.app` 拖到 `Applications` 后打开，然后在状态栏菜单里安装/重载 schedule、
+下载 GUI DMG，把 `Stoker.app` 拖到 `Applications` 后打开（首次打开需要放行一次，见下文），然后在状态栏菜单里安装/重载 schedule、
 刷新 quota、手动触发、暂停定时器和编辑设置。App 内置同一套 CLI engine，并会把工作副本放到
 `~/Library/Application Support/Stoker/stoker`。
 
 完整的新手和高手安装步骤见 [INSTALL_CN.md](INSTALL_CN.md)。
+
+### 首次打开：放行 Stoker
+
+Stoker 是开源软件，只做了 ad-hoc 签名，没有用付费的 Apple Developer ID 做公证，所以在一台新 Mac 上
+第一次打开时会被 macOS 拦下。App 完全在你的 Mac 本机运行，全部源码都在 GitHub 上。只需放行**一次**：
+
+1. **先拖进「应用程序」。** 打开 DMG，把 `Stoker.app` 拖到 `Applications`（应用程序）文件夹，之后从
+   那里打开，不要直接在 DMG 里运行。
+2. **双击 `Stoker.app`。** 会弹出提示：「未打开 “Stoker”」——「Apple 无法验证 “Stoker” 是否包含
+   可能危害 Mac 安全或泄漏隐私的恶意软件……」。点 **完成**（macOS 14 上是 **取消**），不要点 **移到废纸篓**。
+3. **macOS 15 Sequoia / macOS 26 及更新：**
+   1. 打开 **系统设置 › 隐私与安全性**。
+   2. 往下滚到 **安全性** 一栏，会看到一条 “Stoker” 已被阻止（以保护你的 Mac）的提示，点旁边的
+      **仍要打开**。
+   3. 用 Touch ID 或登录密码确认。
+   4. 最后还会弹出一个对话框，再点一次 **仍要打开**，Stoker 就会启动。
+
+   **仍要打开** 按钮只在被拦截后大约一小时内显示。如果找不到它，就再双击一次 `Stoker.app`，然后
+   回到「隐私与安全性」。
+4. **macOS 14 Sonoma：** 右键点按（或按住 Control 点按）`Stoker.app` → **打开**，再在对话框里点
+   **打开**。
+5. **还是打不开？** 如果 macOS 提示「“Stoker” 已损坏，无法打开」，或者 **仍要打开** 按钮始终不出现，
+   在「终端」里运行下面这行，然后再打开 App：
+
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/Stoker.app
+   ```
+
+   它只会去掉这一个 App 身上「从互联网下载」的隔离标记，不会改动任何系统级安全设置。
+6. **完成。** 以后正常双击即可打开。换成新版本后，macOS 可能会要求你按同样的方式再放行一次。
 
 ## 常用命令
 
@@ -306,7 +341,8 @@ CLI/launchd 仍然是主引擎；菜单栏 App 是单独给初学者使用的 GU
 - **顶部与菜单** —— 头部迷你条标注 `Claude 5h` / `Codex 周`，各带一个健康色点；菜单栏下拉每个工具
   一行摘要；任一工具告警时菜单栏火苗图标叠加一个小红点，每 10 分钟重新检查一次，每次定时激活后也
   会很快重新检查，即使窗口没打开也一样。
-- **设置** —— 拆成 Claude 设置卡（启用 + 后台认证）与 Codex 设置卡（启用、模型、自动更新 CLI、
+- **设置** —— 顶部是运行时间卡，Claude 和 Codex 各占一行，各自选择星期（「每天」或周一到周日任选）
+  和时间点；下面是 Claude 设置卡（启用 + 后台认证）与 Codex 设置卡（启用、模型、自动更新 CLI、
   模型自动回退、仅空闲时激活），加上共用的高级选项（额度预检、运行后快照、防睡眠、开机自启）。
 - **后台认证**（现在在 Claude 设置卡内）—— 一眼看清定时任务的认证方式，并一键配置长效
   `CLAUDE_CODE_OAUTH_TOKEN`，让定时任务不再退回会轮换的钥匙串登录（并提供手动粘贴兜底）。
@@ -516,7 +552,7 @@ Runner 会把两个 CLI 的上下文压缩到激活所需的最低限度：
 | `--tools ""` | 禁用所有内置工具 |
 | `--disable-slash-commands` | 禁用 skills |
 
-效果：**~170 input tokens，每次激活 ~$0.001**（优化前 ~40K tokens / ~$0.15）。
+效果：按近期实际运行记录平均，**每次激活 ~1.6K input tokens，约 $0.0025**（优化前 ~40K tokens / ~$0.15）。
 
 ### Codex
 
@@ -532,7 +568,7 @@ Runner 会把两个 CLI 的上下文压缩到激活所需的最低限度：
 | `-c 'features.child_agents_md=false'` | 禁用 AGENTS.md 加载 |
 | `-c 'model_reasoning_effort="low"'` | 最低推理力度 |
 
-效果：**~22K input tokens**（优化前 ~32K）。Codex 内部系统 prompt（~22K）仍然是 token 底线。
+效果：按近期实际运行记录平均，**每次激活 ~38K input tokens**（约 55% 为缓存读取）。Codex 内部系统 prompt 仍然是 token 底线。
 默认模型为 `gpt-5.6-luna`：原默认的 `gpt-5.4-mini` 已于 2026 年 9 月对 ChatGPT 账号登录停用
 （每次都返回 HTTP 400 "not supported when using Codex with a ChatGPT account"）。若想使用 Codex CLI
 默认模型，可设置 `CODEX_MODEL=default`。
@@ -556,8 +592,8 @@ Runner 会把两个 CLI 的上下文压缩到激活所需的最低限度：
 
 | 工具 | 优化前 | 优化后 |
 | --- | --- | --- |
-| Claude | ~$18/月 | **~$0.16/月** |
-| Codex | 按配额计算，~32K tokens/次 | 按配额计算，**~22K tokens/次（−31%）** |
+| Claude | ~$18/月 | **约 $0.30/月** |
+| Codex | 按配额计算 | 按配额计算，**~38K tokens/次（约 55% 缓存读取）** |
 
 ## 安全说明
 

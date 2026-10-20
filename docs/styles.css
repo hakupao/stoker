@@ -367,6 +367,10 @@ html[lang="en"] [data-lang-en], html[lang="zh"] [data-lang-zh] { color: var(--em
   color: var(--text-2); padding: 8px 20px; border-radius: 999px; transition: color var(--dur-fast), background var(--dur-fast); }
 .tab.is-active { color: var(--on-ember); background: var(--ember); }
 .shots__frame { max-width: 620px; margin-inline: auto; }
+.film .section__title { margin-inline: auto; text-align: center; }
+.section .film__frame { margin-top: clamp(28px, 4vw, 44px); }
+.film__frame { max-width: 960px; margin-inline: auto; background: #120d0b; }
+.film__video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; background: #120d0b; }
 /* cross-fade applies to any product window when its screenshot src swaps (lang/theme/tab) */
 .window__img { transition: opacity var(--dur) var(--ease-out); }
 .window.is-swapping .window__img { opacity: 0; }
@@ -405,6 +409,24 @@ html[lang="en"] [data-lang-en], html[lang="zh"] [data-lang-zh] { color: var(--em
 .dlcard__note { color: var(--text-3); font-size: 13px; line-height: 1.6; margin-top: auto; }
 .dlcard__code { margin: 0; padding: 16px; border-radius: var(--radius-sm); background: #161210; color: rgba(255,250,245,.9);
   font-size: 13px; line-height: 1.7; overflow-x: auto; }
+.dlcard__link { color: var(--ember-ink); font-weight: 600; text-decoration: none; white-space: nowrap; }
+.dlcard__link:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+/* first-launch (Gatekeeper) steps */
+.firstrun { position: relative; margin-top: clamp(28px, 4vw, 40px); padding: 28px; border-radius: var(--radius-lg);
+  background: var(--surface); box-shadow: 0 0 0 1px var(--hairline); scroll-margin-top: calc(var(--nav-h) + 16px); }
+.firstrun__t { font-size: 1.12rem; font-weight: 650; }
+.firstrun__sub { margin-top: 8px; color: var(--text-2); font-size: 15px; }
+.firstrun__list { list-style: none; margin: 22px 0 0; padding: 0; display: grid; gap: 12px; }
+.firstrun__item { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px; align-items: start;
+  padding: 16px 18px; border-radius: var(--radius-md); background: var(--elevated); box-shadow: 0 0 0 1px var(--hairline); }
+.firstrun__item > div { min-width: 0; }
+.firstrun__item .step__n { width: 30px; height: 30px; font-size: 14px; margin-bottom: 0; }
+.firstrun__h { font-size: 1rem; font-weight: 620; line-height: 1.45; padding-top: 3px; }
+.firstrun__d { margin-top: 4px; color: var(--text-2); font-size: 14.5px; }
+.firstrun__code { margin-top: 10px; white-space: pre; }
+@media (max-width: 520px) { .firstrun__code { white-space: pre-wrap; word-break: break-all; } }
+.firstrun__foot { margin-top: 16px; color: var(--text-3); font-size: 13.5px; line-height: 1.6; }
 .download__outro { margin: clamp(36px,5vw,52px) auto 0; text-align: center; font-size: clamp(1.3rem, 2vw + .6rem, 1.9rem);
   font-weight: 650; letter-spacing: -0.02em; color: var(--ember-ink); }
 
@@ -611,7 +633,8 @@ html[lang="zh"] .download__outro { letter-spacing: 0; }
   .section .shots__frame, .section .trust__badges, .section .faq__list, .section .download__cards {
     margin-top: 28px;
   }
-  .card, .bento__cell, .step, .dlcard { padding: 22px; }
+  .card, .bento__cell, .step, .dlcard, .firstrun { padding: 22px; }
+  .firstrun__item { padding: 14px; gap: 12px; }
   .terminal__body {
     padding: 16px;
     font-size: 12.5px;

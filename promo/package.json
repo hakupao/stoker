@@ -1,0 +1,11 @@
+{
+  "name": "stoker-promo",
+  "private": true,
+  "description": "Renders the Stoker promo film (see README.md)",
+  "scripts": {
+    "render": "node render.mjs"
+  },
+  "dependencies": {
+    "puppeteer-core": "24.43.1"
+  }
+}
