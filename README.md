@@ -14,7 +14,7 @@ fixed times, then records activation logs, per-run token usage, and quota status
 [![CI](https://github.com/hakupao/stoker/actions/workflows/ci.yml/badge.svg)](https://github.com/hakupao/stoker/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/macOS-14%2B-000000?logo=apple&logoColor=white)](#requirements)
-[![Version](https://img.shields.io/badge/version-0.3.6-E36E43)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.4.0-E36E43)](CHANGELOG.md)
 [![Website](https://img.shields.io/badge/Website-stoker.bojiangz.com-E36E43?logo=githubpages&logoColor=white)](https://stoker.bojiangz.com/)
 
 ![Bash](https://img.shields.io/badge/Bash-4EAA25?logo=gnubash&logoColor=white)
@@ -304,7 +304,8 @@ run of a tool that `ACTIVATION_TOOL` no longer enables exits without sending any
 | `CODEX_RESET_WAIT_MAX_SECONDS` | When the Codex gate window is about to reset (a check-in every five hours lands seconds before the previous window ends), and that reset is at most this many seconds away, wait until about 5 seconds after it and then send, instead of skipping. `0` skips as before. An exhausted window is still skipped | `300` |
 | `CLAUDE_STATUS_SOURCE` | `cache` reads the oh-my-claudecode plugin's local usage cache (no credentials touched); `native` queries the usage API read-only with the Keychain token — no omc needed, skips when the token is expired, never refreshes; `omc` forces a live `omc wait status` query, which can rotate the shared Keychain OAuth login in headless runs | `cache` |
 | `CLAUDE_USAGE_CACHE_FILE` | Optional usage-cache path override | `~/.claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json` |
-| `CLAUDE_USAGE_USER_AGENT` | User-Agent for the `native` usage request; a claude-code-shaped UA avoids the endpoint's aggressive 429 bucket | `claude-code/0.3.6` |
+| `CLAUDE_ACCOUNT_FILE` | Optional path of Claude Code's config file. Stoker extracts only the plan name, rate-limit tier and extra-usage switch from it (the email, names and ids are never output) to label the Claude plan (it is Claude Code's cached profile, so it can lag a plan change); no credentials, no network | `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude.json` when that is set) |
+| `CLAUDE_USAGE_USER_AGENT` | User-Agent for the `native` usage request; a claude-code-shaped UA avoids the endpoint's aggressive 429 bucket | `claude-code/0.4.0` |
 | `CODEX_STATUS_SOURCE` | `app-server` (default) spawns `codex app-server` over JSON-RPC (needs node + codex); `native` reads the ChatGPT usage endpoint over HTTP read-only — reads the token from `~/.codex/auth.json`, never refreshes it, needs no app-server, and surfaces plan tier + credit balance where available | `app-server` |
 | `CODEX_AUTH_FILE` | Codex OAuth credential path for `native` (honors `$CODEX_HOME`) | `~/.codex/auth.json` |
 | `CODEX_USAGE_API_URL` | Codex `native` usage endpoint override | `https://chatgpt.com/backend-api/wham/usage` |

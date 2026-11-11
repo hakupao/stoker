@@ -78,7 +78,10 @@ is split across:
   prefers the live omc usage cache when it is newer than the last snapshot row, restamps
   `timestamp` with the data-capture time (not the snapshot-write time), and blanks any window
   whose `resets_at` already passed (`reset_passed: true`) so stale numbers are never shown as
-  current.
+  current. The Claude plan label comes from the snapshot, else from Claude Code's config file
+  (`CLAUDE_ACCOUNT_FILE`, default `~/.claude.json`): only whitelisted `oauthAccount` fields (plan
+  name, rate-limit tier, extra-usage switch) are emitted as `quota.claude.account` — never the
+  email, names or ids — and tests must point `CLAUDE_ACCOUNT_FILE` at a temp path to stay hermetic.
 
 **Path independence.** Every script computes `ROOT_DIR` at runtime from `${BASH_SOURCE[0]}`
 (`install.sh` uses its own dir; the rest use `…/..`), so the project works from any clone path

@@ -443,7 +443,7 @@ struct BottomActionBar: View {
     @Environment(\.stokerTheme) private var theme
 
     private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.6"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.4.0"
     }
 
     var body: some View {

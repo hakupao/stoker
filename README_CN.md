@@ -14,7 +14,7 @@
 [![CI](https://github.com/hakupao/stoker/actions/workflows/ci.yml/badge.svg)](https://github.com/hakupao/stoker/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/macOS-14%2B-000000?logo=apple&logoColor=white)](#环境要求)
-[![Version](https://img.shields.io/badge/version-0.3.6-E36E43)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.4.0-E36E43)](CHANGELOG.md)
 [![Website](https://img.shields.io/badge/Website-stoker.bojiangz.com-E36E43?logo=githubpages&logoColor=white)](https://stoker.bojiangz.com/)
 
 ![Bash](https://img.shields.io/badge/Bash-4EAA25?logo=gnubash&logoColor=white)
@@ -276,7 +276,8 @@ codex job skipped by quota preflight reason=quota_exhausted
 | `CODEX_RESET_WAIT_MAX_SECONDS` | Codex 门控窗口即将重置时（每 5 小时触发一次，会刚好落在上个窗口结束前几秒），且距离重置不超过这么多秒，就等到重置后约 5 秒再发送，而不是跳过。`0` 表示照旧跳过。额度已耗尽的窗口仍会跳过 | `300` |
 | `CLAUDE_STATUS_SOURCE` | `cache` 直接读 oh-my-claudecode 插件的本地用量缓存（不触碰任何凭证）；`native` 用钥匙串 token 只读查询用量接口——无需 omc，token 过期即跳过、绝不刷新；`omc` 强制 `omc wait status` 实时查询，无头运行时可能轮换钥匙串登录凭证 | `cache` |
 | `CLAUDE_USAGE_CACHE_FILE` | 用量缓存路径覆盖（可选） | `~/.claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json` |
-| `CLAUDE_USAGE_USER_AGENT` | `native` 用量请求的 User-Agent；claude-code 形态的 UA 可避开该接口激进的 429 限流桶 | `claude-code/0.3.6` |
+| `CLAUDE_ACCOUNT_FILE` | Claude Code 配置文件路径（可选）。Stoker 只从中提取套餐名、限额档位和额外用量开关（邮箱、姓名和各类 id 绝不输出），用来标注 Claude 套餐（这是 Claude Code 缓存的账户资料，换套餐后可能滞后）；不碰凭证、不联网 | `~/.claude.json`（设置了 `CLAUDE_CONFIG_DIR` 时为 `$CLAUDE_CONFIG_DIR/.claude.json`） |
+| `CLAUDE_USAGE_USER_AGENT` | `native` 用量请求的 User-Agent；claude-code 形态的 UA 可避开该接口激进的 429 限流桶 | `claude-code/0.4.0` |
 | `CODEX_STATUS_SOURCE` | `app-server`（默认）经 JSON-RPC 拉起 `codex app-server`（需 node + codex）；`native` 只读 HTTP 查询 ChatGPT 用量接口——读 `~/.codex/auth.json` 里的 token、绝不刷新、无需 app-server，并在支持的套餐上显示套餐档位与额度余额 | `app-server` |
 | `CODEX_AUTH_FILE` | `native` 用的 Codex OAuth 凭证路径（识别 `$CODEX_HOME`） | `~/.codex/auth.json` |
 | `CODEX_USAGE_API_URL` | Codex `native` 用量接口地址覆盖 | `https://chatgpt.com/backend-api/wham/usage` |

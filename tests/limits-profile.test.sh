@@ -27,6 +27,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 mkdir -p "$TMP_DIR/logs"
 # Hermetic: never read the real machine's omc usage cache.
 export CLAUDE_USAGE_CACHE_FILE="$TMP_DIR/usage-cache.json"
+export CLAUDE_ACCOUNT_FILE="$TMP_DIR/claude-account.json"
 printf 'LABEL=com.example.stoker.test\nACTIVATION_TOOL=all\n' >"$TMP_DIR/.env"
 
 state() {
@@ -85,6 +86,44 @@ grep -q 'CODEX_SCHEDULE_TIMES=07:00$' <<<"$out" \
   || { echo "recommend must print the Codex weekly_anchor line: $out" >&2; exit 1; }
 cmp -s <(printf 'LABEL=com.example.stoker.test\nACTIVATION_TOOL=all\n') "$TMP_DIR/.env" \
   || { echo "recommend must not modify .env" >&2; exit 1; }
+
+# 2b: the Claude plan comes from Claude Code's local config when the snapshot has
+# none. It is display only (profile and recommendation unchanged), only the
+# whitelisted fields leave the file, and a snapshot that names a plan wins.
+cat >"$CLAUDE_ACCOUNT_FILE" <<'JSON'
+{"userID":"PIICANARY-user","oauthAccount":{"accountUuid":"PIICANARY-acct","emailAddress":"PIICANARY@example.com","organizationUuid":"PIICANARY-org","organizationName":"PIICANARY Org","displayName":"PIICANARY","fullName":"PIICANARY Name","planDisplayName":"Ultra","organizationType":"claude_max","organizationRateLimitTier":"default_claude_max_20x","userRateLimitTier":null,"hasExtraUsageEnabled":false,"profileFetchedAt":1794337556109}}
+JSON
+expect "claude plan from the account file" '
+  .limits.claude.plan == "Ultra" and .limits.claude.profile == "weekly_only"
+  and .limits.claude.recommended == {times: [], days: [], reason: "not_needed"}
+  and .quota.claude.subscription_type == "Ultra"
+  and .quota.claude.account == {plan_name: "Ultra", rate_limit_tier: "max_20x", extra_usage_enabled: false}
+  and (.quota.codex | has("account") | not)'
+json="$(state)"
+if grep -q PIICANARY <<<"$json"; then
+  echo "account identifiers leaked into the state JSON" >&2
+  exit 1
+fi
+out="$(STOKER_ROOT="$TMP_DIR" STOKER_SKIP_LAUNCHCTL=1 "$ROOT_DIR/install.sh" recommend)"
+grep -q '^  Plan:        Ultra (max_20x), extra usage off$' <<<"$out" \
+  || { echo "recommend must print the Claude plan, tier and extra usage: $out" >&2; exit 1; }
+if grep -q PIICANARY <<<"$out"; then
+  echo "account identifiers leaked into recommend" >&2
+  exit 1
+fi
+# No plan name → the tier stands in; a snapshot that names a plan is kept.
+printf '%s\n' '{"oauthAccount":{"organizationRateLimitTier":"default_claude_max_5x","hasExtraUsageEnabled":true}}' >"$CLAUDE_ACCOUNT_FILE"
+expect "tier stands in for a missing plan name" '
+  .limits.claude.plan == "max_5x" and .quota.claude.account.extra_usage_enabled == true'
+sed -i '' 's/"subscription_type":null/"subscription_type":"max"/' "$TMP_DIR/logs/status.jsonl"
+expect "snapshot plan wins" '.limits.claude.plan == "max" and .quota.claude.account.rate_limit_tier == "max_5x"'
+# Malformed, account-less and missing files all read as "no account".
+for body in '{bad' '{"oauthAccount":"nope"}' '{}' '[]'; do
+  printf '%s\n' "$body" >"$CLAUDE_ACCOUNT_FILE"
+  expect "unusable account file: $body" '.limits.claude.plan == "max" and (.quota.claude | has("account") | not)'
+done
+rm -f "$CLAUDE_ACCOUNT_FILE"
+expect "missing account file" '.limits.claude.plan == "max" and (.quota.claude | has("account") | not)'
 
 # 5: Claude snapshot not ok, Codex snapshot missing → unknown with the default times
 cat >"$TMP_DIR/logs/status.jsonl" <<'JSONL'

@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.4.0 - 2026-11-11
 
 ### Added
 - **Plan-aware window detection and schedule recommendations.** Stoker now works from the usage
@@ -13,6 +13,15 @@ All notable changes to this project will be documented in this file.
   them. The menu bar app shows a 5-hour bar, mini bar and trend series for whichever tool has that
   window, and Settings shows the detected windows with a "Use recommended" button. Recommendations
   never change anything by themselves, and no schedule is skipped because a window is absent.
+- **Claude plan name without credentials.** With the default `cache` quota source the Claude plan
+  read "unknown" whenever the usage cache carried no subscription type. Once a Claude quota snapshot
+  exists, Stoker now takes the plan name, rate-limit tier and extra-usage switch from Claude Code's
+  local config file (`~/.claude.json`; override with `CLAUDE_ACCOUNT_FILE`) — a plain file read that
+  never touches credentials and never copies the email, names or account ids. The Claude card shows
+  the plan pill and, when the snapshot carries no live credits, "Extra usage on/off"; `recommend`
+  prints e.g. `Plan: Ultra (max_20x), extra usage off`; `app-status` gains `quota.claude.account`.
+  The values are Claude Code's cached profile, so they can lag a plan change. The plan stays display
+  only: window detection and recommendations do not look at it.
 - **Per-tool schedules.** Claude and Codex are now scheduled independently:
   `CLAUDE_SCHEDULE_TIMES` / `CODEX_SCHEDULE_TIMES` (`HH:MM`, falling back to `SCHEDULE_TIMES`)
   and `CLAUDE_SCHEDULE_DAYS` / `CODEX_SCHEDULE_DAYS` (`mon..sun`; empty or `daily` = every day).
@@ -34,6 +43,9 @@ All notable changes to this project will be documented in this file.
   `activation-state.sh` honors `LAUNCHCTL_BIN` like the installer.
 
 ### Fixed
+- **Environment Check sheet was clipped.** The tool list sat in a scroll view with no height of its
+  own, so the sheet collapsed and cut the list off. The list is now sized to its content (scrolling
+  only past 480 pt) and long descriptions and install hints wrap instead of truncating.
 - **Codex plans with a 5-hour window were never re-lit.** The idle-only gate
   (`CODEX_ACTIVATE_ONLY_WHEN_IDLE=1`) looked only at the weekly window, so on Plus / Business
   standard seats every run was skipped once the week had started. It now gates on the shortest

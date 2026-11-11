@@ -10,6 +10,7 @@ mkdir -p "$TMP_DIR/logs"
 # Hermetic: never read the real machine's omc usage cache (absent until a case
 # writes it).
 export CLAUDE_USAGE_CACHE_FILE="$TMP_DIR/usage-cache.json"
+export CLAUDE_ACCOUNT_FILE="$TMP_DIR/claude-account.json"
 
 cat >"$TMP_DIR/.env" <<'ENV'
 LABEL=com.example.stoker.test

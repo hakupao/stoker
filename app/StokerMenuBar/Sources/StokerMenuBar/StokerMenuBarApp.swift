@@ -894,6 +894,11 @@ struct OnboardingView: View {
     @AppStorage("hideOnboarding") private var hideOnboarding = false
     @State private var toolResults: [ToolChecker.ToolInfo] = []
     @State private var isChecking = true
+    /// Natural height of the tool list. A ScrollView has no intrinsic height, so inside a
+    /// sheet it collapses and clips the list; size it to its content, capped so a long list
+    /// scrolls instead of outgrowing the screen.
+    @State private var listHeight: CGFloat = 0
+    private static let maxListHeight: CGFloat = 480
 
     private var requiredTools: [ToolChecker.ToolInfo] {
         toolResults.filter { $0.category == .required }
@@ -938,7 +943,15 @@ struct OnboardingView: View {
                     }
                     .padding(.horizontal, DS.cardPadding)
                     .padding(.vertical, DS.cardPadding)
+                    .background(GeometryReader { proxy in
+                        Color.clear.preference(key: ToolListHeightKey.self, value: proxy.size.height)
+                    })
                 }
+                // SwiftUI delivers this on the main actor; older SDKs type the closure @Sendable.
+                .onPreferenceChange(ToolListHeightKey.self) { height in
+                    MainActor.assumeIsolated { listHeight = height }
+                }
+                .frame(height: min(max(listHeight, 120), Self.maxListHeight))
             }
 
             HStack(spacing: 12) {
@@ -963,6 +976,11 @@ struct OnboardingView: View {
             isChecking = false
         }
     }
+}
+
+private struct ToolListHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 struct ToolSectionCard: View {
@@ -1045,6 +1063,7 @@ struct ToolStatusRow: View {
             Text(tool.toolDescription)
                 .font(.system(size: 11))
                 .foregroundStyle(theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.leading, 26)
 
             if !tool.found && !tool.builtIn {
@@ -1056,6 +1075,7 @@ struct ToolStatusRow: View {
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(theme.textSecondary)
                         .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.leading, 26)
             }

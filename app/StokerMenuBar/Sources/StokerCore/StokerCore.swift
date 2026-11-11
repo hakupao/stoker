@@ -557,6 +557,10 @@ public struct ActivationState: Decodable {
         /// nil when the source carries none.
         public var resetCredits: ResetCredits?
 
+        /// Claude-only: account facts read from Claude Code's local config (plan name,
+        /// rate-limit tier, extra-usage switch). nil when the file has none.
+        public var account: Account?
+
         /// The plan/tier to display, whichever tool populated it.
         public var displayPlan: String? { planType ?? subscriptionType }
 
@@ -610,6 +614,7 @@ public struct ActivationState: Decodable {
             case subscriptionType = "subscription_type"
             case credits
             case resetCredits = "reset_credits"
+            case account
         }
 
         public init(from decoder: Decoder) throws {
@@ -630,6 +635,28 @@ public struct ActivationState: Decodable {
             credits = (try? c.decodeIfPresent(Credits.self, forKey: .credits)) ?? nil
             // Defensive like `credits`: a malformed `reset_credits` must not fail the whole decode.
             resetCredits = (try? c.decodeIfPresent(ResetCredits.self, forKey: .resetCredits)) ?? nil
+            // Defensive like `credits`: display-only extras must never fail the whole decode.
+            account = (try? c.decodeIfPresent(Account.self, forKey: .account)) ?? nil
+        }
+    }
+
+    /// Claude account facts from Claude Code's local config file. Display only.
+    public struct Account: Decodable {
+        public var planName: String?
+        public var rateLimitTier: String?
+        public var extraUsageEnabled: Bool?
+
+        private enum CodingKeys: String, CodingKey {
+            case planName = "plan_name"
+            case rateLimitTier = "rate_limit_tier"
+            case extraUsageEnabled = "extra_usage_enabled"
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            planName = (try? c.decodeIfPresent(String.self, forKey: .planName)) ?? nil
+            rateLimitTier = (try? c.decodeIfPresent(String.self, forKey: .rateLimitTier)) ?? nil
+            extraUsageEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .extraUsageEnabled)) ?? nil
         }
     }
 

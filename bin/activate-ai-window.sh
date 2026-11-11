@@ -83,7 +83,7 @@ CLAUDE_USAGE_API_URL="${CLAUDE_USAGE_API_URL:-https://api.anthropic.com/api/oaut
 # a claude-code-shaped UA into an aggressively rate-limited bucket (persistent 429),
 # so default to one; override to change or to send an honest Stoker UA. NOTE: the
 # default carries this build's version — it is a version-bump sync site (see CLAUDE.md).
-CLAUDE_USAGE_USER_AGENT="${CLAUDE_USAGE_USER_AGENT:-claude-code/0.3.6}"
+CLAUDE_USAGE_USER_AGENT="${CLAUDE_USAGE_USER_AGENT:-claude-code/0.4.0}"
 # Codex quota source: "app-server" (default) spawns `codex app-server` over JSON-RPC;
 # "native" GETs the ChatGPT usage endpoint read-only (no app-server, no token refresh).
 CODEX_STATUS_SOURCE="${CODEX_STATUS_SOURCE:-app-server}"
@@ -974,7 +974,7 @@ send({
   id: 1,
   method: "initialize",
   params: {
-    clientInfo: { name: "stoker", version: "0.3.6" },
+    clientInfo: { name: "stoker", version: "0.4.0" },
     capabilities: null,
   },
 });

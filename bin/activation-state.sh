@@ -38,6 +38,15 @@ if [[ -z "$JQ_BIN" || ! -x "$JQ_BIN" ]]; then
   unset _bundled_jq
 fi
 CLAUDE_USAGE_CACHE_FILE="${CLAUDE_USAGE_CACHE_FILE:-${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/plugins/oh-my-claudecode/.usage-cache-anthropic.json}"
+# Claude Code's own config file: its `oauthAccount` block names the plan. With
+# CLAUDE_CONFIG_DIR set the CLI keeps it inside that directory, else in $HOME.
+if [[ -z "${CLAUDE_ACCOUNT_FILE:-}" ]]; then
+  if [[ -n "${CLAUDE_CONFIG_DIR:-}" ]]; then
+    CLAUDE_ACCOUNT_FILE="${CLAUDE_CONFIG_DIR}/.claude.json"
+  else
+    CLAUDE_ACCOUNT_FILE="${HOME}/.claude.json"
+  fi
+fi
 
 LOG_DIR="${ROOT_DIR}/logs"
 USAGE_LOG="${LOG_DIR}/usage.jsonl"
@@ -456,6 +465,46 @@ normalized="$("$JQ_BIN" -c '
 ' <<<"$quota" 2>/dev/null || true)"
 [[ -n "$normalized" ]] && quota="$normalized"
 
+# Claude account facts the usage cache does not carry (plan name, rate-limit
+# tier, whether extra usage is on), read from Claude Code's local config file:
+# a plain file read, no credentials, no network. Only the whitelisted fields
+# below ever leave the file — never the email, names, or account/org ids. The
+# plan name fills `subscription_type` only when the snapshot has none, and is
+# display only: window detection and recommendations never look at it.
+claude_account=null
+if [[ -f "$CLAUDE_ACCOUNT_FILE" ]]; then
+  # shellcheck disable=SC2016 # jq variables are intentionally evaluated by jq.
+  claude_account="$("$JQ_BIN" -c '
+    def text: if type == "string" and . != "" then . else null end;
+    (.oauthAccount // null) as $a
+    | if ($a | type) != "object" then null
+      else
+        {
+          plan_name: ($a.planDisplayName | text),
+          rate_limit_tier: (($a.userRateLimitTier | text) // ($a.organizationRateLimitTier | text)
+                            | if . == null then null else sub("^default_"; "") | sub("^claude_"; "") end),
+          extra_usage_enabled: (if ($a.hasExtraUsageEnabled | type) == "boolean" then $a.hasExtraUsageEnabled else null end)
+        }
+        | if .plan_name == null and .rate_limit_tier == null and .extra_usage_enabled == null then null else . end
+      end
+  ' "$CLAUDE_ACCOUNT_FILE" 2>/dev/null || printf 'null')"
+  [[ -n "$claude_account" ]] || claude_account=null
+fi
+if [[ "$claude_account" != "null" ]]; then
+  # shellcheck disable=SC2016 # jq variables are intentionally evaluated by jq.
+  with_account="$("$JQ_BIN" -c --argjson account "$claude_account" '
+    if (.claude | type) == "object" then
+      .claude.account = $account
+      | (.claude.subscription_type // "" | tostring) as $cur
+      | ($account.plan_name // $account.rate_limit_tier) as $name
+      | if ($cur == "" or $cur == "unknown") and $name != null then
+          .claude.subscription_type = $name
+        else . end
+    else . end
+  ' <<<"$quota" 2>/dev/null || true)"
+  [[ -n "$with_account" ]] && quota="$with_account"
+fi
+
 last_usage="$(read_last_jsonl "$USAGE_LOG")"
 enable_status_snapshots="$(bool_from_1 "$ENABLE_STATUS_SNAPSHOTS")"
 enable_quota_preflight="$(bool_from_1 "$ENABLE_QUOTA_PREFLIGHT")"
@@ -643,13 +692,18 @@ fi
   | ["claude", "codex"][] as $tool
   | $st.limits[$tool] as $l
   | $st.schedule[$tool] as $cur
+  | ($st.quota.claude.account // null) as $acct
   | ($tool | ascii_upcase) as $up
   | ($at != "claude" and $at != "codex" or $at == $tool) as $enabled
   | (($tool | .[0:1] | ascii_upcase) + ($tool | .[1:])) as $name
   | [
       "\($name)" + (if $enabled then "" else " (disabled by ACTIVATION_TOOL=\($at))" end),
       "  Windows:     " + window_text($tool; $l),
-      "  Plan:        " + ($l.plan // "unknown"),
+      "  Plan:        " + ($l.plan // "unknown")
+        + (if $tool == "claude" and ($acct.rate_limit_tier // null) != null and $acct.rate_limit_tier != $l.plan
+           then " (" + $acct.rate_limit_tier + ")" else "" end)
+        + (if $tool == "claude" and ($acct.extra_usage_enabled | type) == "boolean"
+           then ", extra usage " + (if $acct.extra_usage_enabled then "on" else "off" end) else "" end),
       "  Current:     " + times_text($cur.times) + " (" + days_text($cur.days) + ")",
       (if $l.recommended.reason == "not_needed" then
          "  Recommended: no scheduled check-ins",

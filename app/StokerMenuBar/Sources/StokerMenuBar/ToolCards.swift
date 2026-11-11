@@ -221,9 +221,14 @@ private struct ToolCardFrame<Content: View>: View {
                     .foregroundStyle(color)
                 if let plan = quota?.displayPlanLabel {
                     PlanPill(text: plan)
+                        .help(quota?.account?.rateLimitTier.flatMap(ActivationState.ToolQuota.planLabel) ?? plan)
                 }
                 Spacer(minLength: 4)
-                if let credits = creditsText(quota?.credits) {
+                // The account file's switch is cached data: use it only when the snapshot
+                // carries no live credits object at all.
+                if let credits = creditsText(quota?.credits)
+                    ?? (quota?.credits == nil
+                        ? quota?.account?.extraUsageEnabled.map(L10n.extraUsage(enabled:)) : nil) {
                     Text(credits)
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(theme.textMuted)

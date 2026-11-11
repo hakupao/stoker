@@ -508,6 +508,11 @@ public enum L10n {
     public static var creditsLabel: String {
         AppLanguage.current == .zh ? "额度" : "Credits"
     }
+    /// Claude's extra-usage switch (usage past the plan limits, billed separately).
+    public static func extraUsage(enabled: Bool) -> String {
+        if AppLanguage.current == .zh { return enabled ? "额外用量 开" : "额外用量 关" }
+        return enabled ? "Extra usage on" : "Extra usage off"
+    }
     /// Shown when a plan's credits are unmetered.
     public static var creditsUnlimited: String {
         AppLanguage.current == .zh ? "额度 无限" : "Credits ∞"
