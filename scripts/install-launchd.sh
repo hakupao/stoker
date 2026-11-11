@@ -314,6 +314,11 @@ remove_agent() {
   rm -f "$(installed_plist "$1")"
 }
 
+# Same path by spelling, or the same file on disk (-ef): macOS paths are
+# case-insensitive, so ~/Project/stoker and ~/project/stoker (or a symlink to
+# it) are one root. Keep in sync with same_path in bin/activation-state.sh.
+same_path() { [[ -n "$1" && ( "$1" == "$2" || "$1" -ef "$2" ) ]]; }
+
 # Succeeds (and warns) when an installed agent's plist points at another Stoker
 # root: that agent is someone else's schedule. An unreadable plist or
 # STOKER_FORCE_MIGRATE=1 counts as ours.
@@ -324,7 +329,7 @@ agent_is_foreign() {
   program="$(plutil -extract ProgramArguments.1 raw -o - "$plist" 2>/dev/null || true)"
   working_dir="$(plutil -extract WorkingDirectory raw -o - "$plist" 2>/dev/null || true)"
   [[ -z "$program$working_dir" ]] && return 1
-  [[ "$program" == "${ROOT_DIR}/bin/activate-ai-window.sh" && "$working_dir" == "$ROOT_DIR" ]] && return 1
+  same_path "$program" "${ROOT_DIR}/bin/activate-ai-window.sh" && same_path "$working_dir" "$ROOT_DIR" && return 1
   echo "WARNING: kept agent ${label}: it points to ${working_dir:-$program}, not ${ROOT_DIR}. Set STOKER_FORCE_MIGRATE=1 to replace it anyway." >&2
   return 0
 }

@@ -16,6 +16,8 @@ set -euo pipefail
 #      the other tool still installs, unless STOKER_FORCE_MIGRATE=1
 #   F) uninstall keeps a per-tool agent from another root (warning, non-zero
 #      exit) while removing this root's, unless STOKER_FORCE_MIGRATE=1
+#   G) an agent recorded under another spelling of this root (symlink, or path
+#      case on case-insensitive APFS) is ours: uninstall removes it, no warning
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
@@ -27,6 +29,8 @@ AGENTS="$HOME_DIR/Library/LaunchAgents"
 LOADED="$TMP_DIR/loaded"
 OTHER_ROOT="$TMP_DIR/other-root"
 mkdir -p "$ROOT/launchd" "$AGENTS" "$LOADED" "$TMP_DIR/bin"
+# OTHER_ROOT exists on disk so the foreign cases exercise -ef on a real, different dir.
+mkdir -p "$OTHER_ROOT/bin" && touch "$OTHER_ROOT/bin/activate-ai-window.sh"
 SCRIPT="$ROOT_DIR/scripts/install-launchd.sh"
 BASE="com.example.stoker.test"
 
@@ -154,5 +158,13 @@ grep -q "WARNING: kept agent $BASE.codex" "$TMP_DIR/err" || fail "F: missing war
 [[ "$(cat "$TMP_DIR/out")" == "Uninstalled $BASE.claude" ]] || fail "F: unexpected output: $(cat "$TMP_DIR/out")"
 run_script STOKER_FORCE_MIGRATE=1 "$SCRIPT" uninstall >/dev/null 2>&1 || fail "F: forced uninstall failed"
 { ! loaded "$BASE.codex" && [[ ! -f "$AGENTS/$BASE.codex.plist" ]]; } || fail "F: forced uninstall kept the foreign agent"
+
+# G) another spelling of this root (symlink) is still this root.
+mkdir -p "$ROOT/bin" && touch "$ROOT/bin/activate-ai-window.sh"
+ln -s "$ROOT" "$TMP_DIR/root-alias"
+seed_agent "$BASE.claude" "$TMP_DIR/root-alias"
+run_script "$SCRIPT" uninstall >"$TMP_DIR/out" 2>"$TMP_DIR/err" || fail "G: uninstall failed: $(cat "$TMP_DIR/err")"
+! grep -q WARNING "$TMP_DIR/err" || fail "G: aliased root treated as foreign: $(cat "$TMP_DIR/err")"
+{ ! loaded "$BASE.claude" && [[ ! -f "$AGENTS/$BASE.claude.plist" ]]; } || fail "G: aliased agent not removed"
 
 echo "launchd install lifecycle test passed"

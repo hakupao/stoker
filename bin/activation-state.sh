@@ -41,6 +41,11 @@ STATUS_LOG="${LOG_DIR}/status.jsonl"
 LAUNCH_AGENTS_DIR="${HOME}/Library/LaunchAgents"
 EXPECTED_PROGRAM="${ROOT_DIR}/bin/activate-ai-window.sh"
 
+# Same path by spelling, or the same file on disk (-ef): macOS paths are
+# case-insensitive, so ~/Project/stoker and ~/project/stoker (or a symlink to
+# it) are one root. Keep in sync with same_path in scripts/install-launchd.sh.
+same_path() { [[ -n "$1" && ( "$1" == "$2" || "$1" -ef "$2" ) ]]; }
+
 usage() {
   cat <<'USAGE'
 Usage: activation-state.sh --json
@@ -248,7 +253,7 @@ probe_agent() {
   if [[ -z "$AGENT_WORKING_DIRECTORY" ]]; then
     AGENT_WORKING_DIRECTORY="$(printf '%s\n' "$output" | awk -F'= ' '/working directory = / {print $2; exit}')"
   fi
-  if [[ "$AGENT_PROGRAM" == "$EXPECTED_PROGRAM" && "$AGENT_WORKING_DIRECTORY" == "$ROOT_DIR" ]]; then
+  if same_path "$AGENT_PROGRAM" "$EXPECTED_PROGRAM" && same_path "$AGENT_WORKING_DIRECTORY" "$ROOT_DIR"; then
     AGENT_MATCHES_ROOT=true
   else
     AGENT_MISMATCH="Loaded LaunchAgent ${label} points to ${AGENT_WORKING_DIRECTORY:-unknown root}; current root is ${ROOT_DIR}"

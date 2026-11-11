@@ -179,6 +179,7 @@ state_json() {
 
 OTHER_ROOT="$TMP_DIR/other-stoker"
 mkdir -p "$OTHER_ROOT/bin"
+touch "$OTHER_ROOT/bin/activate-ai-window.sh"  # real file: foreign cases go through -ef
 
 # ACTIVATION_TOOL=codex (.env): the Codex agent from this root is all it takes.
 load_agent com.example.stoker.test.codex "$TMP_DIR"
@@ -194,6 +195,19 @@ jq -e '
   and .launchctl.legacy == []
   and .launchctl.needs_migration == false
 ' <<<"$matching_json" >/dev/null || { echo "matching: $matching_json" >&2; exit 1; }
+
+# An agent recorded under another spelling of THIS root (e.g. ~/Project vs
+# ~/project on case-insensitive APFS, or a symlink) still matches.
+mkdir -p "$TMP_DIR/bin"
+[[ -e "$TMP_DIR/bin/activate-ai-window.sh" ]] || touch "$TMP_DIR/bin/activate-ai-window.sh"
+ln -s "$TMP_DIR" "$TMP_DIR/root-alias"
+reset_agents
+load_agent com.example.stoker.test.codex "$TMP_DIR/root-alias"
+alias_json="$(state_json)"
+jq -e '.installed == true and .launchctl.matches_root == true and .launchctl.mismatch == null' \
+  <<<"$alias_json" >/dev/null || { echo "alias: $alias_json" >&2; exit 1; }
+reset_agents
+load_agent com.example.stoker.test.codex "$TMP_DIR"
 
 # With both tools enabled, installed needs BOTH agents.
 partial_json="$(state_json ACTIVATION_TOOL=all)"
