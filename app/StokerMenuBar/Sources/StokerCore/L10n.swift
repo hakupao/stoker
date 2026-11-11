@@ -159,7 +159,7 @@ public enum L10n {
         let why: String
         switch reason {
         case "session_window":
-            why = zh ? "每次签到开启新的 5 小时窗口" : "every check-in opens a fresh 5-hour window"
+            why = zh ? "每次激活开启新的 5 小时窗口" : "every check-in opens a fresh 5-hour window"
         case "weekly_anchor":
             why = zh ? "每天一次足以在周窗口重置后立刻锚定" : "once a day anchors the weekly window soon after it resets"
         default:
@@ -171,7 +171,7 @@ public enum L10n {
     /// Claude without a session window: the weekly limit resets at a fixed time.
     public static var recommendationNotNeeded: String {
         AppLanguage.current == .zh
-            ? "未检测到 5 小时窗口，周限额按固定时间重置，签到不会锚定任何窗口。如果你的套餐其实有 5 小时窗口，请保留定时；定时功能始终可用。"
+            ? "未检测到 5 小时窗口，周限额按固定时间重置，激活不会锚定任何窗口。如果你的套餐其实有 5 小时窗口，请保留定时；定时功能始终可用。"
             : "No 5-hour window was detected and the weekly limit resets at a fixed time, so check-ins anchor nothing. If your plan does have a 5-hour window, keep the schedule; scheduling always stays available."
     }
     public static var useRecommended: String {
@@ -307,7 +307,7 @@ public enum L10n {
     }
     public static var scheduleNeedsReinstall: String {
         AppLanguage.current == .zh
-            ? "调度需要更新——请点一下开关或保存设置以重新安装"
+            ? "定时需要更新，请点一下开关或保存设置以重新安装"
             : "Schedule needs updating — toggle it or save settings to re-install"
     }
     public static var scheduleElsewhere: String {
@@ -621,9 +621,9 @@ public enum L10n {
         guard let raw, !raw.isEmpty else { return "" }
         switch raw {
         case "quota_exhausted":
-            return AppLanguage.current == .zh ? "配额耗尽" : "Quota exhausted"
+            return AppLanguage.current == .zh ? "额度用尽" : "Quota exhausted"
         case "window_already_active":
-            return AppLanguage.current == .zh ? "周窗口已在计时" : "Weekly window already running"
+            return AppLanguage.current == .zh ? "窗口已在计时" : "Window already running"
         default:
             return AppLanguage.current == .zh ? "额度未知" : "Quota unknown"
         }

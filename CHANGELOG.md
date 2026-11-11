@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Fixed
+- **The quota trend opened on an empty chart.** It defaulted to the Claude 5-hour series even
+  when that series had no data in the selected range. It now opens on the first series that
+  has data, and keeps your pick once you choose one.
+- **Chinese wording.** The app, the website and the film now use the same words as the docs:
+  「激活」 for a check-in, 「额度」 for quota, 「定时」 for the schedule.
+
 ### Docs
 - The README and INSTALL were rewritten to be shorter and to follow the order a new user
   needs. The full settings list, the health states, and the run details moved to the new

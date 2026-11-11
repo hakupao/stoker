@@ -431,13 +431,13 @@ precondition(s1.envValues["CODEX_MODEL_FALLBACK"] == "1")
 // both "exhausted" and the "quota unknown" catch-all.
 let savedLanguage = UserDefaults.standard.string(forKey: "appLanguage")
 AppLanguage.current = .en
-precondition(L10n.skipReasonText("window_already_active") == "Weekly window already running")
+precondition(L10n.skipReasonText("window_already_active") == "Window already running")
 precondition(L10n.skipReasonText("quota_exhausted") == "Quota exhausted")
 precondition(L10n.skipReasonText("preflight_status_missing") == "Quota unknown")
 precondition(L10n.quotaMiniHelp(remaining: 92, used: 8, weekly: true) == "Weekly window: 92% remaining (8% used)")
 precondition(L10n.quotaMiniHelp(remaining: 40, used: nil) == "5-hour window: 40% remaining")
 AppLanguage.current = .zh
-precondition(L10n.skipReasonText("window_already_active") == "周窗口已在计时")
+precondition(L10n.skipReasonText("window_already_active") == "窗口已在计时")
 // Usage rows (LogStore decodes with convertFromSnakeCase): a failed attempt superseded by
 // a model-fallback retry counts as skipped, not as an error; ids differ by model.
 let usageDecoder = JSONDecoder()
@@ -961,7 +961,7 @@ precondition(L10n.toolScheduleLine(tool: "Claude", times: slots, days: []) == "C
 precondition(L10n.toolScheduleLine(tool: "Codex", times: ["07:30"], days: ["mon", "thu"]) == "Codex 07:30 (Mon, Thu)")
 precondition(L10n.toolScheduleLine(tool: "Codex", times: ["07:00", "12:30"], days: [], compact: false) == "Codex 07:00, 12:30")
 AppLanguage.current = .zh
-precondition(L10n.scheduleNeedsReinstall.hasPrefix("调度需要更新"))
+precondition(L10n.scheduleNeedsReinstall.hasPrefix("定时需要更新"))
 precondition(L10n.everyDay == "每天" && L10n.weekdayShort("sun") == "日")
 precondition(L10n.toolScheduleLine(tool: "Codex", times: ["07:00"], days: ["mon", "thu"]) == "Codex 07（周一、四）")
 if let savedLanguageSched {

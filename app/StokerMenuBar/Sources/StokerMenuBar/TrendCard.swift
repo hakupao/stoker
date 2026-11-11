@@ -11,12 +11,17 @@ struct TrendCard: View {
     @ObservedObject var logStore: LogStore
     /// Series the accounts actually have (see `TrendSeries.available`).
     let available: [TrendSeries]
-    @State private var selected: TrendSeries = .claudeFiveHour
+    /// nil until the user picks a series.
+    @State private var selected: TrendSeries?
     @Environment(\.stokerTheme) private var theme
 
-    /// The selection when the account still has it, else the first series it does have.
+    /// The user's pick while the account still has it. Otherwise the first series with data in
+    /// the current range, so the chart never opens on an empty window the plan no longer has. Until the user
+    /// picks, this follows the data and the date range.
     private var series: TrendSeries {
-        available.contains(selected) ? selected : (available.first ?? .claudeWeekly)
+        if let selected, available.contains(selected) { return selected }
+        return available.first { !logStore.chartPoints(series: $0).isEmpty }
+            ?? available.first ?? .claudeWeekly
     }
 
     var body: some View {
