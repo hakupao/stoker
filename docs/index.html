@@ -148,7 +148,7 @@
       </article>
       <article class="card reveal" style="--i:1">
         <h3 class="card__t" data-i18n="problem.c2.t">Quota you can see</h3>
-        <p class="card__d" data-i18n="problem.c2.d">Five-hour and weekly snapshots recorded after every run.</p>
+        <p class="card__d" data-i18n="problem.c2.d">The windows your plan has (5-hour, weekly, or both), recorded after every run.</p>
       </article>
       <article class="card reveal" style="--i:2">
         <h3 class="card__t" data-i18n="problem.c3.t">Skips when exhausted</h3>
@@ -224,7 +224,7 @@
           <i class="ficon__dot"></i>
         </span>
         <h3 class="bento__t" data-i18n="feat.f5.t">Quota snapshots</h3>
-        <p class="bento__d" data-i18n="feat.f5.d">Five-hour and weekly quota status in logs/status.jsonl.</p>
+        <p class="bento__d" data-i18n="feat.f5.d">Whichever windows your plan has (5-hour, weekly, or both), in logs/status.jsonl.</p>
       </article>
       <article class="bento__cell reveal" style="--i:5">
         <span class="ficon">
@@ -239,8 +239,8 @@
           <svg viewBox="0 0 28 28" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8h11M21 8h2M5 20h2M12 20h11"/><circle cx="18" cy="8" r="2.6"/><circle cx="9" cy="20" r="2.6"/></svg>
           <i class="ficon__dot"></i>
         </span>
-        <h3 class="bento__t" data-i18n="feat.f7.t">Clone-friendly config</h3>
-        <p class="bento__d" data-i18n="feat.f7.d">Per-tool schedules, tools, prompts, timeouts and paths — all in one .env.</p>
+        <h3 class="bento__t" data-i18n="feat.f7.t">Fits your plan</h3>
+        <p class="bento__d" data-i18n="feat.f7.d">Detects the usage windows your plan has and recommends a schedule for them. You decide whether to use it.</p>
       </article>
     </div>
   </div>
@@ -303,7 +303,7 @@
     <h2 class="section__title reveal" data-i18n="faq.title">Questions, answered plainly.</h2>
     <div class="faq__list reveal">
       <details class="qa" open><summary data-i18n="faq.q1">How much does it cost to run?</summary><p data-i18n="faq.a1">About $0.0025 per Claude activation (~1.6K tokens). Roughly $0.30/month at four runs a day. Codex uses your plan quota.</p></details>
-      <details class="qa"><summary data-i18n="faq.q2">Does it consume my quota?</summary><p data-i18n="faq.a2">Yes — it sends real prompts. That is the point. Quota preflight skips a tool when its quota is already exhausted.</p></details>
+      <details class="qa"><summary data-i18n="faq.q2">Does it consume my quota?</summary><p data-i18n="faq.a2">Yes. It sends real prompts, and that is the point. A tool whose quota is used up is skipped. How much check-ins help depends on your plan. Open Settings in the app, or run ./install.sh recommend, to see.</p></details>
       <details class="qa"><summary data-i18n="faq.q3">Is it safe? Does it touch my projects?</summary><p data-i18n="faq.a3">No. It runs in its own folder with a tiny read-only check-in, and never reads or modifies your real projects. dry-run and quota send nothing.</p></details>
       <details class="qa"><summary data-i18n="faq.q4">Is this official?</summary><p data-i18n="faq.a4">No. Stoker is an independent open-source project, not affiliated with Anthropic, OpenAI, or Apple. You are responsible for following their terms.</p></details>
       <details class="qa"><summary data-i18n="faq.q5">How do I uninstall?</summary><p data-i18n="faq.a5">Run ./install.sh uninstall (or use the menu bar app) to unload and remove the LaunchAgents.</p></details>
@@ -331,7 +331,7 @@
         <pre class="dlcard__code mono"><code>git clone https://github.com/hakupao/stoker.git
 cd stoker &amp;&amp; cp .env.example .env
 ./install.sh</code></pre>
-        <a class="btn btn--ghost" href="https://github.com/hakupao/stoker#quick-start" target="_blank" rel="noopener" data-i18n="dl.cli.btn">View install steps</a>
+        <a class="btn btn--ghost" href="https://github.com/hakupao/stoker#install" target="_blank" rel="noopener" data-i18n="dl.cli.btn">View install steps</a>
       </article>
     </div>
     <div class="firstrun reveal" id="first-launch" style="--i:2">

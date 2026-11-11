@@ -8,21 +8,13 @@
 
 **Keep your Claude Code & Codex usage windows lit — on a schedule you choose.**
 
-A tiny macOS `launchd` scheduler that sends low-cost Claude Code and Codex check-ins at
-fixed times, then records activation logs, per-run token usage, and quota status snapshots.
-
 [![CI](https://github.com/hakupao/stoker/actions/workflows/ci.yml/badge.svg)](https://github.com/hakupao/stoker/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/macOS-14%2B-000000?logo=apple&logoColor=white)](#requirements)
 [![Version](https://img.shields.io/badge/version-0.4.0-E36E43)](CHANGELOG.md)
 [![Website](https://img.shields.io/badge/Website-stoker.bojiangz.com-E36E43?logo=githubpages&logoColor=white)](https://stoker.bojiangz.com/)
 
-![Bash](https://img.shields.io/badge/Bash-4EAA25?logo=gnubash&logoColor=white)
-![Swift 6](https://img.shields.io/badge/Swift_6-F05138?logo=swift&logoColor=white)
-![SwiftUI](https://img.shields.io/badge/SwiftUI-2396F3?logo=swift&logoColor=white)
-![launchd](https://img.shields.io/badge/launchd-scheduler-555555)
-
-[Website](https://stoker.bojiangz.com/) · [Features](#features) · [Quick Start](#quick-start) · [First Launch](#first-launch-allow-stoker-to-open) · [Menu Bar App](#menu-bar-app) · [How It Works](#how-it-works) · [Cost](#cost-optimization) · [Configuration](#configuration) · [Download](https://github.com/hakupao/stoker/releases/latest)
+[Website](https://stoker.bojiangz.com/) · [Download](https://github.com/hakupao/stoker/releases/latest) · [Install](#install) · [Configuration](#configuration) · [Reference](REFERENCE.md)
 
 <br/>
 
@@ -38,407 +30,192 @@ fixed times, then records activation logs, per-run token usage, and quota status
 
 </div>
 
-## About
+## What it does
 
-Stoker is a small Bash-based utility for people who want predictable Claude Code and Codex
-usage-window probes. It installs a macOS `launchd` agent that keeps prompts intentionally
-small: Claude replies `READY`, while Codex runs from a tiny `codex-probe/` folder and reads
-one simple file instead of scanning real projects or modifying files.
+Many Claude and Codex plans limit how much you can use within a 5-hour window. The window
+starts with your first message and resets 5 hours later.
 
-The name is a nod to a *stoker* — the crew member who keeps a furnace fed so the fire never
-goes out. That is exactly what this tool does for your AI usage windows: it keeps them lit on
-a schedule you choose. Which windows you have (a 5-hour one, a weekly one, or both) depends on your
-plan; Stoker detects them and recommends a schedule — see [Plans and usage windows](#plans-and-usage-windows).
+Say you start work at 9:00. Your limit resets at 14:00. If a tiny message had gone out at
+7:00, it would reset at 12:00, and you would have a fresh window for the afternoon.
 
-Claude and Codex each have their own schedule (times and, optionally, weekdays). Out of the box
-both use `07:00`, `12:00`, `17:00`, and `22:00` local macOS time, every day, until you set a
-different one per tool in the app's Settings or with `CLAUDE_SCHEDULE_TIMES` / `CODEX_SCHEDULE_TIMES`
-and `CLAUDE_SCHEDULE_DAYS` / `CODEX_SCHEDULE_DAYS` in `.env`.
+Stoker sends that tiny message for you, at the times you pick. This page calls it a
+**check-in**.
 
-## Plans and usage windows
+- **It runs on your Mac.** macOS `launchd` fires the schedule. Nothing is sent to the author.
+- **Each tool has its own schedule.** Claude and Codex each get their own times and days.
+- **Check-ins are tiny and read-only.** Claude replies `READY`. Codex reads one small file in
+  its own folder. Your real projects are never opened.
+- **Everything is logged.** Each run, its token use, and your quota before and after.
+- **It skips when there is no point.** A tool whose quota is used up is not sent a check-in.
 
-Which windows you have depends on your plan, and the plans change often. Stoker does not keep a
-table of plan names: it reads the windows your account actually reports in each quota snapshot
-and works from those. As of November 2026:
+You can use it from the terminal, from the menu bar app, or both. They share one engine and
+one config file.
+
+## Does your plan need it?
+
+Not every plan has a 5-hour window. Stoker reads the windows your account reports and
+recommends a schedule for them. As of November 2026:
 
 | Tool | Plan | 5-hour window | Weekly limit |
 | --- | --- | --- | --- |
-| Claude | Free, Pro, Max, Team*, Enterprise (seat-based) | yes — starts with your first message | yes — resets at a fixed time per account |
-| Claude | Ultra (verified account) | no (a temporary one until the account is verified) | yes — fixed reset |
-| Codex | Plus, Business (standard seat) | yes — starts on first use* | yes |
-| Codex | Pro, Business (premium seat)* | no | yes* — starts on first use* |
+| Claude | Free, Pro, Max, Team*, Enterprise (seat-based) | Yes | Yes, resets at a fixed time |
+| Claude | Ultra | No (a temporary one until the account is verified) | Yes, resets at a fixed time |
+| Codex | Plus, Business (standard seat) | Yes* | Yes |
+| Codex | Pro, Business (premium seat)* | No | Yes, starts on first use* |
 
-Cells marked * are not confirmed by an official page (third-party reports or Stoker's own logs).
-The table is only a guide — Stoker goes by the windows your account reports.
+\* Not confirmed by an official page. Plans change often, so treat the table as a guide.
 
-What that means for the schedule:
+A window starts when you first use it. A limit that resets at a fixed time does so whatever
+you do. What this means for you:
 
-- **A 5-hour window** is worth lighting on a schedule: a check-in every five hours (the default
-  `07:00, 12:00, 17:00, 22:00`) keeps a window open across the day.
-- **Only a Codex weekly window**: it starts on first use, so one check-in a day is enough to anchor it.
-- **Only a Claude weekly limit**: it resets at a fixed time whatever you do, so check-ins anchor
-  nothing. Stoker still sends them if you schedule them — it never turns a schedule off for you.
+- **You have a 5-hour window.** Stoker is most useful here. The default schedule
+  (`07:00, 12:00, 17:00, 22:00`) keeps a window open through the day.
+- **You only have a Codex weekly window.** It starts on first use, so one check-in a day is enough.
+- **You only have a Claude weekly limit.** It resets at a fixed time, so check-ins change
+  nothing. Stoker tells you so, and leaves the choice to you.
 
-`./install.sh recommend` (and the app's Settings) shows the windows Stoker detected for each tool
-and the schedule it recommends. It sends nothing and changes nothing; you decide whether to apply it.
-A scheduled `claude -p` run signed in with your Claude plan draws from the same subscription limits
-as interactive Claude Code.
-
-## Features
-
-| | Feature |
-| :---: | :--- |
-| ⏰ | **Scheduled activation** of Claude Code and Codex through macOS `launchd` — each tool on its own times and days. |
-| 🪶 | **A minimal prompt** that tells both CLIs not to inspect files, run tools, or modify anything. |
-| 📜 | **Human-readable run history** in `logs/activation.log`. |
-| 📊 | **Structured per-run usage records** in `logs/usage.jsonl`. |
-| 🔋 | **Quota snapshots** in `logs/status.jsonl` — whichever 5-hour and weekly windows your plan reports, for both tools. |
-| 🚦 | **Quota preflight** that skips activation gracefully when a known quota is exhausted. |
-| 🧬 | **Clone-friendly configuration** through `.env`. |
-| 🛟 | **Safe manual commands** for dry runs, dependency checks, quota checks, and uninstall. |
+To see what Stoker detected for your account, open the app's Settings or run
+`./install.sh recommend`. Stoker only recommends. It never changes or turns off a schedule
+by itself.
 
 ## Requirements
 
-- macOS with `launchctl`.
-- Bash.
-- Claude Code CLI, authenticated with your Claude plan.
-- Codex CLI, authenticated with ChatGPT.
-- `jq` for structured JSONL parsing.
-- Node.js for Codex quota status queries.
-- oh-my-claudecode (omc) plugin for Claude quota status snapshots — its local usage cache is
-  read directly; the `omc` binary itself is only needed for the legacy `CLAUDE_STATUS_SOURCE=omc`
-  live-query mode. Don't want the plugin? `CLAUDE_STATUS_SOURCE=native` tracks Claude quota with
-  no extra install at all.
+- macOS 14 or later.
+- The Claude Code CLI, the Codex CLI, or both, signed in with your subscription.
+- `jq`. The menu bar app includes it. For the command line, `brew install jq`.
+- Optional, for quota tracking: Node.js (Codex) and the oh-my-claudecode plugin (Claude).
+  Without the plugin, set `CLAUDE_STATUS_SOURCE=native`.
 
-The activation itself only requires the Claude and Codex CLIs. Quota snapshots gracefully warn
-and skip if optional helpers such as `omc`, `node`, or `jq` are missing.
-
-### Don't have the CLIs yet?
-
-The Claude / ChatGPT desktop apps do not ship the CLIs, but CLI usage shares the same
-subscription quota windows as the apps — so app-first users benefit from Stoker too.
-One-time setup, no Node or Homebrew required:
+The Claude and ChatGPT desktop apps do not include these CLIs. Install them separately:
 
 ```sh
-# Claude Code CLI — afterwards run `claude` once to log in with your Claude plan
-curl -fsSL https://claude.ai/install.sh | bash
-
-# Codex CLI — afterwards run `codex` once and pick "Sign in with ChatGPT"
-curl -fsSL https://chatgpt.com/codex/install.sh | sh
+curl -fsSL https://claude.ai/install.sh | bash          # then run `claude` once to sign in
+curl -fsSL https://chatgpt.com/codex/install.sh | sh    # then run `codex` once to sign in
 ```
 
-Only using one of the two? Set `ACTIVATION_TOOL=claude` (or `codex`) in `.env` — the menu
-bar app's environment check follows it and stops treating the other CLI as required.
+Using only one tool? Set `ACTIVATION_TOOL=claude` or `ACTIVATION_TOOL=codex`.
 
-## Quick Start
+## Install
 
-Choose one distribution:
+### Menu bar app
 
-- **CLI/launchd package**: for advanced users who want the lightest possible install and
-  direct shell control.
-- **Menu bar app package**: for beginners who want a GUI monitor and settings panel while
-  keeping the same local scheduler underneath.
+1. Download `stoker-gui-<version>.dmg` from the
+   [latest release](https://github.com/hakupao/stoker/releases/latest).
+2. Drag `Stoker.app` into `Applications` and open it from there.
+3. macOS blocks the first launch because the app is not notarized. Approve it once in
+   **System Settings › Privacy & Security › Open Anyway**. On macOS 14, right-click the app
+   and choose **Open** instead. [INSTALL.md](INSTALL.md) has the exact steps.
+4. Open **Settings...** from the menu bar icon, pick your times, and click **Save**.
+5. In **Settings › Background auth**, click **Configure token**. Scheduled Claude runs need
+   it. [Why](#sign-in-for-scheduled-claude-runs).
 
-### CLI / launchd
+The schedule keeps running when the app is closed.
+
+### Command line
 
 ```sh
 git clone https://github.com/hakupao/stoker.git
 cd stoker
 cp .env.example .env
-./install.sh check
-./install.sh dry-run
-./install.sh
+./install.sh check      # are the tools installed?
+./install.sh dry-run    # show what would be sent, send nothing
+./install.sh install    # load the schedule
 ```
 
-`./install.sh` defaults to `install`, which generates a user LaunchAgent and loads it into the
-current macOS GUI session.
+Then set up [sign-in for scheduled Claude runs](#sign-in-for-scheduled-claude-runs).
 
-### Menu bar app
+### Sign-in for scheduled Claude runs
 
-Download the GUI DMG, drag `Stoker.app` to `Applications`, open it (the first launch needs a
-one-time approval — see below), then use the status-bar
-menu to install/reload the schedule, refresh quota, run once, pause the schedule, and edit
-settings. The app bundles the same CLI engine and installs its working copy under
-`~/Library/Application Support/Stoker/stoker`.
-
-See [INSTALL.md](INSTALL.md) for complete beginner and advanced installation steps.
-
-### First launch: allow Stoker to open
-
-Stoker is open source and only ad-hoc signed — it isn't notarized with a paid Apple Developer ID —
-so on a fresh Mac, macOS blocks it the first time you open it. The app runs entirely on your Mac
-and its full source is on GitHub. You approve it **once**:
-
-1. **Move it to Applications first.** Open the DMG and drag `Stoker.app` onto the `Applications`
-   folder. Launch it from there, not from inside the DMG.
-2. **Double-click `Stoker.app`.** A dialog appears: *“Stoker” Not Opened* — *Apple could not
-   verify “Stoker” is free of malware…*. Click **Done** (on macOS 14 the button
-   is **Cancel**) — not **Move to Trash**.
-3. **macOS 15 Sequoia / macOS 26 and later:**
-   1. Open **System Settings › Privacy & Security**.
-   2. Scroll down to the **Security** section. You'll see *“Stoker” was blocked to protect your
-      Mac.* Click **Open Anyway**.
-   3. Confirm with Touch ID or your login password.
-   4. A final dialog appears — click **Open Anyway** again. Stoker starts.
-
-   The **Open Anyway** button only shows for about an hour after the blocked attempt. If it's
-   missing, double-click `Stoker.app` again, then go back to Privacy & Security.
-4. **macOS 14 Sonoma:** right-click (or Control-click) `Stoker.app` → **Open**, then click
-   **Open** in the dialog.
-5. **Still blocked?** If macOS says *“Stoker” is damaged and can't be opened*, or the
-   **Open Anyway** button never appears, run this in Terminal and then open the app again:
-
-   ```sh
-   xattr -dr com.apple.quarantine /Applications/Stoker.app
-   ```
-
-   This only removes the "downloaded from the internet" quarantine flag from this one app; it
-   doesn't change any system-wide security setting.
-6. **That's it.** Later launches open normally. After you replace Stoker with a newer version,
-   macOS may ask you to approve it once more the same way.
-
-## Commands
+By default a scheduled run reuses the sign-in from your own Claude Code sessions. That
+sign-in is short-lived, so a scheduled run can fail with
+`401 Invalid authentication credentials`. A long-lived token fixes this:
 
 ```sh
-./install.sh check        # verify local dependencies
-./install.sh dry-run      # show commands without sending model prompts
-./install.sh quota        # query quota status without sending model prompts
-./install.sh app-status   # print JSON status for the menu bar app
-./install.sh status       # show launchd status
-./install.sh run-now      # trigger once; this sends model prompts
-./install.sh uninstall    # unload and remove the LaunchAgents
-./install.sh print-plist  # print the generated launchd plists (`print-plist claude|codex` for one)
+claude setup-token    # opens a browser and prints sk-ant-oat01-...
 ```
 
-You can also call the runner directly:
+Put the token in `.env` as `CLAUDE_CODE_OAUTH_TOKEN="sk-ant-oat01-..."`. It uses your existing
+subscription and adds no API charges. The app's **Configure token** button does all of this
+for you.
+
+### Upgrading
+
+Replace the app or pull the new code. Then run `./install.sh install` once, or turn the
+schedule off and on in the app. [CHANGELOG.md](CHANGELOG.md) says when a release needs more.
+
+## Everyday use
+
+| Command | What it does | Sends a check-in? |
+| --- | --- | :---: |
+| `./install.sh status` | Shows whether the schedule is loaded | No |
+| `./install.sh recommend` | Shows your detected windows and the schedule that fits them | No |
+| `./install.sh quota` | Records your current quota | No |
+| `./install.sh dry-run` | Prints the exact commands a run would use | No |
+| `./install.sh check` | Checks that the required tools are installed | No |
+| `./install.sh run-now` | Sends one check-in now to each enabled tool. Run `install` first | **Yes** |
+| `./install.sh install` | Loads or reloads the schedule | No¹ |
+| `./install.sh uninstall` | Removes the schedule | No |
+
+¹ `install` sends nothing itself, but the schedule it loads will.
+
+To confirm it is working:
 
 ```sh
-./bin/activate-ai-window.sh --once
-./bin/activate-ai-window.sh --status
-./bin/activate-ai-window.sh --once --tool claude
-./bin/activate-ai-window.sh --once --tool codex
+./install.sh status              # "not running" between runs is normal
+tail -f logs/activation.log      # plain-text run history
+tail -n 20 logs/usage.jsonl | jq # one record per tool per run
 ```
 
-## Daily Operation
-
-Use these checks to confirm the timer is installed, waiting, and recording results:
-
-```sh
-./install.sh status
-tail -f logs/activation.log
-tail -n 20 logs/usage.jsonl | jq
-tail -n 20 logs/status.jsonl | jq
-```
-
-`./install.sh status` should show a loaded LaunchAgent with calendar triggers for your
-configured hours. `state = not running` is normal between scheduled runs; it means the job is
-loaded and waiting for the next trigger. During a trigger it may briefly show `running`.
-
-`logs/activation.log` is the quickest human-readable view. A normal run looks like this:
-
-```text
-Activation run started ...
-Quota preflight started
-Claude job started
-Codex job started
-Activation run finished exit=0
-```
-
-If quota preflight decides not to send a prompt, the run stays clean and records a skip:
-
-```text
-claude job skipped by quota preflight reason=quota_exhausted
-codex job skipped by quota preflight reason=quota_exhausted
-```
-
-`logs/usage.jsonl` is the structured success/skip record. Successful activations usually
-include `ok: true`, `result: READY`, and `exit_code: 0`. Skipped activations include
-`skipped: true` and a `skip_reason`.
-
-Manual command guide:
-
-- `./install.sh status`: checks whether local `launchd` has the timer loaded.
-- `./install.sh quota`: checks quota status without sending prompts.
-- `./install.sh dry-run`: prints the planned commands without sending prompts.
-- `./install.sh recommend`: shows the usage windows detected for each tool and the schedule
-  Stoker recommends for them; sends nothing and changes nothing.
-- `./install.sh run-now`: triggers the installed LaunchAgent once and may consume usage if
-  quota is available.
+A skipped run is recorded with `skipped: true` and a reason. See
+[Logs](REFERENCE.md#logs) for the full list of files.
 
 ## Configuration
 
-Copy `.env.example` to `.env` and adjust values:
+Settings live in `.env`. The app reads and writes the same file, so there is one source of
+truth. These are the settings most people change:
 
-| Variable | Description | Default |
+| Variable | What it sets | Default |
 | --- | --- | --- |
-| `LABEL` | Base macOS LaunchAgent label; each tool gets its own agent `<LABEL>.claude` / `<LABEL>.codex` | `com.stoker.ai-window` |
-| `CLAUDE_SCHEDULE_TIMES` | Claude's comma-separated `HH:MM` schedule; each time point is independent | `SCHEDULE_TIMES` |
-| `CODEX_SCHEDULE_TIMES` | Codex's comma-separated `HH:MM` schedule (e.g. `"07:00"`) | `SCHEDULE_TIMES` |
-| `CLAUDE_SCHEDULE_DAYS` | Days Claude runs: comma-separated `mon,tue,wed,thu,fri,sat,sun`; empty or `daily` = every day | empty (daily) |
-| `CODEX_SCHEDULE_DAYS` | Days Codex runs, same format | empty (daily) |
-| `SCHEDULE_TIMES` | Fallback schedule for a tool whose `*_SCHEDULE_TIMES` is unset or empty | `"07:00,12:00,17:00,22:00"` |
-| `ACTIVATION_TOOL` | `all`, `claude`, or `codex` — which tools' agents are installed | `all` |
+| `CLAUDE_SCHEDULE_TIMES` | Claude's times, as comma-separated `HH:MM` | `SCHEDULE_TIMES` |
+| `CODEX_SCHEDULE_TIMES` | Codex's times | `SCHEDULE_TIMES` |
+| `CLAUDE_SCHEDULE_DAYS` | Claude's days, such as `mon,tue,wed`. Empty means every day | every day |
+| `CODEX_SCHEDULE_DAYS` | Codex's days | every day |
+| `SCHEDULE_TIMES` | Times for a tool that has none of its own | `07:00,12:00,17:00,22:00` |
+| `ACTIVATION_TOOL` | Which tools run: `all`, `claude`, or `codex` | `all` |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Long-lived sign-in token for scheduled Claude runs | unset |
+| `CODEX_MODEL` | Model for Codex check-ins. `default` lets the Codex CLI choose | `gpt-5.6-luna` |
+| `CODEX_ACTIVATE_ONLY_WHEN_IDLE` | `1` skips Codex while its window is already running | `1` |
+| `KEEP_AWAKE_MODE` | Keep the Mac awake during a run: `off`, `during`, or `always` | `off` |
 
-After changing any `*_SCHEDULE_*` variable or `ACTIVATION_TOOL`, re-run `./install.sh install` so
-the LaunchAgents pick it up (the menu bar app reinstalls automatically when you save). A scheduled
-run of a tool that `ACTIVATION_TOOL` no longer enables exits without sending anything.
+After changing a schedule or `ACTIVATION_TOOL` by hand, run `./install.sh install` again. The
+app does this for you when you click Save.
 
-| `ACTIVATION_PROMPT` | Low-cost prompt sent to Claude | `Reply exactly READY...` |
-| `CLAUDE_CODE_OAUTH_TOKEN` | Long-lived token from `claude setup-token` for unattended auth (see below) | unset (uses Keychain login) |
-| `CODEX_MODEL` | Codex activation model; set `default` to let Codex CLI choose | `gpt-5.6-luna` |
-| `CODEX_WORK_DIR` | Tiny working directory used by Codex probe runs | `${ROOT_DIR}/codex-probe` |
-| `CODEX_ACTIVATION_PROMPT` | Read-only Codex probe prompt | `Read only ./probe.py...` |
-| `TIMEOUT_SECONDS` | Per-tool timeout | `120` |
-| `LOCK_WAIT_SECONDS` | How long a run waits for another run's lock before skipping (`0` = skip at once). Keep-awake runs stay awake for this wait too (`caffeinate -t KEEP_AWAKE_SECONDS + LOCK_WAIT_SECONDS + CODEX_RESET_WAIT_MAX_SECONDS + 5`) | `TIMEOUT_SECONDS × (1 + CODEX_MODEL_FALLBACK_MAX_TRIES) + CODEX_UPDATE_TIMEOUT_SECONDS + CODEX_RESET_WAIT_MAX_SECONDS + 5 + 120` (1085) |
-| `ENABLE_STATUS_SNAPSHOTS` | Record quota snapshots after real activation | `1` |
-| `ENABLE_QUOTA_PREFLIGHT` | Check quota before sending prompts | `1` |
-| `QUOTA_PREFLIGHT_ON_UNKNOWN` | `allow` or `skip` when quota cannot be checked | `allow` |
-| `QUOTA_EXHAUSTED_THRESHOLD_PERCENT` | Skip when remaining quota is at or below this percent | `0` |
-| `CODEX_AUTO_UPDATE` | **`1` upgrades your Codex CLI unattended** — set `0` to manage Codex versions yourself. Runs `codex update` right before a real Codex prompt (never on skipped, dry-run, check, or status runs), throttled per interval; failures/timeouts only warn | `1` |
-| `CODEX_AUTO_UPDATE_INTERVAL_HOURS` | Minimum hours between update attempts (stamped in `run/codex-update.last`, even on failure) | `24` |
-| `CODEX_UPDATE_TIMEOUT_SECONDS` | Timeout for `codex update` | `180` |
-| `CODEX_MODEL_FALLBACK` | `1` retries with the next candidate from the Codex model cache when the model is rejected ("model is not supported"); never on other errors, never rewrites `.env` | `1` |
-| `CODEX_MODEL_FALLBACK_MAX_TRIES` | Maximum fallback retries per run (each rejected model is excluded) | `3` |
-| `CODEX_MODELS_CACHE` | Codex model cache used to pick the fallback (honors `$CODEX_HOME`) | `~/.codex/models_cache.json` |
-| `CODEX_ACTIVATE_ONLY_WHEN_IDLE` | `1` or `0`. `1` skips the Codex prompt with reason `window_already_active` while its shortest window (the 5-hour one if your plan has it, otherwise the weekly one) is already running, so each window is anchored once; `0` always sends. A run that lands within `CODEX_RESET_WAIT_MAX_SECONDS` before that window resets waits for the reset instead of skipping. Needs `ENABLE_QUOTA_PREFLIGHT=1` | `1` |
-| `CODEX_RESET_WAIT_MAX_SECONDS` | When the Codex gate window is about to reset (a check-in every five hours lands seconds before the previous window ends), and that reset is at most this many seconds away, wait until about 5 seconds after it and then send, instead of skipping. `0` skips as before. An exhausted window is still skipped | `300` |
-| `CLAUDE_STATUS_SOURCE` | `cache` reads the oh-my-claudecode plugin's local usage cache (no credentials touched); `native` queries the usage API read-only with the Keychain token — no omc needed, skips when the token is expired, never refreshes; `omc` forces a live `omc wait status` query, which can rotate the shared Keychain OAuth login in headless runs | `cache` |
-| `CLAUDE_USAGE_CACHE_FILE` | Optional usage-cache path override | `~/.claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json` |
-| `CLAUDE_ACCOUNT_FILE` | Optional path of Claude Code's config file. Stoker extracts only the plan name, rate-limit tier and extra-usage switch from it (the email, names and ids are never output) to label the Claude plan (it is Claude Code's cached profile, so it can lag a plan change); no credentials, no network | `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude.json` when that is set) |
-| `CLAUDE_USAGE_USER_AGENT` | User-Agent for the `native` usage request; a claude-code-shaped UA avoids the endpoint's aggressive 429 bucket | `claude-code/0.4.0` |
-| `CODEX_STATUS_SOURCE` | `app-server` (default) spawns `codex app-server` over JSON-RPC (needs node + codex); `native` reads the ChatGPT usage endpoint over HTTP read-only — reads the token from `~/.codex/auth.json`, never refreshes it, needs no app-server, and surfaces plan tier + credit balance where available | `app-server` |
-| `CODEX_AUTH_FILE` | Codex OAuth credential path for `native` (honors `$CODEX_HOME`) | `~/.codex/auth.json` |
-| `CODEX_USAGE_API_URL` | Codex `native` usage endpoint override | `https://chatgpt.com/backend-api/wham/usage` |
-| `CODEX_USAGE_USER_AGENT` | User-Agent sent by Codex `native` requests | `codex_cli_rs/<ver> (darwin)` |
-| `KEEP_AWAKE_MODE` | `off`, `during`, or `always`; scheduled CLI runs use `caffeinate` when not `off` | `off` |
-| `KEEP_AWAKE_SECONDS` | Bounded keep-awake duration for each real activation run | `900` |
-| `CLAUDE_BIN` | Optional Claude binary override | auto-discovered |
-| `CODEX_BIN` | Optional Codex binary override | auto-discovered |
-| `JQ_BIN` | Optional `jq` binary override | auto-discovered |
-| `NODE_BIN` | Optional Node.js binary override | auto-discovered |
-| `OMC_BIN` | Optional `omc` binary override | auto-discovered |
-| `PATH_VALUE` | PATH used by launchd and the runner | Homebrew/local/system defaults |
+[REFERENCE.md](REFERENCE.md#configuration) lists every variable.
 
-**One config, shared by the CLI and the app.** `.env` is the single source of truth. The menu
-bar app writes the settings it manages — the schedule, tool selection, and the keep-awake / quota
-options it exposes — back to this same `.env`, leaving any other keys and comments untouched.
-Anything the app doesn't surface keeps falling back to built-in defaults, so a hand-written,
-CLI-only `.env` can be very short. The full annotated list of variables lives in `.env.example`.
-CLI-only users edit `.env` directly.
+### The Mac must be awake
 
-**Headless authentication (recommended).** By default a scheduled `claude -p` run reuses your
-interactive Claude Code login from the macOS Keychain. That credential is short-lived and is
-rotated whenever your interactive session refreshes it, so an unattended run sharing it can fail
-with `401 Invalid authentication credentials` until you log in again. To make the scheduler
-self-sufficient, mint a long-lived token once and store it in `.env`:
+`launchd` does not run a job while the Mac is asleep. On wake it runs a missed job once, not
+once per missed time. `KEEP_AWAKE_MODE` keeps the Mac awake during a run but cannot wake it.
+
+For reliable times, keep the Mac awake at those times, or have macOS wake it shortly before
+one. `pmset repeat` holds a single wake time:
 
 ```sh
-claude setup-token          # opens a browser; prints sk-ant-oat01-...
-# then add to .env:  CLAUDE_CODE_OAUTH_TOKEN="sk-ant-oat01-..."
+sudo pmset repeat wakeorpoweron MTWRFSU 06:58:00
 ```
 
-The token authenticates as — and bills against — your existing Claude subscription (no extra API
-charges), and because it no longer shares the interactive Keychain credential the rotation that
-caused the 401s goes away. When a run still fails to authenticate, `activation.log` now prints an
-explicit hint pointing back to `claude setup-token`.
+## Menu bar app
 
-**Or set it up in one click (menu bar app).** Open **Settings → Background auth → Configure token**,
-finish the login in the browser that opens, and the app runs `claude setup-token`, captures the
-token, and writes it to `.env` for you — no terminal, no copy-paste. A manual "run in Terminal +
-paste" path (with format validation) is always available as a fallback.
+The app is a front end for the same engine. It has no scheduler of its own.
 
-After changing schedule or label values, reinstall the LaunchAgent:
-
-```sh
-./install.sh install
-```
-
-> A standalone `Stoker.app` (one not launched from a clone) keeps its engine — and its own
-> `.env` — under `~/Library/Application Support/Stoker/stoker`, separate from a CLI checkout. If
-> you use both, edit the copy that owns the loaded schedule; the app warns when they diverge.
-
-### Sleep & wake
-
-Scheduled activation depends on the Mac being awake at the scheduled time. macOS `launchd`
-**does not fire `StartCalendarInterval` jobs while the Mac is asleep** — on wake it runs a missed
-job **once** (it does not replay every slot that was skipped). A closed-lid / sleeping Mac will
-miss check-ins until it next wakes.
-
-`KEEP_AWAKE_MODE` does **not** wake a sleeping Mac; it only prevents sleep *while a run is already
-in progress* (`caffeinate -i`). `always` additionally keeps the Mac awake the whole time the menu
-bar app is open. To make the schedule reliably hit its times, keep the Mac awake at those times
-(e.g. plugged in with sleep disabled), or set your own wakeups with `pmset repeat wake …`. Stoker
-does not configure `pmset` for you.
-
-## Logs
-
-```sh
-tail -f logs/activation.log
-tail -20 logs/usage.jsonl | jq
-tail -20 logs/status.jsonl | jq
-```
-
-Log files:
-
-- `logs/activation.log`: human-readable run history.
-- `logs/usage.jsonl`: one structured usage snapshot per tool per real run.
-- `logs/status.jsonl`: quota snapshots per tool (whichever 5-hour / weekly windows the plan reports).
-- `logs/raw/`: raw Claude/Codex/status outputs for debugging and future parsing.
-- `logs/launchd.out.log` and `logs/launchd.err.log`: launchd stdout/stderr.
-
-## Menu Bar App
-
-The CLI/launchd workflow remains the primary engine. The optional menu bar app is a separate
-beginner-friendly distribution that adds a macOS status-bar control surface for the same
-configuration, schedule, quota snapshots, and logs. The interface follows the system Light/Dark
-appearance and warms from a cool idle palette to a warm ember "active" state when the schedule
-is on.
-
-Highlights:
-
-- **Activity dashboard** — an alert banner (shown only while a tool needs attention; "View" filters
-  the run list to it) above two identity-colored tool cards: Claude (5-hour window as the headline,
-  weekly and any per-model weekly buckets below) and Codex (weekly window as the headline with its
-  reset date and day countdown, plus reset credits when available), each ending in a health line
-  (state, last run, next activation). Below the cards: a quota-trend switcher (`Claude 5h` /
-  `Claude weekly` / `Codex weekly`), a run-history timeline with expandable per-run details
-  (tokens, cost, duration, session), and summary stats — including a neutral "planned skip" vs.
-  warning "quota skip" split — with date-range / status / tool filters.
-- **Header & menu** — mini quota bars labeled `Claude 5h` / `Codex wk` with a health dot each; the
-  menu-bar dropdown shows one summary line per tool; the menu-bar flame icon gets a small red dot
-  while either tool is alerting, rechecked every 10 minutes and again shortly after each scheduled
-  activation, even while the window is closed.
-- **Settings** — a Schedule card with one row per tool (Claude and Codex each pick their own
-  days — "Every day" or any of Mon–Sun — and their own times), then a Claude card (enable +
-  background auth) and a Codex card (enable, model, auto-update CLI, model fallback,
-  activate-only-when-idle), plus shared advanced options (quota preflight, post-run snapshots,
-  keep-awake, launch at login).
-- **Background auth** (in the Claude settings card) — at-a-glance status of how scheduled runs
-  authenticate, plus one-click setup of a long-lived `CLAUDE_CODE_OAUTH_TOKEN` so they never fall
-  back to the rotating Keychain login (with a manual paste fallback).
-- **Bilingual UI** with an EN / 中 switch; the appearance follows the system Light/Dark setting.
-- **Environment Check** that detects required and optional CLI tools.
-- **Export run history to CSV.**
-
-**Health states:**
-
-| Tool | State | Shown as | Meaning |
-| :--- | :--- | :--- | :--- |
-| Claude | `unknown` | "No runs yet" | No real (non-skipped) run recorded yet. |
-| Claude | `alert` | "N failures in a row" / "Activation failing" | ≥2 consecutive real-run failures, or the schedule is on and the last 24h had neither a successful run nor a quota-preflight skip (a skip proves the scheduler is running). |
-| Claude | `warning` | "Last run failed" | Most recent real run failed. |
-| Claude | `ok` | "Activating normally" | Most recent real run succeeded. |
-| Codex | `alert` | "N failures in a row" / "Activation failing" | ≥2 consecutive real-run failures (checked before window state). |
-| Codex | `warning` | "Last run failed" | Most recent real run failed. |
-| Codex | `exhausted` | "Weekly quota used up" / "5-hour quota used up" | Any window the plan reports (5-hour or weekly) whose remaining quota is at or below `QUOTA_EXHAUSTED_THRESHOLD_PERCENT` (default 0) and its reset is still in the future. |
-| Codex | `anchored` | "Anchored this week" / "Anchored this 5h window" | The gate window's reset is still in the future and the engine reports it anchored (`limits.codex.gate.active`). |
-| Codex | `pending` | "Will anchor next slot" | The window is idle, its reset already passed, or quota data is missing. |
-| Either | `disabled` | "Disabled" | The tool is excluded by `ACTIVATION_TOOL` — no next activation, never alerts. |
-
-States are checked in the order shown per tool (a failure streak overrides window state for Codex).
-Codex's next activation moves past the weekly reset only when the engine would actually skip:
-an exhausted window with `ENABLE_QUOTA_PREFLIGHT=1`, or an anchored one when
-`CODEX_ACTIVATE_ONLY_WHEN_IDLE=1` as well; otherwise it is simply the next scheduled slot.
+- **Activity.** A card per tool with your quota, when it resets, and whether check-ins are
+  healthy. Below: a quota trend chart and the run history, which you can filter and export
+  to CSV.
+- **Settings.** Times and days for each tool, the windows Stoker detected with a
+  **Use recommended** button, **Background auth**, and the **Advanced** options.
+- **Menu bar icon.** The flame shows a red dot when a tool needs attention.
+- **Environment Check.** Shows which required and optional tools are installed.
+- **English and Chinese**, light and dark.
 
 <div align="center">
 <table>
@@ -449,301 +226,99 @@ an exhausted window with `ENABLE_QUOTA_PREFLIGHT=1`, or an anchored one when
 </table>
 </div>
 
-Build the app bundle locally:
+The health states are explained in [REFERENCE.md](REFERENCE.md#health-states).
 
-```sh
-./app/StokerMenuBar/build-app.sh
-open "dist/Stoker.app"
-```
+## What it costs
 
-The app calls the existing scripts instead of replacing them:
+On a subscription you are not billed for check-ins. They come out of your plan's usage, like
+your own messages. Stoker strips each CLI down to the minimum so that share stays small.
 
-- `./install.sh app-status` for a JSON state snapshot.
-- `./install.sh install` to save/reload the LaunchAgent after settings changes.
-- `./install.sh run-now`, `quota`, `dry-run`, and `uninstall` for menu actions.
+| Tool | Per check-in | Per month at 4 a day |
+| --- | --- | --- |
+| Claude | About 1.6K input tokens, worth ≈ $0.0025 | Worth ≈ $0.30 |
+| Codex | About 38K input tokens, about 55% of them cache reads | No dollar figure is reported |
 
-Set `KEEP_AWAKE_MODE=always` in the app if you want it to keep macOS awake while the menu bar
-app is open. Scheduled activation still works without the app running, and
-`KEEP_AWAKE_MODE=during` protects only real activation runs.
+The dollar figures are what Claude Code reports the same tokens would cost at API prices.
+Without the trimming, a Claude check-in would load about 40K tokens, worth about $0.15. The
+flags that do the trimming are listed in [REFERENCE.md](REFERENCE.md#how-check-ins-stay-small).
 
-## Release Packaging
-
-Maintainers can build both publishable artifacts with one command:
-
-```sh
-./scripts/package-release.sh
-```
-
-The output under `dist/` is split by audience:
-
-- `stoker-cli-<version>.tar.gz`: lightweight CLI/launchd package.
-- `stoker-gui-<version>.dmg`: GUI app package for beginner users.
-
-`STOKER_PLAIN_DMG=1 ./scripts/package-release.sh` skips the Finder-styled installer window and
-builds a plain DMG (for CI and other headless hosts). The styled layout is also bounded to 60
-seconds of Finder automation and falls back to a plain DMG on failure.
-- `stoker-gui-<version>.zip`: fallback GUI app archive.
-
-## How It Works
-
-### Architecture Overview
-
-The project has two entry points — CLI and menu bar app — that share the same shell engine:
+## How it works
 
 ```mermaid
 flowchart TB
-    subgraph entry["Entry points"]
-        L["launchd<br/><i>(scheduled at HH:MM)</i>"]
-        A["Menu bar app<br/><i>(SwiftUI GUI)</i>"]
-    end
-
-    subgraph engine["Shared shell engine"]
-        R["bin/activate-ai-window.sh<br/><i>activation runner</i>"]
-        S["bin/activation-state.sh<br/><i>JSON state query</i>"]
-        I["scripts/install-launchd.sh<br/><i>launchd manager</i>"]
-    end
-
+    L["launchd<br/><i>your schedule</i>"]
+    A["Menu bar app"]
+    E["Shell engine<br/><i>install.sh and bin/</i>"]
     C["Claude Code CLI"]
     X["Codex CLI"]
 
-    L -- "triggers" --> R
-    A -- "Process()" --> R
-    A -- "Process()" --> S
-    A -- "Process()" --> I
-    R -- "minimal prompt" --> C
-    R -- "minimal prompt" --> X
+    L --> E
+    A --> E
+    E -- "check-in" --> C
+    E -- "check-in" --> X
 ```
 
-### CLI Runtime Flow
+Each run does the same things in order:
 
-When launchd triggers at a scheduled time (or you run `./install.sh run-now`), the activation
-script executes this sequence:
+1. Read `.env` and take a lock, so two runs never overlap.
+2. Check quota. Skip a tool whose quota is used up.
+3. Send one check-in to each enabled tool.
+4. Record token use in `logs/usage.jsonl`.
+5. Record quota again in `logs/status.jsonl` and release the lock.
 
-1. **Load config** — reads `.env` for schedule, tool selection, quota settings, and binary
-   paths.
-2. **Acquire lock** — creates `run/activation.lock` to prevent concurrent runs. The Claude and
-   Codex agents can fire in the same second, so a second trigger waits (polling every 2 s, up to
-   `LOCK_WAIT_SECONDS`) for the active run to finish; only if the lock is still held after that
-   is it skipped gracefully. The lock records its owner's PID, so a lock left by a crashed run
-   (dead PID, or no PID and older than the longest possible run) is reclaimed — by exactly one
-   waiter, under a separate `run/activation.lock.reclaim` marker. `--dry-run` never takes it.
-3. **Quota preflight** (optional) — queries Claude and Codex quota status *before* sending any
-   prompt. If a tool's quota is exhausted, that tool is skipped and the skip is recorded in
-   `logs/usage.jsonl`. Claude per-scope weekly buckets (`scoped_weekly`, e.g. a model-specific
-   limit) count only while the account is actively limited by them (`is_active: true`). Codex
-   is also skipped (`window_already_active`) while its shortest window (5-hour if the plan has
-   one, otherwise weekly) is already running — see `CODEX_ACTIVATE_ONLY_WHEN_IDLE`.
-4. **Send prompt** — calls each enabled CLI with a minimal prompt. Claude replies `READY`;
-   Codex runs a tiny read-only probe from `codex-probe/`. Codex uses the configured lightweight
-   model with `--ephemeral`, `--skip-git-repo-check`, `--sandbox read-only`, and stripped-down
-   config (see below).
-5. **Record usage** — parses each CLI's JSON output with `jq` and appends a structured record
-   to `logs/usage.jsonl` (token counts, cost, session ID, model, duration, etc.).
-6. **Post-run snapshots** (optional) — takes another quota snapshot after activation and
-   appends it to `logs/status.jsonl`.
-7. **Release lock** — removes the lock directory so the next scheduled run can proceed.
+Both CLIs run inside Stoker's own folder, never inside your projects.
+[REFERENCE.md](REFERENCE.md#how-a-run-works) has the details.
 
-Timeout protection: each CLI call is wrapped in a background process with a configurable timeout
-(default 120 s). If a CLI hangs, it receives SIGTERM, then SIGKILL after 2 s.
+## Safety
 
-### Menu Bar App
-
-The SwiftUI app is a thin GUI shell — it does not contain its own scheduler or activation logic.
-Every operation delegates to the same shell scripts:
-
-| App action | Shell call |
-| --- | --- |
-| Read status | `bin/activation-state.sh --json` |
-| Toggle schedule | `install.sh install` or `install.sh uninstall` |
-| Save settings | Write `.env`, then `install.sh install` |
-| Run once | `install.sh run-now` |
-
-The app calls scripts through `Process()` (Foundation), reads stdout, and decodes the JSON into
-Swift model types.
-
-### Where Does Activation Run?
-
-Both CLIs are invoked inside the **stoker project directory itself** — never inside your real
-projects. This is a lightweight folder that contains only scripts and logs, so there is nothing
-for the CLIs to scan or modify.
-
-| Installation method | Working directory | Who creates it |
-| --- | --- | --- |
-| CLI (`git clone`) | The cloned repo, e.g. `~/stoker` | You, when you clone |
-| Menu bar app (dev build) | Same cloned repo | Same |
-| Menu bar app (.app / DMG) | `~/Library/Application Support/Stoker/stoker/` | App creates it automatically on first launch by copying scripts from the app bundle |
-
-How the directory is resolved:
-
-- **Shell scripts**: `ROOT_DIR` is computed at runtime by walking up from the script's own
-  location (`bin/`) to find the parent directory. This means the project works from any clone
-  path without editing scripts.
-- **Menu bar app**: `ProjectLocator` walks up from the app bundle to find a directory containing
-  `bin/activate-ai-window.sh`. For a standalone `.app`, it falls back to copying bundled scripts
-  into Application Support and using that copy as the root.
-
-The installer writes one absolute-path plist per enabled tool (`<LABEL>.claude.plist`,
-`<LABEL>.codex.plist`, each running `activate-ai-window.sh --once --tool <tool>` on that tool's
-own times and days) and places them under `~/Library/LaunchAgents/`. Installing also removes the
-agent of a disabled tool and the pre-per-tool single `<LABEL>` agent (plus `LEGACY_LABELS`); a
-legacy agent whose plist points at a different Stoker checkout is kept with a warning unless you
-set `STOKER_FORCE_MIGRATE=1`; `uninstall` likewise keeps (and exits non-zero on) a
-`<LABEL>.claude`/`.codex` agent installed from another checkout. The plists are intentionally git-ignored because they contain
-machine-specific paths.
-
-### Project Structure
-
-```text
-stoker/
-├── bin/
-│   ├── activate-ai-window.sh   ← activation runner
-│   └── activation-state.sh     ← JSON state for the app
-├── scripts/
-│   └── install-launchd.sh      ← launchd install/uninstall
-├── app/
-│   └── StokerMenuBar/          ← SwiftUI menu bar app
-├── launchd/                    ← generated plists (git-ignored)
-├── logs/                       ← generated logs
-│   ├── activation.log
-│   ├── usage.jsonl
-│   ├── status.jsonl
-│   └── raw/
-├── .env.example
-├── install.sh                  ← user-facing entry point
-└── README.md
-```
-
-GitHub Actions only validates the repository scripts on push and pull requests. Scheduled
-activation always runs locally on the Mac where `./install.sh install` was executed.
-
-## Cost Optimization
-
-Each activation only needs a single API round-trip — the prompt and response together are under
-300 tokens. The cost challenge is the **system prompt** that each CLI injects automatically
-(CLAUDE.md, plugins, MCP tool descriptions, hooks, etc.), which can exceed 40 000 tokens per
-call.
-
-The runner strips both CLIs down to the absolute minimum context required:
-
-### Claude
-
-| Flag | Effect |
-| --- | --- |
-| `--model haiku` | Cheapest model (input ~$0.80/M vs Opus ~$15/M) |
-| `--system-prompt "Reply only: READY"` | Custom minimal system prompt |
-| `--setting-sources ""` | Skip loading CLAUDE.md, hooks, and plugin instructions — eliminates ~40K tokens of injected context |
-| `--effort low` | Minimal reasoning effort |
-| `--strict-mcp-config --mcp-config '{"mcpServers":{}}'` | Empty MCP config — removes all tool descriptions |
-| `--tools ""` | Disable all built-in tools |
-| `--disable-slash-commands` | Disable skills |
-
-Result: **~1.6K input tokens, ≈ $0.0025 per activation** on average over recent logged runs
-(vs ~40K tokens / ~$0.15 without optimization).
-
-### Codex
-
-| Flag | Effect |
-| --- | --- |
-| `--ignore-user-config` | Skip `~/.codex/config.toml` — removes plugins, MCP servers, developer instructions |
-| `--ignore-rules` | Skip `.rules` files |
-| `--cd "$CODEX_WORK_DIR"` | Keep Codex scoped to the tiny probe folder |
-| `--model "$CODEX_MODEL"` | Use the configured lightweight activation model (`gpt-5.6-luna` by default) |
-| `-c 'features.memories=false'` | Disable memories |
-| `-c 'features.multi_agent=false'` | Disable multi-agent |
-| `-c 'features.goals=false'` | Disable goals |
-| `-c 'features.hooks=false'` | Disable hooks |
-| `-c 'features.child_agents_md=false'` | Disable AGENTS.md loading |
-| `-c 'model_reasoning_effort="low"'` | Minimal reasoning effort |
-
-Result: **~38K input tokens per activation** on average over recent logged runs (~55% cache
-reads). Codex's internal system prompt is still the token floor. The default model is `gpt-5.6-luna`: the previous default,
-`gpt-5.4-mini`, was retired for ChatGPT-account sign-ins in September 2026 (every run returned
-HTTP 400 "not supported when using Codex with a ChatGPT account"). Set `CODEX_MODEL=default` if
-you prefer the Codex CLI default.
-
-> **Upgrading from ≤ 0.3.5:** your `.env` most likely still pins `CODEX_MODEL=gpt-5.4-mini`. The
-> engine now warns and uses `gpt-5.6-luna` instead, and the menu bar app migrates the value on
-> load (click Save to persist it). If you only use the CLI, change `CODEX_MODEL` in `.env`.
-
-**Keeping Codex working across plan changes.** By default (`CODEX_AUTO_UPDATE=1`) Stoker
-**upgrades your Codex CLI unattended**; set `CODEX_AUTO_UPDATE=0` in `.env` to opt out. Before a
-real Codex prompt the engine runs `codex update` (at most once per `CODEX_AUTO_UPDATE_INTERVAL_HOURS`, bounded by
-`CODEX_UPDATE_TIMEOUT_SECONDS`) and records `cli_update: {attempted, from, to, exit}` in the usage
-row; a failed update never blocks the activation. If Codex then rejects the configured model
-("model is not supported"), it retries with the next candidate from `~/.codex/models_cache.json`:
-the rejected model's own `upgrade.model` first, then slugs containing `luna`, `terra`, `sol`,
-anything else (ascending `priority` within each tier). Only listed models that support `low`
-reasoning effort and aren't past their `retirement_at` qualify; every rejected model is excluded.
-It stops on success, on any other error, or after `CODEX_MODEL_FALLBACK_MAX_TRIES` retries. Each
-attempt gets its own usage row (retries carry `model_fallback: {from, to, attempt}`; rejected
-attempts that were retried carry `superseded_by_fallback: true` and aren't counted as errors in
-the app), and a WARNING asks you to set `CODEX_MODEL` to the model that worked. `.env` is never
-rewritten.
-
-### Monthly cost estimate (4 activations/day)
-
-| Tool | Before | After |
-| --- | --- | --- |
-| Claude | ~$18/month | **≈ $0.30/month** |
-| Codex | Quota-based | Quota-based, **~38K tokens/call (~55% cache reads)** |
-
-## Safety Notes
-
-- `dry-run` does not send model prompts.
-- `quota` only queries account/rate-limit status paths and local caches; it does not send a
-  model prompt.
-- `run-now` and scheduled activation first run quota preflight, then send one small prompt per
-  enabled tool only when quota appears available.
-- If quota is known to be exhausted, the tool is skipped and recorded in `logs/usage.jsonl`
-  with `skipped: true`.
-- The Claude invocation uses `--model haiku`, `--setting-sources ""`, `--system-prompt`,
-  `--effort low`, `--strict-mcp-config` with an empty config, no tools, no slash commands, and
-  no session persistence. See [Cost Optimization](#cost-optimization) for details.
-- The Codex invocation uses `--model "$CODEX_MODEL"`, `--ephemeral`, `--skip-git-repo-check`,
-  `--cd "$CODEX_WORK_DIR"`, `--sandbox read-only`, `--ignore-user-config`, `--ignore-rules`,
-  and disables features like memories, multi-agent, goals, and hooks.
-- The generated plist is intentionally ignored by git because it contains machine-specific
-  absolute paths.
+- `dry-run`, `quota`, `check`, `status`, and `recommend` never send a check-in.
+- `run-now` and scheduled runs send one check-in per enabled tool, and only when quota is
+  available.
+- Claude runs with no tools, no MCP servers, no slash commands, and no saved session.
+- Codex runs in a read-only sandbox, inside the small `codex-probe/` folder.
+- By default Stoker updates your Codex CLI before a Codex check-in. Set `CODEX_AUTO_UPDATE=0`
+  to turn that off.
 
 ## Uninstall
+
+From a clone:
 
 ```sh
 ./install.sh uninstall
 ```
 
-If you are migrating from an older local label, set `LEGACY_LABELS="old.label"` when installing
-so the old LaunchAgent is removed and does not double-trigger.
+Then delete the folder.
 
-## Contributing
-
-Run local validation before sending changes:
+With the app: turn the schedule off with the switch at the top of the window, then delete
+`Stoker.app`. If you already deleted the app, the schedule is still loaded. Remove it with:
 
 ```sh
-./scripts/validate.sh
+~/Library/Application\ Support/Stoker/stoker/install.sh uninstall
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development notes.
+The app's settings and logs stay in `~/Library/Application Support/Stoker`. Delete that
+folder too if you want them gone.
 
-## Changelog
+## More
 
-See [CHANGELOG.md](CHANGELOG.md) for release history.
+- [INSTALL.md](INSTALL.md): step-by-step installation.
+- [REFERENCE.md](REFERENCE.md): every setting, the health states, and how a run works.
+- [CHANGELOG.md](CHANGELOG.md): release history.
+- [CONTRIBUTING.md](CONTRIBUTING.md): development and release notes. Run
+  `./scripts/validate.sh` before sending a change.
+- [SECURITY.md](SECURITY.md): how to report a vulnerability.
 
 ## Disclaimer
 
-Stoker is an independent, open-source project. It is **not affiliated with, endorsed by, or
-sponsored by Anthropic, OpenAI, or Apple**. "Claude", "Claude Code", and "Anthropic" are
-trademarks of Anthropic; "Codex", "ChatGPT", and "OpenAI" are trademarks of OpenAI; "macOS" and
-"Apple" are trademarks of Apple Inc. — used here only to identify the tools Stoker works with.
+Stoker is an independent open-source project. It is **not affiliated with, endorsed by, or
+sponsored by Anthropic, OpenAI, or Apple**. Their names are trademarks of their owners and
+are used here only to identify the tools Stoker works with.
 
-Stoker sends automated check-in prompts to the Claude Code and Codex CLIs on your behalf and
-consumes real usage/quota. **You are solely responsible** for ensuring your use complies with
-the applicable Terms of Service, usage policies, and rate limits of Anthropic and OpenAI, and
-for any resulting costs or account actions. The software is provided "as is", without warranty
-of any kind. Stoker runs entirely on your Mac and sends no data to the project authors.
-
-See **[DISCLAIMER.md](DISCLAIMER.md)** for the full disclaimer and trademark, privacy, and
-third-party notices, and **[SECURITY.md](SECURITY.md)** to report a vulnerability.
+Stoker sends automated prompts on your behalf and uses real quota. **You are solely responsible**
+for following the terms and usage policies of Anthropic and OpenAI, and for any resulting
+costs or account actions. The software is provided "as is", without warranty. See
+[DISCLAIMER.md](DISCLAIMER.md) for the full text.
 
 ## License
 
-Distributed under the MIT License. See [LICENSE](LICENSE) for more information.
+MIT. See [LICENSE](LICENSE).

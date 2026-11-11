@@ -20,6 +20,6 @@ cd promo && npm ci && node render.mjs   # → docs/assets/stoker-promo-{en,zh}.{
   (`/opt/homebrew/bin/ffmpeg` or `FFMPEG=`). A full render of both languages takes roughly 10–15 minutes.
 
 Copy rules: the numbers on screen (≈ $0.0025 per Claude activation, ≈ $0.30/month at 4/day) come
-from the landing page / README cost section (measured averages; see CHANGELOG Unreleased › Docs).
+from the landing page / README cost section (measured averages; see CHANGELOG 0.4.0 › Docs).
 Render on macOS: the film uses the system font stack (SF Pro / PingFang SC / SF Mono). The film adds no version text of its own (only what the screenshots show), so it is not a version-bump site.
 Strings live in the `STR` table at the top of `promo.js`.

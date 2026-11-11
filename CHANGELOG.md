@@ -2,85 +2,85 @@
 
 All notable changes to this project will be documented in this file.
 
-## 0.4.0 - 2026-11-11
-
-### Added
-- **Plan-aware window detection and schedule recommendations.** Stoker now works from the usage
-  windows your account actually reports instead of assuming "Claude has a 5-hour window, Codex is
-  weekly-only". `app-status` JSON gains a top-level `limits` object (per tool: window `profile`,
-  `session_minutes`, `weekly_reset`, `plan`, and a `recommended` schedule with its reason), and the
-  new safe command `./install.sh recommend` prints the detected windows and the schedule that fits
-  them. The menu bar app shows a 5-hour bar, mini bar and trend series for whichever tool has that
-  window, and Settings shows the detected windows with a "Use recommended" button. Recommendations
-  never change anything by themselves, and no schedule is skipped because a window is absent.
-- **Claude plan name without credentials.** With the default `cache` quota source the Claude plan
-  read "unknown" whenever the usage cache carried no subscription type. Once a Claude quota snapshot
-  exists, Stoker now takes the plan name, rate-limit tier and extra-usage switch from Claude Code's
-  local config file (`~/.claude.json`; override with `CLAUDE_ACCOUNT_FILE`) — a plain file read that
-  never touches credentials and never copies the email, names or account ids. The Claude card shows
-  the plan pill and, when the snapshot carries no live credits, "Extra usage on/off"; `recommend`
-  prints e.g. `Plan: Ultra (max_20x), extra usage off`; `app-status` gains `quota.claude.account`.
-  The values are Claude Code's cached profile, so they can lag a plan change. The plan stays display
-  only: window detection and recommendations do not look at it.
-- **Per-tool schedules.** Claude and Codex are now scheduled independently:
-  `CLAUDE_SCHEDULE_TIMES` / `CODEX_SCHEDULE_TIMES` (`HH:MM`, falling back to `SCHEDULE_TIMES`)
-  and `CLAUDE_SCHEDULE_DAYS` / `CODEX_SCHEDULE_DAYS` (`mon..sun`; empty or `daily` = every day).
-  The engine rejects `daily` mixed with day names (e.g. `daily,mon`); the menu bar app normalizes
-  the value when it saves.
-  The single LaunchAgent is split into `<LABEL>.claude` and `<LABEL>.codex`, each running
-  `--once --scheduled --tool <tool>`; `install` also removes the old single `<LABEL>` agent and the
-  agent of a disabled tool. A legacy agent pointing at another Stoker checkout is kept with a
-  warning unless `STOKER_FORCE_MIGRATE=1`; the same applies to a `<LABEL>.claude`/`.codex` agent
-  installed from another checkout (install and uninstall skip it and exit non-zero). A `--scheduled` run of a tool that `ACTIVATION_TOOL`
-  excludes exits without sending anything. `print-plist` prints every enabled tool's plist (`print-plist claude|codex`
-  prints just one). **Upgrade note:** re-run `./install.sh install` (or toggle the schedule in
-  the app) to replace the old agent.
-- `app-status` JSON adds `schedule.claude` / `schedule.codex` (`{times, days}`) and
-  `launchctl.agents` (with `stray` for a loaded agent of a disabled tool), `launchctl.legacy`
-  (loaded old-label agents) and `launchctl.needs_migration`; `schedule.times` is the union of the
-  enabled tools' times, `installed` requires every enabled tool's agent and nothing stray, and a
-  legacy agent — or a stray per-tool agent — from another root fills `launchctl.mismatch`.
-  `activation-state.sh` honors `LAUNCHCTL_BIN` like the installer.
-
-### Fixed
-- **Environment Check sheet was clipped.** The tool list sat in a scroll view with no height of its
-  own, so the sheet collapsed and cut the list off. The list is now sized to its content (scrolling
-  only past 480 pt) and long descriptions and install hints wrap instead of truncating.
-- **Codex plans with a 5-hour window were never re-lit.** The idle-only gate
-  (`CODEX_ACTIVATE_ONLY_WHEN_IDLE=1`) looked only at the weekly window, so on Plus / Business
-  standard seats every run was skipped once the week had started. It now gates on the shortest
-  window the snapshot reports (5-hour when present, otherwise weekly); a skip records which one
-  as `gate_window`. A five-hourly schedule fires seconds before the previous window ends, so a
-  run within `CODEX_RESET_WAIT_MAX_SECONDS` (default 300) of that reset now waits for it and then
-  sends (`window_resets_soon`) instead of skipping every other slot. Weekly-only plans behave as
-  before apart from that same wait on the reset-day slot.
-- The installed-root check compares files, not path spelling, so `~/Project/stoker` vs
-  `~/project/stoker` (or a symlink) no longer reads as "another root".
-- Docs no longer claim that Codex has only a weekly window since September 2026 — that was one
-  account's plan change, not a policy change. README gains a plans-and-windows table.
-
-### Changed
-- **Concurrent runs wait instead of being dropped.** A run that finds the activation lock held
-  now polls for up to `LOCK_WAIT_SECONDS` (default `TIMEOUT_SECONDS × (1 +
-  CODEX_MODEL_FALLBACK_MAX_TRIES) + CODEX_UPDATE_TIMEOUT_SECONDS +
-  CODEX_RESET_WAIT_MAX_SECONDS + 5 + 120`, 1085 s) before skipping, so
-  two agents firing in the same second both run. `LOCK_WAIT_SECONDS=0` restores the immediate
-  skip. The lock records its owner's PID and a crashed run's lock is reclaimed (once, under a
-  reclaim mutex; a PID-less lock only after the longest possible run); keep-awake covers
-  the wait; dry-run no longer takes the lock; `TIMEOUT_SECONDS` is validated.
-- `install` exits non-zero (removing that agent's plist and naming what was installed) when a
-  bootstrap fails; `uninstall` no longer validates `ACTIVATION_TOOL` and reports only the agents
-  that existed.
+## Unreleased
 
 ### Docs
-- README / README_CN / INSTALL / INSTALL_CN and the landing page gain a step-by-step "first launch
-  on a new Mac" guide (Done → Privacy & Security › Open Anyway, the ~1-hour button window, the
-  Sonoma right-click path, and the `xattr -dr com.apple.quarantine` fallback), plus a landing-page
-  FAQ entry; schedule wording now reflects per-tool Claude/Codex schedules.
-- App screenshots refreshed for the per-tool schedule UI. New 40-second promo film (EN/中, source
-  in `promo/`) embedded on the landing page and linked from both READMEs.
-- README cost figures now match the landing page's measured averages (Claude ~1.6K tokens ≈
-  $0.0025/activation, ≈ $0.30/month at 4/day; Codex ~38K tokens/activation).
+- The README and INSTALL were rewritten to be shorter and to follow the order a new user
+  needs. The full settings list, the health states, and the run details moved to the new
+  `REFERENCE.md`. All of them have Chinese versions.
+- Screenshots and the 40-second film were redone for the 0.4.0 app.
+- The release packages now include `REFERENCE.md`, `DISCLAIMER.md` and `SECURITY.md`.
+
+## 0.4.0 - 2026-11-11
+
+Stoker no longer assumes which usage windows your plan has. It detects which usage windows your
+account has, recommends a schedule for them, and lets Claude and Codex run on separate
+schedules.
+
+**Upgrading:** run `./install.sh install` once, or turn the schedule off and on in the app.
+This replaces the old single LaunchAgent with one per tool.
+
+### Added
+- **Separate schedules for Claude and Codex.** Each tool has its own times
+  (`CLAUDE_SCHEDULE_TIMES`, `CODEX_SCHEDULE_TIMES`) and its own days (`CLAUDE_SCHEDULE_DAYS`,
+  `CODEX_SCHEDULE_DAYS`). A tool without its own times uses `SCHEDULE_TIMES`. In the app, the
+  Schedule card has a row per tool.
+- **Window detection and a recommended schedule.** Stoker reads the windows your account
+  reports (5-hour, weekly, or both) instead of assuming them. `./install.sh recommend` and the
+  app's Settings show what was detected and the schedule that fits. Stoker only recommends. It
+  never changes or turns off a schedule by itself.
+- **The app follows your windows.** The 5-hour bar, the mini bar in the header, and the trend
+  chart appear for whichever tool has a 5-hour window.
+- **Claude plan name.** The Claude card now shows your plan and whether extra usage is on.
+  Stoker reads these from Claude Code's local config file (`~/.claude.json`). It touches no
+  credentials and never copies your email, name, or account ids. Set `CLAUDE_ACCOUNT_FILE` to
+  use another path.
+
+### Fixed
+- **Codex plans with a 5-hour window were skipped all week.** The "activate only when idle"
+  check looked only at the weekly window, so on Plus and Business standard seats every run was
+  skipped once the week had started. It now looks at the 5-hour window when your plan has one.
+- **Codex: a check-in seconds before a window reset was skipped.** A check-in every five hours fires
+  just before the previous window ends. Stoker now waits for the reset and then sends. Set
+  `CODEX_RESET_WAIT_MAX_SECONDS` to change how long it waits (default 300; `0` never waits).
+- **The Environment Check window was cut off.** It now fits its content.
+- **A clone reached by a differently spelled path looked like another install.** For example
+  `~/Project/stoker` and `~/project/stoker`. Stoker now compares the files, not the spelling.
+- **The docs said Codex has only a weekly window since September 2026.** That was one account's
+  plan change, not a policy change. The README now has a table of plans and windows.
+
+### Changed
+- **Two runs that start together both run.** A run that finds another one in progress now
+  waits for it, up to `LOCK_WAIT_SECONDS`, instead of exiting. A lock left by a crashed run is
+  taken over. `LOCK_WAIT_SECONDS=0` restores the old behavior.
+- `install` exits non-zero when a LaunchAgent fails to load, and says what was installed.
+- `install` and `uninstall` leave alone an agent that belongs to another Stoker folder, and
+  exit non-zero. Set `STOKER_FORCE_MIGRATE=1` to remove it anyway.
+- A day list that mixes `daily` with day names, such as `daily,mon`, is rejected.
+- A leftover agent of a tool that `ACTIVATION_TOOL` no longer enables sends nothing.
+- `dry-run` no longer takes the run lock.
+- `print-plist` prints the plist of every enabled tool. `print-plist claude` or
+  `print-plist codex` prints one.
+
+### Docs
+- New first-launch guide for a new Mac in INSTALL and on the website.
+- New 40-second film on the website, in English and Chinese. Its source is in `promo/`.
+- Cost figures now use measured averages: about 1.6K tokens and $0.0025 per Claude check-in.
+
+### For scripts that read `app-status`
+- New `limits.<tool>`: the window `profile`, `session_minutes`, `weekly_reset`, `plan`, the
+  `recommended` schedule with its reason, and for Codex the `gate` window and whether it is
+  running.
+- New `schedule.claude` and `schedule.codex` (`{times, days}`). `schedule.times` is the union
+  of the enabled tools' times.
+- New `launchctl.agents`, `launchctl.legacy`, and `launchctl.needs_migration`. `installed` is
+  true only when every enabled tool's agent is loaded and nothing stray is.
+- New `quota.claude.account` and `config.codex_reset_wait_max_seconds`.
+
+### For scripts that read the logs
+- In `logs/usage.jsonl`, a Codex skip records which window caused it as
+  `preflight.gate_window`. A run that waited for a reset has `preflight.reason` set to
+  `window_resets_soon`.
 
 ## 0.3.6 - 2026-09-26
 

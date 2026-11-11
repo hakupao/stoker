@@ -8,21 +8,13 @@
 
 **按你的作息，把 Claude Code 和 Codex 的用量窗口一直「续上火」。**
 
-一个很小的 macOS `launchd` 定时器：按固定时间轻量触发 Claude Code 和 Codex，并记录触发日志、
-单次 usage 和额度状态快照（5 小时窗口、周窗口，具体有哪些取决于你的套餐，Stoker 会自动探测并给出推荐调度）。
-
 [![CI](https://github.com/hakupao/stoker/actions/workflows/ci.yml/badge.svg)](https://github.com/hakupao/stoker/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/macOS-14%2B-000000?logo=apple&logoColor=white)](#环境要求)
 [![Version](https://img.shields.io/badge/version-0.4.0-E36E43)](CHANGELOG.md)
 [![Website](https://img.shields.io/badge/Website-stoker.bojiangz.com-E36E43?logo=githubpages&logoColor=white)](https://stoker.bojiangz.com/)
 
-![Bash](https://img.shields.io/badge/Bash-4EAA25?logo=gnubash&logoColor=white)
-![Swift 6](https://img.shields.io/badge/Swift_6-F05138?logo=swift&logoColor=white)
-![SwiftUI](https://img.shields.io/badge/SwiftUI-2396F3?logo=swift&logoColor=white)
-![launchd](https://img.shields.io/badge/launchd-scheduler-555555)
-
-[网站](https://stoker.bojiangz.com/) · [功能](#功能) · [快速开始](#快速开始) · [首次打开](#首次打开放行-stoker) · [菜单栏-app](#菜单栏-app) · [工作方式](#工作方式) · [成本优化](#成本优化) · [配置](#配置) · [下载](https://github.com/hakupao/stoker/releases/latest)
+[网站](https://stoker.bojiangz.com/) · [下载](https://github.com/hakupao/stoker/releases/latest) · [安装](#安装) · [配置](#配置) · [参考文档](REFERENCE_CN.md)
 
 <br/>
 
@@ -38,643 +30,252 @@
 
 </div>
 
-## 项目简介
+## 它能做什么
 
-Stoker（司炉——锅炉房里负责不停添煤、让炉火长燃不灭的人）适合想把 Claude Code / Codex 用量窗口
-固定到自己作息时间的人。它就像替你守着那簇火：通过 macOS `launchd` 定时运行，在一个专用轻量目录里
-让两个 CLI 只回复 `READY`，并明确要求不要扫描真实项目、不要运行工具、不要修改文件。
+很多 Claude 和 Codex 套餐会限制你在一个 5 小时窗口里能用多少。窗口从你发出第一条消息时开始，5 小时后重置。
 
-Claude 和 Codex 各有一套独立的运行时间（时间点，以及可选的星期几）。默认两者都是本机时间 `07:00`、
-`12:00`、`17:00`、`22:00`、每天触发；可以在 App 的设置里按工具分别修改，或在 `.env` 里用
-`CLAUDE_SCHEDULE_TIMES` / `CODEX_SCHEDULE_TIMES` 与 `CLAUDE_SCHEDULE_DAYS` / `CODEX_SCHEDULE_DAYS` 设置。
+假设你 9:00 开始工作，额度就要到 14:00 才重置。如果 7:00 已经发出过一条很小的消息，额度会在 12:00 重置。这样下午你就有一个全新的窗口。
 
-## 套餐与用量窗口
+Stoker 会在你选定的时间，替你发出这条小消息。本文把这条消息叫作一次**激活**。
 
-你有哪些窗口取决于订阅套餐，而套餐经常调整。Stoker 不维护套餐名对照表：它读取每次额度快照里
-账号实际返回的窗口，并以此为准。截至 2026 年 11 月：
+- **在你自己的 Mac 上运行。** 定时由 macOS `launchd` 触发。不会向作者发送任何数据。
+- **每个工具各有自己的定时。** Claude 和 Codex 分别设置时间和星期。
+- **激活很小，并且只读。** Claude 只回复 `READY`。Codex 只读取它自己目录里的一个小文件。你的真实项目永远不会被打开。
+- **一切都有记录。** 包括每次运行、它用掉的 token，以及运行前后的额度。
+- **没有意义时会跳过。** 额度已经用尽的工具，不会收到激活。
+
+你可以在终端里用，也可以用菜单栏 App，或者两者一起用。它们共用同一个引擎和同一个配置文件。
+
+## 你的套餐需要它吗？
+
+不是每个套餐都有 5 小时窗口。Stoker 会读取你的账号上报的窗口，并据此推荐运行时间。截至 2026 年 11 月：
 
 | 工具 | 套餐 | 5 小时窗口 | 周限额 |
 | --- | --- | --- | --- |
-| Claude | Free、Pro、Max、Team*、Enterprise（按席位） | 有，从第一条消息开始计时 | 有，每个账号固定时间重置 |
-| Claude | Ultra（已验证账号） | 无（验证通过前有临时窗口） | 有，固定时间重置 |
-| Codex | Plus、Business（标准席位） | 有，首次使用起算* | 有 |
-| Codex | Pro、Business（Premium 席位）* | 无 | 有*，首次使用起算* |
+| Claude | Free、Pro、Max、Team*、Enterprise（按席位） | 有 | 有，在固定时间重置 |
+| Claude | Ultra | 没有（账号验证完成前有一个临时的） | 有，在固定时间重置 |
+| Codex | Plus、Business（标准席位） | 有* | 有 |
+| Codex | Pro、Business（高级席位）* | 没有 | 有，从首次使用时开始* |
 
-带 * 的内容没有官方页面确认（来自第三方报道或 Stoker 自身日志）。此表仅供参考，Stoker 以账号实际上报的窗口为准。
+\* 没有官方页面确认。套餐经常变化，这张表仅供参考。
 
-对调度的影响：
+窗口在你第一次使用时开始。在固定时间重置的限额，不管你做什么都会按时重置。按你的情况：
 
-- **有 5 小时窗口**：值得定时点亮，每 5 小时触发一次（默认 `07:00、12:00、17:00、22:00`）即可让窗口覆盖全天。
-- **Codex 只有周窗口**：首次使用才开始计时，每天触发一次就足以锚定。
-- **Claude 只有周限额**：无论是否使用都在固定时间重置，触发不会锚定任何东西。但只要你设了调度，
-  Stoker 仍会照常发送，不会替你关掉。
+- **你有 5 小时窗口。** 这时 Stoker 最有用。默认定时（`07:00, 12:00, 17:00, 22:00`）能让窗口一整天都开着。
+- **你只有 Codex 周窗口。** 它从首次使用时开始，所以每天激活一次就够了。
+- **你只有 Claude 周限额。** 它在固定时间重置，所以激活改变不了什么。Stoker 会告诉你这一点，要不要用由你决定。
 
-`./install.sh recommend`（以及 App 的设置页）会显示 Stoker 为每个工具探测到的窗口和推荐调度。
-它不发送任何请求、不修改任何配置，是否采用由你决定。用 Claude 订阅登录的定时 `claude -p`
-与交互式 Claude Code 消耗同一份订阅额度。
-
-## 功能
-
-| | 功能 |
-| :---: | :--- |
-| ⏰ | **定时触发** —— 使用 macOS `launchd` 定时触发 Claude Code 和 Codex，每个工具各自设定时间和星期。 |
-| 🪶 | **极短 prompt** —— 要求两个 CLI 不读文件、不运行工具、不修改内容。 |
-| 📜 | **可读运行历史** —— `logs/activation.log` 记录人类可读的运行历史。 |
-| 📊 | **结构化 usage** —— `logs/usage.jsonl` 记录每次真实触发返回的 token/usage 信息。 |
-| 🔋 | **额度快照** —— `logs/status.jsonl` 记录两个工具按套餐实际上报的 5 小时 / 周额度快照。 |
-| 🚦 | **额度预检** —— 真实触发前先检查额度；如果明确额度耗尽，会优雅跳过并记录日志。 |
-| 🧬 | **可克隆配置** —— 通过 `.env` 配置时间、label、prompt、timeout 和工具路径。 |
-| 🛟 | **安全手动命令** —— 支持 dry-run、依赖检查、只查额度、手动触发和卸载。 |
+想看 Stoker 为你的账号检测到了什么，可以打开 App 的设置，或者运行 `./install.sh recommend`。Stoker 只给建议。它从不自行修改或关闭定时。
 
 ## 环境要求
 
-- macOS 和 `launchctl`。
-- Bash。
-- 已登录的 Claude Code CLI。
-- 已登录的 Codex CLI。
-- `jq`：用于解析 JSONL 日志。
-- Node.js：用于查询 Codex quota status。
-- oh-my-claudecode（omc）插件：Claude 额度快照直接读取其本地用量缓存；只有
-  `CLAUDE_STATUS_SOURCE=omc` 实时查询模式才需要 `omc` 命令本体。不想装插件？
-  `CLAUDE_STATUS_SOURCE=native` 零额外安装即可跟踪 Claude 额度。
+- macOS 14 或更新版本。
+- Claude Code CLI、Codex CLI，或者两者都装，并已用你的订阅登录。
+- `jq`。菜单栏 App 已经自带。用命令行时可以 `brew install jq`。
+- 可选，用于跟踪额度：Node.js（Codex 用）和 oh-my-claudecode 插件（Claude 用）。没有这个插件时，设置 `CLAUDE_STATUS_SOURCE=native`。
 
-实际定时触发只依赖 Claude 和 Codex CLI；如果缺少 `omc`、`node` 或 `jq`，脚本会记录 warning
-并跳过对应的结构化状态记录。
-
-### 还没装 CLI？
-
-Claude / ChatGPT 桌面 App 并不自带 CLI，但 CLI 的用量和 App 共享同一套订阅额度窗口——
-所以习惯用 App 的用户同样能从 Stoker 受益。一次性安装，无需 Node 或 Homebrew：
+Claude 和 ChatGPT 的桌面 App 不包含这些 CLI，需要单独安装：
 
 ```sh
-# Claude Code CLI——装好后运行 `claude`，用你的 Claude 订阅登录一次
-curl -fsSL https://claude.ai/install.sh | bash
-
-# Codex CLI——装好后运行 `codex`，选 "Sign in with ChatGPT" 登录一次
-curl -fsSL https://chatgpt.com/codex/install.sh | sh
+curl -fsSL https://claude.ai/install.sh | bash          # 装好后运行一次 `claude` 登录
+curl -fsSL https://chatgpt.com/codex/install.sh | sh    # 装好后运行一次 `codex` 登录
 ```
 
-只用其中一个？在 `.env` 里设 `ACTIVATION_TOOL=claude`（或 `codex`）即可——菜单栏 App 的
-环境检查会跟随该设置，不再把另一个 CLI 当作必需项。
+只用其中一个工具？设置 `ACTIVATION_TOOL=claude` 或 `ACTIVATION_TOOL=codex`。
 
-## 快速开始
+## 安装
 
-先选择一种发布包：
+### 菜单栏 App
 
-- **CLI/launchd 包**：给 IT 高手和想保持极轻量的人，直接用 shell 控制。
-- **菜单栏 App 包**：给小白初学者，用图形化界面监看和设置；底层仍然是同一套本地定时器。
+1. 从[最新版本](https://github.com/hakupao/stoker/releases/latest)下载 `stoker-gui-<version>.dmg`。
+2. 把 `Stoker.app` 拖进 `Applications`，然后从那里打开它。
+3. App 没有经过 Apple 公证，所以第一次打开会被 macOS 拦下。在 **系统设置 › 隐私与安全性 › 仍要打开** 里放行一次即可。macOS 14 上改为右键点 App，选择 **打开**。具体步骤见 [INSTALL_CN.md](INSTALL_CN.md)。
+4. 从菜单栏图标打开 **设置...**，选好时间，点击 **保存**。
+5. 在 **设置 › 后台认证** 里点击 **配置长效令牌**。定时运行 Claude 需要它。[原因见这里](#定时运行-claude-的登录)。
 
-### CLI / launchd
+App 关闭后，定时仍会继续运行。
+
+### 命令行
 
 ```sh
 git clone https://github.com/hakupao/stoker.git
 cd stoker
 cp .env.example .env
-./install.sh check
-./install.sh dry-run
-./install.sh
+./install.sh check      # 工具都装好了吗？
+./install.sh dry-run    # 显示会发送什么，但不发送
+./install.sh install    # 加载定时
 ```
 
-`./install.sh` 默认执行 `install`，会生成 LaunchAgent 并加载到当前 macOS 用户的 GUI session。
+然后设置[定时运行 Claude 的登录](#定时运行-claude-的登录)。
 
-### 菜单栏 App
+### 定时运行 Claude 的登录
 
-下载 GUI DMG，把 `Stoker.app` 拖到 `Applications` 后打开（首次打开需要放行一次，见下文），然后在状态栏菜单里安装/重载 schedule、
-刷新 quota、手动触发、暂停定时器和编辑设置。App 内置同一套 CLI engine，并会把工作副本放到
-`~/Library/Application Support/Stoker/stoker`。
-
-完整的新手和高手安装步骤见 [INSTALL_CN.md](INSTALL_CN.md)。
-
-### 首次打开：放行 Stoker
-
-Stoker 是开源软件，只做了 ad-hoc 签名，没有用付费的 Apple Developer ID 做公证，所以在一台新 Mac 上
-第一次打开时会被 macOS 拦下。App 完全在你的 Mac 本机运行，全部源码都在 GitHub 上。只需放行**一次**：
-
-1. **先拖进「应用程序」。** 打开 DMG，把 `Stoker.app` 拖到 `Applications`（应用程序）文件夹，之后从
-   那里打开，不要直接在 DMG 里运行。
-2. **双击 `Stoker.app`。** 会弹出提示：「未打开 “Stoker”」——「Apple 无法验证 “Stoker” 是否包含
-   可能危害 Mac 安全或泄漏隐私的恶意软件……」。点 **完成**（macOS 14 上是 **取消**），不要点 **移到废纸篓**。
-3. **macOS 15 Sequoia / macOS 26 及更新：**
-   1. 打开 **系统设置 › 隐私与安全性**。
-   2. 往下滚到 **安全性** 一栏，会看到一条 “Stoker” 已被阻止（以保护你的 Mac）的提示，点旁边的
-      **仍要打开**。
-   3. 用 Touch ID 或登录密码确认。
-   4. 最后还会弹出一个对话框，再点一次 **仍要打开**，Stoker 就会启动。
-
-   **仍要打开** 按钮只在被拦截后大约一小时内显示。如果找不到它，就再双击一次 `Stoker.app`，然后
-   回到「隐私与安全性」。
-4. **macOS 14 Sonoma：** 右键点按（或按住 Control 点按）`Stoker.app` → **打开**，再在对话框里点
-   **打开**。
-5. **还是打不开？** 如果 macOS 提示「“Stoker” 已损坏，无法打开」，或者 **仍要打开** 按钮始终不出现，
-   在「终端」里运行下面这行，然后再打开 App：
-
-   ```sh
-   xattr -dr com.apple.quarantine /Applications/Stoker.app
-   ```
-
-   它只会去掉这一个 App 身上「从互联网下载」的隔离标记，不会改动任何系统级安全设置。
-6. **完成。** 以后正常双击即可打开。换成新版本后，macOS 可能会要求你按同样的方式再放行一次。
-
-## 常用命令
+默认情况下，定时运行会沿用你平时在终端里登录的 Claude Code。这个登录的有效期很短，所以定时运行可能失败，报错 `401 Invalid authentication credentials`。长效令牌可以解决这个问题：
 
 ```sh
-./install.sh check        # 检查本机依赖
-./install.sh dry-run      # 只展示命令，不发送模型 prompt
-./install.sh quota        # 只查询额度状态，不发送模型 prompt
-./install.sh app-status   # 输出菜单栏 App 使用的 JSON 状态
-./install.sh status       # 查看 launchd 状态
-./install.sh run-now      # 手动真实触发一次，会发送模型 prompt
-./install.sh uninstall    # 卸载 LaunchAgent
-./install.sh print-plist  # 打印生成的 launchd plist（`print-plist claude|codex` 只打印一个）
+claude setup-token    # 打开浏览器，并打印出 sk-ant-oat01-...
 ```
 
-也可以直接调用 runner：
+把令牌写进 `.env`：`CLAUDE_CODE_OAUTH_TOKEN="sk-ant-oat01-..."`。它使用你现有的订阅，不会产生 API 费用。App 里的 **配置长效令牌** 按钮会替你完成这些步骤。
+
+### 升级
+
+替换 App，或者拉取新代码。然后运行一次 `./install.sh install`，或者在 App 里把定时关掉再打开。某个版本如果还需要别的步骤，[CHANGELOG.md](CHANGELOG.md) 会写明。
+
+## 日常使用
+
+| 命令 | 作用 | 会发送激活吗？ |
+| --- | --- | :---: |
+| `./install.sh status` | 显示定时是否已加载 | 否 |
+| `./install.sh recommend` | 显示检测到的窗口，以及适合它们的运行时间 | 否 |
+| `./install.sh quota` | 记录当前额度 | 否 |
+| `./install.sh dry-run` | 打印一次运行会用到的完整命令 | 否 |
+| `./install.sh check` | 检查必需的工具是否已安装 | 否 |
+| `./install.sh run-now` | 立刻给每个启用的工具发送一次激活。要先运行 `install` | **是** |
+| `./install.sh install` | 加载或重新加载定时 | 否¹ |
+| `./install.sh uninstall` | 移除定时 | 否 |
+
+¹ `install` 本身不发送任何内容，但它加载的定时会发送。
+
+确认它在正常工作：
 
 ```sh
-./bin/activate-ai-window.sh --once
-./bin/activate-ai-window.sh --status
-./bin/activate-ai-window.sh --once --tool claude
-./bin/activate-ai-window.sh --once --tool codex
+./install.sh status              # 两次运行之间显示 "not running" 是正常的
+tail -f logs/activation.log      # 纯文本的运行记录
+tail -n 20 logs/usage.jsonl | jq # 每个工具每次运行一条记录
 ```
 
-## 日常运行检查
-
-用下面几条命令判断定时器是否已经安装、是否正在等待触发、以及上次运行结果：
-
-```sh
-./install.sh status
-tail -f logs/activation.log
-tail -n 20 logs/usage.jsonl | jq
-tail -n 20 logs/status.jsonl | jq
-```
-
-`./install.sh status` 应该能看到已加载的 LaunchAgent，以及你配置的日历触发时间。两次触发之间显示
-`state = not running` 是正常的，它表示任务已经加载，正在等待下一个定时点。真正触发的短时间内才可能
-显示 `running`。
-
-`logs/activation.log` 是最适合日常看的文本日志。一次正常运行大致会像这样：
-
-```text
-Activation run started ...
-Quota preflight started
-Claude job started
-Codex job started
-Activation run finished exit=0
-```
-
-如果 quota preflight 判断额度已经耗尽，就不会发送 prompt，而是干净地记录跳过：
-
-```text
-claude job skipped by quota preflight reason=quota_exhausted
-codex job skipped by quota preflight reason=quota_exhausted
-```
-
-`logs/usage.jsonl` 是结构化的成功/跳过记录。成功触发通常会包含 `ok: true`、`result: READY`
-和 `exit_code: 0`。被跳过的触发会包含 `skipped: true` 和 `skip_reason`。
-
-常用命令含义：
-
-- `./install.sh status`：检查本地 `launchd` 是否已经加载定时器。
-- `./install.sh quota`：只查额度状态，不发送 prompt。
-- `./install.sh dry-run`：只打印计划执行的命令，不发送 prompt。
-- `./install.sh recommend`：显示每个工具探测到的用量窗口和推荐调度；不发送请求，不修改配置。
-- `./install.sh run-now`：立刻触发已安装的 LaunchAgent；如果额度可用，可能消耗 usage。
+被跳过的运行会记为 `skipped: true`，并带上原因。完整的文件列表见[日志](REFERENCE_CN.md#日志)。
 
 ## 配置
 
-复制 `.env.example` 为 `.env`，按需修改：
+设置都在 `.env` 里。App 读写的也是这个文件，所以设置只有一份。下面是大多数人会改的设置：
 
-| 变量 | 说明 | 默认值 |
+| 变量 | 作用 | 默认值 |
 | --- | --- | --- |
-| `LABEL` | macOS LaunchAgent 基础 label；每个工具各有一个 agent：`<LABEL>.claude` / `<LABEL>.codex` | `com.stoker.ai-window` |
-| `CLAUDE_SCHEDULE_TIMES` | Claude 的逗号分隔 `HH:MM` 触发时间，每个时间点相互独立 | `SCHEDULE_TIMES` |
-| `CODEX_SCHEDULE_TIMES` | Codex 的逗号分隔 `HH:MM` 触发时间（如 `"07:00"`） | `SCHEDULE_TIMES` |
-| `CLAUDE_SCHEDULE_DAYS` | Claude 运行的星期：逗号分隔 `mon,tue,wed,thu,fri,sat,sun`；留空或 `daily` = 每天 | 空（每天） |
-| `CODEX_SCHEDULE_DAYS` | Codex 运行的星期，格式同上 | 空（每天） |
-| `SCHEDULE_TIMES` | 某工具的 `*_SCHEDULE_TIMES` 未设置或为空时的回退时间表 | `"07:00,12:00,17:00,22:00"` |
-| `ACTIVATION_TOOL` | `all`、`claude` 或 `codex`——决定安装哪些工具的 agent | `all` |
+| `CLAUDE_SCHEDULE_TIMES` | Claude 的时间，逗号分隔的 `HH:MM` | `SCHEDULE_TIMES` |
+| `CODEX_SCHEDULE_TIMES` | Codex 的时间 | `SCHEDULE_TIMES` |
+| `CLAUDE_SCHEDULE_DAYS` | Claude 的星期，例如 `mon,tue,wed`。留空表示每天 | 每天 |
+| `CODEX_SCHEDULE_DAYS` | Codex 的星期 | 每天 |
+| `SCHEDULE_TIMES` | 工具没有设置自己的时间时，使用这组时间 | `07:00,12:00,17:00,22:00` |
+| `ACTIVATION_TOOL` | 运行哪些工具：`all`、`claude` 或 `codex` | `all` |
+| `CLAUDE_CODE_OAUTH_TOKEN` | 定时运行 Claude 用的长效登录令牌 | 未设置 |
+| `CODEX_MODEL` | Codex 激活用的模型。设为 `default` 则由 Codex CLI 自己选 | `gpt-5.6-luna` |
+| `CODEX_ACTIVATE_ONLY_WHEN_IDLE` | `1` 表示 Codex 的窗口已在计时就跳过 | `1` |
+| `KEEP_AWAKE_MODE` | 运行期间让 Mac 保持唤醒：`off`、`during` 或 `always` | `off` |
 
-修改任何 `*_SCHEDULE_*` 变量或 `ACTIVATION_TOOL` 后，需要重新执行 `./install.sh install` 让 LaunchAgent
-生效（菜单栏 App 保存时会自动重装）。`ACTIVATION_TOOL` 已不再启用的工具即使被定时触发，也会直接退出、不发送任何内容。
+手动修改定时或 `ACTIVATION_TOOL` 后，要重新运行 `./install.sh install`。在 App 里点击 **保存** 时，App 会替你做这一步。
 
-| `ACTIVATION_PROMPT` | 发送给 CLI 的低消耗 prompt | `Reply exactly READY...` |
-| `CLAUDE_CODE_OAUTH_TOKEN` | 由 `claude setup-token` 生成的长效 token，供无人值守认证（见下） | 未设置（用钥匙串登录） |
-| `CODEX_MODEL` | Codex 激活模型；设为 `default` 则交给 Codex CLI 自行选择 | `gpt-5.6-luna` |
-| `TIMEOUT_SECONDS` | 每个工具的超时时间 | `120` |
-| `LOCK_WAIT_SECONDS` | 另一次运行持有锁时最多等待多久再跳过（`0` = 立即跳过）。开启防休眠时等待期间也保持唤醒（`caffeinate -t KEEP_AWAKE_SECONDS + LOCK_WAIT_SECONDS + CODEX_RESET_WAIT_MAX_SECONDS + 5`） | `TIMEOUT_SECONDS × (1 + CODEX_MODEL_FALLBACK_MAX_TRIES) + CODEX_UPDATE_TIMEOUT_SECONDS + CODEX_RESET_WAIT_MAX_SECONDS + 5 + 120`（1085） |
-| `ENABLE_STATUS_SNAPSHOTS` | 真实触发后是否记录额度快照 | `1` |
-| `ENABLE_QUOTA_PREFLIGHT` | 发送 prompt 前是否先检查额度 | `1` |
-| `QUOTA_PREFLIGHT_ON_UNKNOWN` | 无法确认额度时 `allow` 继续或 `skip` 跳过 | `allow` |
-| `QUOTA_EXHAUSTED_THRESHOLD_PERCENT` | 剩余额度低于或等于该百分比时跳过 | `0` |
-| `CODEX_AUTO_UPDATE` | **为 `1`（默认）时会无人值守地升级你的 Codex CLI**——想自己管理 Codex 版本请设为 `0`。在真实发送 Codex prompt 前执行 `codex update`（跳过、dry-run、check、status 时绝不执行），按间隔节流；失败或超时只告警 | `1` |
-| `CODEX_AUTO_UPDATE_INTERVAL_HOURS` | 两次更新尝试的最小间隔小时数（记录在 `run/codex-update.last`，失败也记录） | `24` |
-| `CODEX_UPDATE_TIMEOUT_SECONDS` | `codex update` 的超时时间 | `180` |
-| `CODEX_MODEL_FALLBACK` | 为 `1` 时，若模型被拒（"model is not supported"），按顺序从 Codex 模型缓存中选下一个候选重试；其它错误不重试，也绝不改写 `.env` | `1` |
-| `CODEX_MODEL_FALLBACK_MAX_TRIES` | 每次运行最多的备用模型重试次数（被拒模型逐个排除） | `3` |
-| `CODEX_MODELS_CACHE` | 选择备用模型所用的 Codex 模型缓存（识别 `$CODEX_HOME`） | `~/.codex/models_cache.json` |
-| `CODEX_ACTIVATE_ONLY_WHEN_IDLE` | `1` 或 `0`。为 `1` 时，Codex 最短的那个窗口（套餐有 5 小时窗口就看它，否则看周窗口）已在计时则跳过 Codex 激活（原因 `window_already_active`），即每个窗口只锚定一次；若触发时该窗口将在 `CODEX_RESET_WAIT_MAX_SECONDS` 内重置，则等它重置后再发送而不是跳过；`0` 则每次都发送。需 `ENABLE_QUOTA_PREFLIGHT=1` | `1` |
-| `CODEX_RESET_WAIT_MAX_SECONDS` | Codex 门控窗口即将重置时（每 5 小时触发一次，会刚好落在上个窗口结束前几秒），且距离重置不超过这么多秒，就等到重置后约 5 秒再发送，而不是跳过。`0` 表示照旧跳过。额度已耗尽的窗口仍会跳过 | `300` |
-| `CLAUDE_STATUS_SOURCE` | `cache` 直接读 oh-my-claudecode 插件的本地用量缓存（不触碰任何凭证）；`native` 用钥匙串 token 只读查询用量接口——无需 omc，token 过期即跳过、绝不刷新；`omc` 强制 `omc wait status` 实时查询，无头运行时可能轮换钥匙串登录凭证 | `cache` |
-| `CLAUDE_USAGE_CACHE_FILE` | 用量缓存路径覆盖（可选） | `~/.claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json` |
-| `CLAUDE_ACCOUNT_FILE` | Claude Code 配置文件路径（可选）。Stoker 只从中提取套餐名、限额档位和额外用量开关（邮箱、姓名和各类 id 绝不输出），用来标注 Claude 套餐（这是 Claude Code 缓存的账户资料，换套餐后可能滞后）；不碰凭证、不联网 | `~/.claude.json`（设置了 `CLAUDE_CONFIG_DIR` 时为 `$CLAUDE_CONFIG_DIR/.claude.json`） |
-| `CLAUDE_USAGE_USER_AGENT` | `native` 用量请求的 User-Agent；claude-code 形态的 UA 可避开该接口激进的 429 限流桶 | `claude-code/0.4.0` |
-| `CODEX_STATUS_SOURCE` | `app-server`（默认）经 JSON-RPC 拉起 `codex app-server`（需 node + codex）；`native` 只读 HTTP 查询 ChatGPT 用量接口——读 `~/.codex/auth.json` 里的 token、绝不刷新、无需 app-server，并在支持的套餐上显示套餐档位与额度余额 | `app-server` |
-| `CODEX_AUTH_FILE` | `native` 用的 Codex OAuth 凭证路径（识别 `$CODEX_HOME`） | `~/.codex/auth.json` |
-| `CODEX_USAGE_API_URL` | Codex `native` 用量接口地址覆盖 | `https://chatgpt.com/backend-api/wham/usage` |
-| `CODEX_USAGE_USER_AGENT` | Codex `native` 请求发送的 User-Agent | `codex_cli_rs/<ver> (darwin)` |
-| `KEEP_AWAKE_MODE` | `off`、`during` 或 `always`；非 `off` 时真实定时触发会用 `caffeinate` 防止睡眠 | `off` |
-| `KEEP_AWAKE_SECONDS` | 每次真实触发的防睡眠时长上限 | `900` |
-| `CLAUDE_BIN` | Claude 路径覆盖 | 自动发现 |
-| `CODEX_BIN` | Codex 路径覆盖 | 自动发现 |
-| `JQ_BIN` | `jq` 路径覆盖 | 自动发现 |
-| `NODE_BIN` | Node.js 路径覆盖 | 自动发现 |
-| `OMC_BIN` | `omc` 路径覆盖 | 自动发现 |
-| `PATH_VALUE` | launchd 和 runner 使用的 PATH | Homebrew/local/system 默认路径 |
+所有变量见 [REFERENCE_CN.md](REFERENCE_CN.md#配置)。
 
-**配置只有一份，CLI 和 App 共用。** `.env` 是唯一真相源。菜单栏 App 会把它管理的那几项设置——
-时间表、工具选择、以及它暴露的防睡眠／配额等选项——写回同一个 `.env`，不改动其它键和注释。App
-没有暴露的项继续走代码内置默认值，所以一份手写、纯 CLI 的 `.env` 可以很短。完整的变量清单和注释
-在 `.env.example` 里。只用 CLI 的用户直接编辑 `.env`。
+### Mac 必须保持唤醒
 
-**无人值守认证（推荐）。** 默认情况下，定时的 `claude -p` 会复用你交互式 Claude Code 登录的
-macOS 钥匙串凭证。那份凭证寿命很短，且每当你的交互式会话刷新它时就会被轮换掉——于是共用它的
-无人值守任务可能报 `401 Invalid authentication credentials`，直到你重新登录。要让定时任务自给自足，
-用 `claude setup-token` 生成一份长效 token 存进 `.env`：
+Mac 睡眠时，`launchd` 不会运行任务。唤醒后，错过的任务只补跑一次，不会每个错过的时间都跑一次。`KEEP_AWAKE_MODE` 能让 Mac 在运行期间保持唤醒，但不能把 Mac 唤醒。
+
+想让时间准确，就让 Mac 在这些时间保持唤醒，或者让 macOS 在某个时间前不久把它唤醒。`pmset repeat` 只能设一个唤醒时间：
 
 ```sh
-claude setup-token          # 打开浏览器，输出 sk-ant-oat01-...
-# 然后写入 .env：  CLAUDE_CODE_OAUTH_TOKEN="sk-ant-oat01-..."
+sudo pmset repeat wakeorpoweron MTWRFSU 06:58:00
 ```
-
-这份 token 以你现有的 Claude 订阅身份认证、并计入订阅额度（**不产生额外 API 计费**）；由于它不再
-和交互式会话共用钥匙串凭证，导致 401 的轮换问题随之消失。若某次仍认证失败，`activation.log` 现在
-会打印一条明确指向 `claude setup-token` 的提示。
-
-**也可以在菜单栏 App 里一键完成。** 打开 **设置 → 后台认证 → 配置长效令牌**，在弹出的浏览器中完成
-登录，App 会自动运行 `claude setup-token`、抓取令牌并写入 `.env`——无需开终端、无需复制粘贴；并始终
-提供「在终端运行 + 手动粘贴」（带格式校验）的兜底方式。
-
-修改时间或 label 后，重新安装一次：
-
-```sh
-./install.sh install
-```
-
-> 独立的 `Stoker.app`（不是从克隆目录启动的那种）会把引擎和它自己的 `.env` 放在
-> `~/Library/Application Support/Stoker/stoker`，与 CLI 仓库分开。如果两者都用，请编辑「拥有当前
-> 已加载 schedule」的那一份；当两者指向不同副本时 App 会给出警示。
-
-### 睡眠与唤醒
-
-定时触发依赖 Mac 在计划时刻处于唤醒状态。macOS `launchd` **在 Mac 睡眠期间不会触发
-`StartCalendarInterval` 任务**——唤醒后只补跑**一次**错过的任务（不会把睡眠期间错过的每个时间点都
-补齐）。所以合盖／睡眠中的 Mac 会一直错过 check-in，直到下次唤醒。
-
-`KEEP_AWAKE_MODE` **不会**唤醒睡着的 Mac；它只在**某次触发已经在运行时**防止睡眠
-（`caffeinate -i`）。`always` 则额外在菜单栏 App 打开期间一直保持 Mac 唤醒。想让定时可靠命中那几个
-时刻，请在那些时刻保持 Mac 唤醒（例如接通电源并关闭睡眠），或用 `pmset repeat wake …` 自行设定时
-唤醒。Stoker 不会替你配置 `pmset`。
-
-## 日志
-
-```sh
-tail -f logs/activation.log
-tail -20 logs/usage.jsonl | jq
-tail -20 logs/status.jsonl | jq
-```
-
-日志文件说明：
-
-- `logs/activation.log`：人类可读的运行历史。
-- `logs/usage.jsonl`：每个工具每次真实触发的 usage 快照。
-- `logs/status.jsonl`：额度快照（套餐实际上报的 5 小时 / 周窗口）。
-- `logs/raw/`：Claude、Codex 和 status 查询的原始输出。
-- `logs/launchd.out.log` / `logs/launchd.err.log`：launchd 的 stdout/stderr。
 
 ## 菜单栏 App
 
-CLI/launchd 仍然是主引擎；菜单栏 App 是单独给初学者使用的 GUI 发布形态，提供 macOS 状态栏
-控制面板，并共用同一份配置、schedule、quota 快照和日志。界面随系统明暗自动适配；当定时开启时，
-整个窗口会从冷色「待机」配色整体「升温」到暖色 ember「激活」状态。
+App 是同一个引擎的操作界面。它自己不负责定时。
 
-亮点：
-
-- **活动仪表盘** —— 顶部告警横幅（仅在某工具需要关注时出现；点「查看」把运行记录筛选到该工具），
-  下方是两张按身份色区分的工具卡：Claude（5 小时窗口为主指标，周窗口和各模型的周额度桶为次要行）、
-  Codex（周窗口为主指标，带重置日期和天数倒计时，有重置券时一并显示），每张卡底部都有健康行
-  （状态、上次运行、下次激活）。
-  卡片下方是趋势切换器（`Claude 5h` / `Claude 周` / `Codex 周`）、可展开查看单次详情（token、费用、
-  耗时、session）的运行记录时间线，以及统计条——「按计划跳过」（中性色）与「额度跳过」（警告色）
-  分开显示——带「时间范围 / 状态 / 工具」筛选。
-- **顶部与菜单** —— 头部迷你条标注 `Claude 5h` / `Codex 周`，各带一个健康色点；菜单栏下拉每个工具
-  一行摘要；任一工具告警时菜单栏火苗图标叠加一个小红点，每 10 分钟重新检查一次，每次定时激活后也
-  会很快重新检查，即使窗口没打开也一样。
-- **设置** —— 顶部是运行时间卡，Claude 和 Codex 各占一行，各自选择星期（「每天」或周一到周日任选）
-  和时间点；下面是 Claude 设置卡（启用 + 后台认证）与 Codex 设置卡（启用、模型、自动更新 CLI、
-  模型自动回退、仅空闲时激活），加上共用的高级选项（额度预检、运行后快照、防睡眠、开机自启）。
-- **后台认证**（现在在 Claude 设置卡内）—— 一眼看清定时任务的认证方式，并一键配置长效
-  `CLAUDE_CODE_OAUTH_TOKEN`，让定时任务不再退回会轮换的钥匙串登录（并提供手动粘贴兜底）。
-- **双语界面**，右上角 EN / 中 一键切换；主题随系统明暗自动适配。
-- **环境检查**，自动检测必需与可选的命令行工具。
-- **运行记录可导出 CSV。**
-
-**健康状态：**
-
-| 工具 | 状态 | 界面文案 | 含义 |
-| :--- | :--- | :--- | :--- |
-| Claude | `unknown` | "暂无运行" | 还没有任何真实（非跳过）运行记录。 |
-| Claude | `alert` | "连续 N 次失败" / "激活异常" | 最近 ≥2 次真实运行全部失败；或定时开启且最近 24 小时内既无成功运行、也无额度预检跳过（跳过说明调度仍在运行）。 |
-| Claude | `warning` | "最近一次失败" | 最近一次真实运行失败。 |
-| Claude | `ok` | "激活正常" | 最近一次真实运行成功。 |
-| Codex | `alert` | "连续 N 次失败" / "激活异常" | 最近 ≥2 次真实运行全部失败（优先于窗口状态判定）。 |
-| Codex | `warning` | "最近一次失败" | 最近一次真实运行失败。 |
-| Codex | `exhausted` | "本周额度用尽" / "5 小时额度用尽" | 套餐上报的任一窗口（5 小时或周）剩余额度 ≤ `QUOTA_EXHAUSTED_THRESHOLD_PERCENT`（默认 0），且重置时间仍在未来。 |
-| Codex | `anchored` | "本周已锚定" / "本 5 小时已锚定" | 门控窗口重置时间仍在未来，且引擎判定它已锚定（`limits.codex.gate.active`）。 |
-| Codex | `pending` | "待锚定" | 窗口空闲、重置时间已过，或没有额度数据。 |
-| 两者 | `disabled` | "未启用" | 该工具被 `ACTIVATION_TOOL` 排除——没有下次激活，也不会告警。 |
-
-每个工具按上表顺序依次判定（对 Codex 而言，连续失败会覆盖窗口状态）。
-Codex 的下次激活只在引擎真的会跳过时才推迟到周窗口重置之后：`ENABLE_QUOTA_PREFLIGHT=1` 下额度用尽，
-或同时 `CODEX_ACTIVATE_ONLY_WHEN_IDLE=1` 下窗口已锚定；否则就是下一个定时时段。
+- **活动。** 每个工具一张卡片，显示额度、重置时间，以及激活是否正常。下方是「额度趋势」图和「运行记录」。运行记录可以筛选，也可以导出为 CSV。
+- **设置。** 每个工具的时间和星期、Stoker 检测到的窗口和 **套用推荐** 按钮、「后台认证」，以及「高级设置」。
+- **菜单栏图标。** 某个工具需要处理时，火苗图标上会出现一个小红点。
+- **环境检查。** 显示哪些必需和可选的工具已经安装。
+- **中英双语**，支持浅色和深色。
 
 <div align="center">
 <table>
   <tr>
-    <td align="center"><sub><b>设置 · 浅色</b></sub><br/><img src="docs/images/settings-zh.png" width="390" alt="Stoker 设置页（浅色）" /></td>
-    <td align="center"><sub><b>设置 · 深色</b></sub><br/><img src="docs/images/settings-zh-dark.png" width="390" alt="Stoker 设置页（深色）" /></td>
+    <td align="center"><sub><b>设置 · 浅色</b></sub><br/><img src="docs/images/settings-zh.png" width="390" alt="Stoker 设置（浅色）" /></td>
+    <td align="center"><sub><b>设置 · 深色</b></sub><br/><img src="docs/images/settings-zh-dark.png" width="390" alt="Stoker 设置（深色）" /></td>
   </tr>
 </table>
 </div>
 
-本地构建 App：
+健康状态的含义见 [REFERENCE_CN.md](REFERENCE_CN.md#健康状态)。
 
-```sh
-./app/StokerMenuBar/build-app.sh
-open "dist/Stoker.app"
-```
+## 费用
 
-App 不替代脚本，而是调用现有入口：
+用订阅的话，激活不会另外收费。它和你自己发的消息一样，从套餐用量里扣。Stoker 把每个 CLI 精简到最低限度，让这部分用量很小。
 
-- `./install.sh app-status`：读取 JSON 状态。
-- `./install.sh install`：保存设置后重新加载 LaunchAgent。
-- `./install.sh run-now`、`quota`、`dry-run`、`uninstall`：对应菜单操作。
+| 工具 | 每次激活 | 每天 4 次，每月合计 |
+| --- | --- | --- |
+| Claude | 约 1.6K 输入 token，折合 ≈ $0.0025 | 折合 ≈ $0.30 |
+| Codex | 约 38K 输入 token，其中约 55% 是缓存读取 | 没有上报美元金额 |
 
-如果在 App 里设置 `KEEP_AWAKE_MODE=always`，菜单栏 App 打开期间会保持 macOS 醒着。即使 App
-没开，定时触发仍然照常由 launchd 执行；`KEEP_AWAKE_MODE=during` 只保护真实触发运行期间。
+这里的美元金额，是 Claude Code 报告的同样 token 按 API 价格计算的费用。不做精简的话，一次 Claude 激活会加载约 40K token，折合约 $0.15。负责精简的参数见 [REFERENCE_CN.md](REFERENCE_CN.md#激活如何保持精简)。
 
-## 发布打包
-
-维护者可以用一条命令同时生成两种发布包：
-
-```sh
-./scripts/package-release.sh
-```
-
-`dist/` 下会按人群分开：
-
-- `stoker-cli-<version>.tar.gz`：轻量 CLI/launchd 包。
-- `stoker-gui-<version>.dmg`：给初学者的 GUI App 安装包。
-
-`STOKER_PLAIN_DMG=1 ./scripts/package-release.sh` 会跳过 Finder 美化安装窗口、直接生成普通 DMG（供 CI 等无头环境使用）。
-美化布局的 Finder 自动化也限时 60 秒，失败时回退为普通 DMG。
-- `stoker-gui-<version>.zip`：GUI App 备用压缩包。
-
-## 工作方式
-
-### 架构总览
-
-项目有两个入口——CLI 和菜单栏 App——共享同一套 shell 引擎：
+## 工作原理
 
 ```mermaid
 flowchart TB
-    subgraph entry["入口层"]
-        L["launchd<br/><i>（按 HH:MM 定时触发）</i>"]
-        A["菜单栏 App<br/><i>（SwiftUI GUI）</i>"]
-    end
-
-    subgraph engine["共享 Shell 引擎"]
-        R["bin/activate-ai-window.sh<br/><i>激活执行器</i>"]
-        S["bin/activation-state.sh<br/><i>JSON 状态查询</i>"]
-        I["scripts/install-launchd.sh<br/><i>launchd 管理器</i>"]
-    end
-
+    L["launchd<br/><i>你的定时</i>"]
+    A["菜单栏 App"]
+    E["Shell 引擎<br/><i>install.sh 和 bin/</i>"]
     C["Claude Code CLI"]
     X["Codex CLI"]
 
-    L -- "触发" --> R
-    A -- "Process()" --> R
-    A -- "Process()" --> S
-    A -- "Process()" --> I
-    R -- "极简 prompt" --> C
-    R -- "极简 prompt" --> X
+    L --> E
+    A --> E
+    E -- "激活" --> C
+    E -- "激活" --> X
 ```
 
-### CLI 运行流程
+每次运行都按顺序做这几件事：
 
-当 launchd 到达预定时间（或你手动执行 `./install.sh run-now`）时，激活脚本按以下顺序执行：
+1. 读取 `.env` 并加锁，保证两次运行不会重叠。
+2. 检查额度。额度已用尽的工具会被跳过。
+3. 给每个启用的工具发送一次激活。
+4. 把 token 用量记到 `logs/usage.jsonl`。
+5. 再记录一次额度到 `logs/status.jsonl`，然后释放锁。
 
-1. **加载配置** —— 从 `.env` 读取 schedule、工具选择、额度设置和二进制路径。
-2. **获取锁** —— 创建 `run/activation.lock` 防止并发。Claude 和 Codex 的 agent 可能在同一秒触发，
-   所以第二次触发会等待（每 2 秒轮询，最长 `LOCK_WAIT_SECONDS`）当前运行结束；超过上限锁仍被占用
-   才会被优雅跳过。锁里记录持有者 PID，崩溃遗留的锁（PID 已不存在，或没有 PID 且比单次运行的最长可能时长更旧）会被回收——通过单独的
-   `run/activation.lock.reclaim` 标记保证只有一个等待者执行回收。
-   `--dry-run` 不拿锁。
-3. **额度预检**（可选） —— 在发送任何 prompt *之前*查询 Claude 和 Codex 的额度状态。如果某个
-   工具的额度已耗尽，该工具会被跳过，跳过记录写入 `logs/usage.jsonl`。Claude 的分项周额度
-   （`scoped_weekly`，如某个模型专属的限额）仅在账号当前确实受其限制（`is_active: true`）时计入。
-   Codex（只有 7 天周窗口）若周窗口已在计时，也会被跳过（`window_already_active`）——
-   见 `CODEX_ACTIVATE_ONLY_WHEN_IDLE`。
-4. **发送 prompt** —— 对每个启用的 CLI 发送一个极简 prompt（`Reply exactly READY`）。Claude
-   使用超轻量模式（见[成本优化](#成本优化)）。Codex 使用配置的轻量模型，并带上 `--ephemeral`、
-   `--skip-git-repo-check`、`--sandbox read-only` 以及精简后的配置（见下文）。
-5. **记录 usage** —— 用 `jq` 解析每个 CLI 的 JSON 输出，把结构化记录追加到 `logs/usage.jsonl`
-   （token 数量、费用、session ID、模型、耗时等）。
-6. **触发后快照**（可选） —— 激活后再做一次额度快照，追加到 `logs/status.jsonl`。
-7. **释放锁** —— 删除 lock 目录，下一次定时触发就可以正常执行。
+两个 CLI 都在 Stoker 自己的目录里运行，从不进入你的项目。详情见 [REFERENCE_CN.md](REFERENCE_CN.md#一次运行的流程)。
 
-超时保护：每个 CLI 调用都封装在后台进程中，有可配置的超时时间（默认 120 秒）。如果 CLI 挂起，
-先发 SIGTERM，2 秒后再发 SIGKILL。
+## 安全
 
-### 菜单栏 App
-
-SwiftUI App 是一层很薄的 GUI 壳——它自己不包含调度器或激活逻辑，所有操作都委托给同一套 shell
-脚本：
-
-| App 操作 | Shell 调用 |
-| --- | --- |
-| 读取状态 | `bin/activation-state.sh --json` |
-| 开关定时器 | `install.sh install` 或 `install.sh uninstall` |
-| 保存设置 | 写入 `.env`，然后 `install.sh install` |
-| 手动触发一次 | `install.sh run-now` |
-
-App 通过 Foundation 的 `Process()` 调用脚本，读取 stdout，再用 `JSONDecoder` 解析成 Swift
-数据模型。
-
-### 激活在哪个目录运行？
-
-两个 CLI 都在 **stoker 项目目录本身**内被调用——永远不会进入你的真实项目。这是一个只包含脚本和
-日志的轻量目录，CLI 没有东西可以扫描或修改。
-
-| 安装方式 | 工作目录 | 谁创建的 |
-| --- | --- | --- |
-| CLI（`git clone`） | 你 clone 的仓库，如 `~/stoker` | 你手动 clone |
-| 菜单栏 App（开发构建） | 同上，复用源码目录 | 同上 |
-| 菜单栏 App（.app / DMG） | `~/Library/Application Support/Stoker/stoker/` | App 首次启动时自动从 bundle 拷贝脚本 |
-
-目录是怎么找到的：
-
-- **Shell 脚本**：`ROOT_DIR` 在运行时从脚本自身位置（`bin/`）向上取父目录。这意味着项目 clone
-  到任何路径都能正常工作，无需手动改脚本。
-- **菜单栏 App**：`ProjectLocator` 从 app bundle 向上遍历，寻找包含 `bin/activate-ai-window.sh`
-  的目录。对于独立的 `.app`，会把 bundle 内的脚本拷贝到 Application Support 并以该副本作为工作
-  根目录。
-
-安装脚本会为每个启用的工具生成一个带绝对路径的 plist（`<LABEL>.claude.plist`、
-`<LABEL>.codex.plist`，各自按该工具的时间和星期运行 `activate-ai-window.sh --once --tool <tool>`），
-放到 `~/Library/LaunchAgents/`。安装时也会移除未启用工具的 agent 以及旧版的单个 `<LABEL>` agent（和
-`LEGACY_LABELS`）；如果旧 agent 的 plist 指向另一个 Stoker 目录，会保留并给出警告，除非设置 `STOKER_FORCE_MIGRATE=1`；
-`uninstall` 同样会保留另一个目录安装的 `<LABEL>.claude`/`.codex` agent（并以非零退出）。
-plist 被 git ignore，因为它包含本机路径。
-
-### 项目结构
-
-```text
-stoker/
-├── bin/
-│   ├── activate-ai-window.sh   ← 激活执行器
-│   └── activation-state.sh     ← 给 App 用的 JSON 状态
-├── scripts/
-│   └── install-launchd.sh      ← launchd 安装/卸载
-├── app/
-│   └── StokerMenuBar/          ← SwiftUI 菜单栏 App
-├── launchd/                    ← 生成的 plist（git ignore）
-├── logs/                       ← 生成的日志
-│   ├── activation.log
-│   ├── usage.jsonl
-│   ├── status.jsonl
-│   └── raw/
-├── .env.example
-├── install.sh                  ← 用户入口
-└── README_CN.md
-```
-
-GitHub Actions 只在 push 和 pull request 时校验仓库脚本。真正的定时触发始终运行在执行过
-`./install.sh install` 的那台 Mac 本地。
-
-## 成本优化
-
-每次激活只需一次 API 往返——prompt 和响应加起来不到 300 tokens。成本的瓶颈在于 CLI 自动注入的
-**系统 prompt**（CLAUDE.md、插件、MCP 工具描述、hooks 等），单次可超过 40 000 tokens。
-
-Runner 会把两个 CLI 的上下文压缩到激活所需的最低限度：
-
-### Claude
-
-| 参数 | 作用 |
-| --- | --- |
-| `--model haiku` | 最便宜的模型（input ~$0.80/M，Opus ~$15/M） |
-| `--system-prompt "Reply only: READY"` | 自定义极简系统 prompt |
-| `--setting-sources ""` | 跳过加载 CLAUDE.md、hooks、插件指令——消除 ~40K tokens 的注入上下文 |
-| `--effort low` | 最低推理力度 |
-| `--strict-mcp-config --mcp-config '{"mcpServers":{}}'` | 空 MCP 配置——去掉所有工具描述 |
-| `--tools ""` | 禁用所有内置工具 |
-| `--disable-slash-commands` | 禁用 skills |
-
-效果：按近期实际运行记录平均，**每次激活 ~1.6K input tokens，约 $0.0025**（优化前 ~40K tokens / ~$0.15）。
-
-### Codex
-
-| 参数 | 作用 |
-| --- | --- |
-| `--ignore-user-config` | 跳过 `~/.codex/config.toml`——去除插件、MCP、developer instructions |
-| `--ignore-rules` | 跳过 `.rules` 文件 |
-| `--model "$CODEX_MODEL"` | 使用配置的轻量激活模型（默认 `gpt-5.6-luna`） |
-| `-c 'features.memories=false'` | 禁用 memories |
-| `-c 'features.multi_agent=false'` | 禁用 multi-agent |
-| `-c 'features.goals=false'` | 禁用 goals |
-| `-c 'features.hooks=false'` | 禁用 hooks |
-| `-c 'features.child_agents_md=false'` | 禁用 AGENTS.md 加载 |
-| `-c 'model_reasoning_effort="low"'` | 最低推理力度 |
-
-效果：按近期实际运行记录平均，**每次激活 ~38K input tokens**（约 55% 为缓存读取）。Codex 内部系统 prompt 仍然是 token 底线。
-默认模型为 `gpt-5.6-luna`：原默认的 `gpt-5.4-mini` 已于 2026 年 9 月对 ChatGPT 账号登录停用
-（每次都返回 HTTP 400 "not supported when using Codex with a ChatGPT account"）。若想使用 Codex CLI
-默认模型，可设置 `CODEX_MODEL=default`。
-
-> **从 ≤ 0.3.5 升级：** 你的 `.env` 很可能仍写着 `CODEX_MODEL=gpt-5.4-mini`。引擎现在会记录 WARNING
-> 并改用 `gpt-5.6-luna`；菜单栏 App 加载时也会自动迁移该值（点一次“保存”即写回）。只用 CLI 的话，
-> 请手动修改 `.env` 里的 `CODEX_MODEL`。
-
-**套餐变动时保持 Codex 可用。** 默认（`CODEX_AUTO_UPDATE=1`）Stoker **会无人值守地升级你的 Codex CLI**；
-不想要可在 `.env` 设 `CODEX_AUTO_UPDATE=0`。真实发送 Codex prompt 前，引擎会执行 `codex update`（每
-`CODEX_AUTO_UPDATE_INTERVAL_HOURS` 最多一次，受 `CODEX_UPDATE_TIMEOUT_SECONDS` 限时），并在 usage 记录里写入
-`cli_update: {attempted, from, to, exit}`；更新失败绝不阻塞激活。若随后 Codex 拒绝所配置的模型
-（"model is not supported"），会按顺序从 `~/.codex/models_cache.json` 选下一个候选重试：先是被拒模型自身的
-`upgrade.model`，再按含 `luna`、`terra`、`sol`、其它分档（档内按 `priority` 升序）。只考虑可见、支持 `low`
-推理力度且未过 `retirement_at` 的模型，被拒模型逐个排除；成功、遇到其它错误或达到
-`CODEX_MODEL_FALLBACK_MAX_TRIES` 次即停止。每次尝试各写一条 usage 记录（重试带
-`model_fallback: {from, to, attempt}`；被重试取代的失败记录带 `superseded_by_fallback: true`，App 不计为错误），
-并输出 WARNING 提示你把 `CODEX_MODEL` 设为成功的模型。不会改写 `.env`。
-
-### 月成本估算（每天 4 次激活）
-
-| 工具 | 优化前 | 优化后 |
-| --- | --- | --- |
-| Claude | ~$18/月 | **约 $0.30/月** |
-| Codex | 按配额计算 | 按配额计算，**~38K tokens/次（约 55% 缓存读取）** |
-
-## 安全说明
-
-- `dry-run` 不会发送模型 prompt。
-- `quota` 只查询账号/rate-limit 状态和本地 cache，不会发送模型 prompt。
-- `run-now` 和定时触发会先做 quota preflight；只有额度看起来可用时，才给启用的工具发送一个很短的
-  prompt。
-- 如果明确额度已经耗尽，对应工具会被跳过，并在 `logs/usage.jsonl` 里记录 `skipped: true`。
-- Claude 使用 `--model haiku`、`--setting-sources ""`、`--system-prompt`、`--effort low`、
-  `--strict-mcp-config` 空配置、无 tools、无 slash commands、无 session persistence。详见
-  [成本优化](#成本优化)。
-- Codex 使用 `--model "$CODEX_MODEL"`、`--ephemeral`、`--skip-git-repo-check`、
-  `--sandbox read-only`、`--ignore-user-config`、`--ignore-rules`，并禁用 memories、multi-agent、
-  goals、hooks 等功能。
-- 生成的 plist 会被 git 忽略，因为它包含本机绝对路径。
+- `dry-run`、`quota`、`check`、`status` 和 `recommend` 从不发送激活。
+- `run-now` 和定时运行会给每个启用的工具发送一次激活，并且只在还有额度时发送。
+- Claude 运行时不带任何工具、MCP 服务器和斜杠命令，也不保存会话。
+- Codex 在只读沙箱里运行，范围限定在很小的 `codex-probe/` 目录。
+- 默认情况下，Stoker 会在 Codex 激活前更新你的 Codex CLI。设置 `CODEX_AUTO_UPDATE=0` 可以关闭。
 
 ## 卸载
+
+如果用的是克隆目录：
 
 ```sh
 ./install.sh uninstall
 ```
 
-如果你从旧 label 迁移，可以安装时设置 `LEGACY_LABELS="old.label"`，这样旧 LaunchAgent 会被
-清理，避免重复触发。
+然后删除这个文件夹。
 
-## 参与贡献
-
-提交修改前建议先运行：
+如果用的是 App：先用窗口顶部的开关关闭定时，再删除 `Stoker.app`。如果已经先删了 App，定时仍然处于加载状态。用下面的命令移除：
 
 ```sh
-./scripts/validate.sh
+~/Library/Application\ Support/Stoker/stoker/install.sh uninstall
 ```
 
-更多说明见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+App 的设置和日志留在 `~/Library/Application Support/Stoker`。想彻底清除，就把这个文件夹也删掉。
 
-## 更新记录
+## 更多
 
-版本变化见 [CHANGELOG.md](CHANGELOG.md)。
+- [INSTALL_CN.md](INSTALL_CN.md)：分步安装说明。
+- [REFERENCE_CN.md](REFERENCE_CN.md)：所有设置、健康状态，以及一次运行的流程。
+- [CHANGELOG.md](CHANGELOG.md)：版本历史。
+- [CONTRIBUTING.md](CONTRIBUTING.md)：开发与发布说明。提交改动前请运行 `./scripts/validate.sh`。
+- [SECURITY.md](SECURITY.md)：如何报告安全漏洞。
 
 ## 免责声明
 
-Stoker 是一个独立的开源项目，与 **Anthropic、OpenAI、Apple 没有隶属关系，也未获其授权、认可或
-赞助**。"Claude"、"Claude Code"、"Anthropic" 是 Anthropic 的商标；"Codex"、"ChatGPT"、"OpenAI"
-是 OpenAI 的商标；"macOS"、"Apple" 是 Apple Inc. 的商标——这里仅用于标识 Stoker 所配合的工具。
+Stoker 是一个独立的开源项目。它**与 Anthropic、OpenAI、Apple 没有任何关联，也未获得它们的认可或赞助**。这些名称是各自所有者的商标，这里只用来说明 Stoker 配合哪些工具使用。
 
-Stoker 会代表你向 Claude Code 和 Codex CLI 发送自动「打卡」prompt，并消耗真实用量 / 额度。
-**你需自行负责**确保使用符合 Anthropic 与 OpenAI 的服务条款、使用政策与速率限制，并自行承担由此
-产生的费用或账号后果。本软件按「现状」提供，不附带任何担保。Stoker 完全在你本机运行，不会向项目
-作者发送任何数据。
+Stoker 会代你自动发送消息，并消耗真实额度。**你需要自行负责**遵守 Anthropic 和 OpenAI 的条款与使用政策，并承担由此产生的任何费用，以及账号被限制或封禁等后果。本软件按「原样」提供，不附带任何保证。完整条款见 [DISCLAIMER.md](DISCLAIMER.md)。
 
-完整的免责声明、商标、隐私与第三方声明见 **[DISCLAIMER.md](DISCLAIMER.md)**；安全问题上报见
-**[SECURITY.md](SECURITY.md)**。
+## 许可证
 
-## License
-
-本项目使用 MIT License。详情见 [LICENSE](LICENSE)。
+MIT。见 [LICENSE](LICENSE)。

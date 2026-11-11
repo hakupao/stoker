@@ -89,7 +89,8 @@ machine-specific.
 **Config sourcing.** `activate-ai-window.sh`, `activation-state.sh`, and `install-launchd.sh` all
 source `${ROOT_DIR}/.env` with `set -a`, but snapshot the caller's exported env first
 (`export -p`) and re-apply it after — so **the caller's environment always wins over `.env`**.
-The full `.env` variable surface is documented in `README.md` (don't duplicate it here);
+The full `.env` variable surface is documented in `REFERENCE.md` (don't duplicate it here; `README.md`
+lists only the common ones, and `REFERENCE_CN.md` / `README_CN.md` mirror them);
 `.env.example` is the committed template, `.env` is git-ignored.
 
 **Runtime flow** of a real `--once` run: `cd ROOT_DIR` → optional `caffeinate` re-exec → acquire

@@ -36,6 +36,10 @@ required_paths=(
   "README_CN.md"
   "INSTALL.md"
   "INSTALL_CN.md"
+  "REFERENCE.md"
+  "REFERENCE_CN.md"
+  "DISCLAIMER.md"
+  "SECURITY.md"
   "LICENSE"
 )
 
@@ -76,6 +80,10 @@ build_cli_archive() {
   cp "${ROOT_DIR}/README_CN.md" "$root/"
   cp "${ROOT_DIR}/INSTALL.md" "$root/"
   cp "${ROOT_DIR}/INSTALL_CN.md" "$root/"
+  cp "${ROOT_DIR}/REFERENCE.md" "$root/"
+  cp "${ROOT_DIR}/REFERENCE_CN.md" "$root/"
+  cp "${ROOT_DIR}/DISCLAIMER.md" "$root/"
+  cp "${ROOT_DIR}/SECURITY.md" "$root/"
   cp -R "${ROOT_DIR}/bin" "$root/bin"
   cp -R "${ROOT_DIR}/codex-probe" "$root/codex-probe"
   mkdir -p "$root/scripts"

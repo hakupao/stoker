@@ -13,6 +13,13 @@ file "$TMP_DIR/AppIcon.icns" | grep -q 'Mac OS X icon'
 
 grep -q 'CFBundleIconFile' "${ROOT_DIR}/app/StokerMenuBar/build-app.sh"
 grep -q 'INSTALL_CN.md' "${ROOT_DIR}/app/StokerMenuBar/build-app.sh"
+# Every doc the bundled README links to must ship with it, in both packages.
+for doc in REFERENCE.md REFERENCE_CN.md DISCLAIMER.md SECURITY.md; do
+  grep -q "$doc" "${ROOT_DIR}/app/StokerMenuBar/build-app.sh" \
+    || { echo "build-app.sh does not bundle $doc" >&2; exit 1; }
+  grep -q "$doc" "${ROOT_DIR}/scripts/package-release.sh" \
+    || { echo "package-release.sh does not package $doc" >&2; exit 1; }
+done
 grep -q 'codex-probe' "${ROOT_DIR}/app/StokerMenuBar/build-app.sh"
 grep -q '安装' "${ROOT_DIR}/INSTALL_CN.md"
 
