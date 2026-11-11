@@ -52,6 +52,7 @@ jq -e '
   and .config.enable_status_snapshots == false
   and .config.enable_quota_preflight == true
   and .config.codex_activate_only_when_idle == true
+  and .config.codex_reset_wait_max_seconds == 300
   and .keep_awake.mode == "during"
   and .keep_awake.seconds == 600
   and .quota.codex.five_hour.remaining_percent == 81
@@ -103,12 +104,14 @@ json="$(
   STOKER_ROOT="$TMP_DIR" \
   STOKER_SKIP_LAUNCHCTL=1 \
   CODEX_ACTIVATE_ONLY_WHEN_IDLE=0 \
+  CODEX_RESET_WAIT_MAX_SECONDS=45 \
   ENABLE_QUOTA_PREFLIGHT=0 \
   QUOTA_EXHAUSTED_THRESHOLD_PERCENT=5 \
   "$ROOT_DIR/bin/activation-state.sh" --json
 )"
 jq -e '
   .config.codex_activate_only_when_idle == false
+  and .config.codex_reset_wait_max_seconds == 45
   and .config.enable_quota_preflight == false
   and .config.quota_exhausted_threshold_percent == 5
 ' <<<"$json" >/dev/null

@@ -47,13 +47,42 @@ one simple file instead of scanning real projects or modifying files.
 
 The name is a nod to a *stoker* — the crew member who keeps a furnace fed so the fire never
 goes out. That is exactly what this tool does for your AI usage windows: it keeps them lit on
-a schedule you choose. Claude has a 5-hour and a weekly window; Codex, as of September 2026, has
-only a 7-day window, which Stoker anchors once per week (see `CODEX_ACTIVATE_ONLY_WHEN_IDLE`).
+a schedule you choose. Which windows you have (a 5-hour one, a weekly one, or both) depends on your
+plan; Stoker detects them and recommends a schedule — see [Plans and usage windows](#plans-and-usage-windows).
 
 Claude and Codex each have their own schedule (times and, optionally, weekdays). Out of the box
 both use `07:00`, `12:00`, `17:00`, and `22:00` local macOS time, every day, until you set a
 different one per tool in the app's Settings or with `CLAUDE_SCHEDULE_TIMES` / `CODEX_SCHEDULE_TIMES`
 and `CLAUDE_SCHEDULE_DAYS` / `CODEX_SCHEDULE_DAYS` in `.env`.
+
+## Plans and usage windows
+
+Which windows you have depends on your plan, and the plans change often. Stoker does not keep a
+table of plan names: it reads the windows your account actually reports in each quota snapshot
+and works from those. As of November 2026:
+
+| Tool | Plan | 5-hour window | Weekly limit |
+| --- | --- | --- | --- |
+| Claude | Free, Pro, Max, Team*, Enterprise (seat-based) | yes — starts with your first message | yes — resets at a fixed time per account |
+| Claude | Ultra (verified account) | no (a temporary one until the account is verified) | yes — fixed reset |
+| Codex | Plus, Business (standard seat) | yes — starts on first use* | yes |
+| Codex | Pro, Business (premium seat)* | no | yes* — starts on first use* |
+
+Cells marked * are not confirmed by an official page (third-party reports or Stoker's own logs).
+The table is only a guide — Stoker goes by the windows your account reports.
+
+What that means for the schedule:
+
+- **A 5-hour window** is worth lighting on a schedule: a check-in every five hours (the default
+  `07:00, 12:00, 17:00, 22:00`) keeps a window open across the day.
+- **Only a Codex weekly window**: it starts on first use, so one check-in a day is enough to anchor it.
+- **Only a Claude weekly limit**: it resets at a fixed time whatever you do, so check-ins anchor
+  nothing. Stoker still sends them if you schedule them — it never turns a schedule off for you.
+
+`./install.sh recommend` (and the app's Settings) shows the windows Stoker detected for each tool
+and the schedule it recommends. It sends nothing and changes nothing; you decide whether to apply it.
+A scheduled `claude -p` run signed in with your Claude plan draws from the same subscription limits
+as interactive Claude Code.
 
 ## Features
 
@@ -63,7 +92,7 @@ and `CLAUDE_SCHEDULE_DAYS` / `CODEX_SCHEDULE_DAYS` in `.env`.
 | 🪶 | **A minimal prompt** that tells both CLIs not to inspect files, run tools, or modify anything. |
 | 📜 | **Human-readable run history** in `logs/activation.log`. |
 | 📊 | **Structured per-run usage records** in `logs/usage.jsonl`. |
-| 🔋 | **Quota snapshots** in `logs/status.jsonl` — Claude 5-hour + weekly, Codex weekly (7-day). |
+| 🔋 | **Quota snapshots** in `logs/status.jsonl` — whichever 5-hour and weekly windows your plan reports, for both tools. |
 | 🚦 | **Quota preflight** that skips activation gracefully when a known quota is exhausted. |
 | 🧬 | **Clone-friendly configuration** through `.env`. |
 | 🛟 | **Safe manual commands** for dry runs, dependency checks, quota checks, and uninstall. |
@@ -231,6 +260,8 @@ Manual command guide:
 - `./install.sh status`: checks whether local `launchd` has the timer loaded.
 - `./install.sh quota`: checks quota status without sending prompts.
 - `./install.sh dry-run`: prints the planned commands without sending prompts.
+- `./install.sh recommend`: shows the usage windows detected for each tool and the schedule
+  Stoker recommends for them; sends nothing and changes nothing.
 - `./install.sh run-now`: triggers the installed LaunchAgent once and may consume usage if
   quota is available.
 
@@ -258,7 +289,7 @@ run of a tool that `ACTIVATION_TOOL` no longer enables exits without sending any
 | `CODEX_WORK_DIR` | Tiny working directory used by Codex probe runs | `${ROOT_DIR}/codex-probe` |
 | `CODEX_ACTIVATION_PROMPT` | Read-only Codex probe prompt | `Read only ./probe.py...` |
 | `TIMEOUT_SECONDS` | Per-tool timeout | `120` |
-| `LOCK_WAIT_SECONDS` | How long a run waits for another run's lock before skipping (`0` = skip at once). Keep-awake runs stay awake for this wait too (`caffeinate -t KEEP_AWAKE_SECONDS + LOCK_WAIT_SECONDS`) | `TIMEOUT_SECONDS × (1 + CODEX_MODEL_FALLBACK_MAX_TRIES) + CODEX_UPDATE_TIMEOUT_SECONDS + 120` (780) |
+| `LOCK_WAIT_SECONDS` | How long a run waits for another run's lock before skipping (`0` = skip at once). Keep-awake runs stay awake for this wait too (`caffeinate -t KEEP_AWAKE_SECONDS + LOCK_WAIT_SECONDS + CODEX_RESET_WAIT_MAX_SECONDS + 5`) | `TIMEOUT_SECONDS × (1 + CODEX_MODEL_FALLBACK_MAX_TRIES) + CODEX_UPDATE_TIMEOUT_SECONDS + CODEX_RESET_WAIT_MAX_SECONDS + 5 + 120` (1085) |
 | `ENABLE_STATUS_SNAPSHOTS` | Record quota snapshots after real activation | `1` |
 | `ENABLE_QUOTA_PREFLIGHT` | Check quota before sending prompts | `1` |
 | `QUOTA_PREFLIGHT_ON_UNKNOWN` | `allow` or `skip` when quota cannot be checked | `allow` |
@@ -269,7 +300,8 @@ run of a tool that `ACTIVATION_TOOL` no longer enables exits without sending any
 | `CODEX_MODEL_FALLBACK` | `1` retries with the next candidate from the Codex model cache when the model is rejected ("model is not supported"); never on other errors, never rewrites `.env` | `1` |
 | `CODEX_MODEL_FALLBACK_MAX_TRIES` | Maximum fallback retries per run (each rejected model is excluded) | `3` |
 | `CODEX_MODELS_CACHE` | Codex model cache used to pick the fallback (honors `$CODEX_HOME`) | `~/.codex/models_cache.json` |
-| `CODEX_ACTIVATE_ONLY_WHEN_IDLE` | `1` or `0`. Codex has only a 7-day window (since Sept 2026): `1` skips the Codex prompt with reason `window_already_active` while that window is already running, so Stoker anchors it once per week; `0` always sends. Needs `ENABLE_QUOTA_PREFLIGHT=1` | `1` |
+| `CODEX_ACTIVATE_ONLY_WHEN_IDLE` | `1` or `0`. `1` skips the Codex prompt with reason `window_already_active` while its shortest window (the 5-hour one if your plan has it, otherwise the weekly one) is already running, so each window is anchored once; `0` always sends. A run that lands within `CODEX_RESET_WAIT_MAX_SECONDS` before that window resets waits for the reset instead of skipping. Needs `ENABLE_QUOTA_PREFLIGHT=1` | `1` |
+| `CODEX_RESET_WAIT_MAX_SECONDS` | When the Codex gate window is about to reset (a check-in every five hours lands seconds before the previous window ends), and that reset is at most this many seconds away, wait until about 5 seconds after it and then send, instead of skipping. `0` skips as before. An exhausted window is still skipped | `300` |
 | `CLAUDE_STATUS_SOURCE` | `cache` reads the oh-my-claudecode plugin's local usage cache (no credentials touched); `native` queries the usage API read-only with the Keychain token — no omc needed, skips when the token is expired, never refreshes; `omc` forces a live `omc wait status` query, which can rotate the shared Keychain OAuth login in headless runs | `cache` |
 | `CLAUDE_USAGE_CACHE_FILE` | Optional usage-cache path override | `~/.claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json` |
 | `CLAUDE_USAGE_USER_AGENT` | User-Agent for the `native` usage request; a claude-code-shaped UA avoids the endpoint's aggressive 429 bucket | `claude-code/0.3.6` |
@@ -349,7 +381,7 @@ Log files:
 
 - `logs/activation.log`: human-readable run history.
 - `logs/usage.jsonl`: one structured usage snapshot per tool per real run.
-- `logs/status.jsonl`: quota snapshots per tool (Claude 5-hour + weekly; Codex weekly only).
+- `logs/status.jsonl`: quota snapshots per tool (whichever 5-hour / weekly windows the plan reports).
 - `logs/raw/`: raw Claude/Codex/status outputs for debugging and future parsing.
 - `logs/launchd.out.log` and `logs/launchd.err.log`: launchd stdout/stderr.
 
@@ -397,8 +429,8 @@ Highlights:
 | Claude | `ok` | "Activating normally" | Most recent real run succeeded. |
 | Codex | `alert` | "N failures in a row" / "Activation failing" | ≥2 consecutive real-run failures (checked before window state). |
 | Codex | `warning` | "Last run failed" | Most recent real run failed. |
-| Codex | `exhausted` | "Weekly quota used up" | The weekly window's remaining quota is at or below `QUOTA_EXHAUSTED_THRESHOLD_PERCENT` (default 0) and its reset is still in the future. |
-| Codex | `anchored` | "Anchored this week" | The weekly window's reset is still in the future and already in use (used% > 0, or a success landed this cycle). |
+| Codex | `exhausted` | "Weekly quota used up" / "5-hour quota used up" | Any window the plan reports (5-hour or weekly) whose remaining quota is at or below `QUOTA_EXHAUSTED_THRESHOLD_PERCENT` (default 0) and its reset is still in the future. |
+| Codex | `anchored` | "Anchored this week" / "Anchored this 5h window" | The gate window's reset is still in the future and the engine reports it anchored (`limits.codex.gate.active`). |
 | Codex | `pending` | "Will anchor next slot" | The window is idle, its reset already passed, or quota data is missing. |
 | Either | `disabled` | "Disabled" | The tool is excluded by `ACTIVATION_TOOL` — no next activation, never alerts. |
 
@@ -498,8 +530,8 @@ script executes this sequence:
    prompt. If a tool's quota is exhausted, that tool is skipped and the skip is recorded in
    `logs/usage.jsonl`. Claude per-scope weekly buckets (`scoped_weekly`, e.g. a model-specific
    limit) count only while the account is actively limited by them (`is_active: true`). Codex
-   (7-day window only) is also skipped (`window_already_active`) while that window is already
-   running — see `CODEX_ACTIVATE_ONLY_WHEN_IDLE`.
+   is also skipped (`window_already_active`) while its shortest window (5-hour if the plan has
+   one, otherwise weekly) is already running — see `CODEX_ACTIVATE_ONLY_WHEN_IDLE`.
 4. **Send prompt** — calls each enabled CLI with a minimal prompt. Claude replies `READY`;
    Codex runs a tiny read-only probe from `codex-probe/`. Codex uses the configured lightweight
    model with `--ephemeral`, `--skip-git-repo-check`, `--sandbox read-only`, and stripped-down

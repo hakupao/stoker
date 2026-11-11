@@ -30,6 +30,7 @@ run_engine() {
   KEEP_AWAKE_MODE=during \
     KEEP_AWAKE_SECONDS=42 \
     LOCK_WAIT_SECONDS=0 \
+    CODEX_RESET_WAIT_MAX_SECONDS=0 \
     CAFFEINATE_BIN="$TMP_DIR/bin/caffeinate-fake" \
     ENABLE_QUOTA_PREFLIGHT=0 \
     CLAUDE_BIN=/nonexistent CODEX_BIN=/nonexistent \
@@ -42,7 +43,7 @@ run_engine env "$ENGINE" --once --tool codex \
   || { echo "expected the stubbed re-exec to exit 0" >&2; exit 1; }
 [[ -f "$ARGV_FILE" ]] || { echo "expected caffeinate to be invoked" >&2; exit 1; }
 argv="$(cat "$ARGV_FILE")"
-[[ "$argv" == "-i -t 42 "*"/bin/activate-ai-window.sh --once --tool codex" ]] \
+[[ "$argv" == "-i -t 47 "*"/bin/activate-ai-window.sh --once --tool codex" ]] \
   || { echo "re-exec dropped or reordered args: $argv" >&2; exit 1; }
 
 # B) no args (the plist's bare --once is optional): must not trip `set -u` on an
@@ -60,12 +61,13 @@ run_engine env STOKER_CAFFEINATED=1 ACTIVATION_TOOL=codex "$ENGINE" --once --too
 [[ ! -e "$ARGV_FILE" ]] \
   || { echo "a caffeinated run must not re-exec again" >&2; exit 1; }
 
-# D) the keep-awake budget also covers the lock wait: -t = KEEP_AWAKE_SECONDS + LOCK_WAIT_SECONDS
+# D) the keep-awake budget also covers the lock wait and the Codex reset wait:
+#    -t = KEEP_AWAKE_SECONDS + LOCK_WAIT_SECONDS + CODEX_RESET_WAIT_MAX_SECONDS + 5
 rm -f "$ARGV_FILE"
-run_engine env LOCK_WAIT_SECONDS=100 "$ENGINE" --once --scheduled --tool codex \
+run_engine env LOCK_WAIT_SECONDS=100 CODEX_RESET_WAIT_MAX_SECONDS=20 "$ENGINE" --once --scheduled --tool codex \
   || { echo "expected the stubbed re-exec to exit 0" >&2; exit 1; }
 argv="$(cat "$ARGV_FILE")"
-[[ "$argv" == "-i -t 142 "*"/bin/activate-ai-window.sh --once --scheduled --tool codex" ]] \
-  || { echo "expected -t 142 and preserved --scheduled: $argv" >&2; exit 1; }
+[[ "$argv" == "-i -t 167 "*"/bin/activate-ai-window.sh --once --scheduled --tool codex" ]] \
+  || { echo "expected -t 167 (42+100+20+5) and preserved --scheduled: $argv" >&2; exit 1; }
 
 echo "caffeinate re-exec test passed"

@@ -56,6 +56,9 @@ public struct UsageRecord: Decodable, Identifiable, Sendable {
     /// A failed attempt the engine retried with a fallback model in the same run; the
     /// retry's own row carries the outcome, so this one isn't counted as an error.
     public let supersededByFallback: Bool?
+    /// `preflight.gate_window` of an idle-only skip ("five_hour" / "weekly"); nil from an older
+    /// engine, which only ever gated on the weekly window.
+    public let gateWindow: String?
 
     public var status: RunStatus {
         if skipped == true || supersededByFallback == true { return .skipped }
@@ -74,7 +77,11 @@ public struct UsageRecord: Decodable, Identifiable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case timestamp, runId, tool, exitCode, ok, result
         case sessionId, threadId, model, durationMs, totalCostUsd
-        case usage, rawLog, skipped, skipReason, eventCount, supersededByFallback
+        case usage, rawLog, skipped, skipReason, eventCount, supersededByFallback, preflight
+    }
+
+    private struct Preflight: Decodable {
+        let gateWindow: String?
     }
 
     public init(from decoder: Decoder) throws {
@@ -96,6 +103,8 @@ public struct UsageRecord: Decodable, Identifiable, Sendable {
         skipReason = try c.decodeIfPresent(String.self, forKey: .skipReason)
         eventCount = try c.decodeIfPresent(Int.self, forKey: .eventCount)
         supersededByFallback = try c.decodeIfPresent(Bool.self, forKey: .supersededByFallback)
+        // Informational only: a surprise shape must not fail the row.
+        gateWindow = ((try? c.decodeIfPresent(Preflight.self, forKey: .preflight)) ?? nil)?.gateWindow
         date = LogTimestamp.parse(timestamp)
     }
 }
@@ -191,11 +200,26 @@ public enum DateRangeFilter: String, CaseIterable, Sendable {
 }
 
 /// One quota line the Activity trend can show. Each series belongs to exactly one tool and
-/// window, so the trend never mixes Claude's 5h window with Codex's weekly one.
+/// window, so the trend never mixes a 5h window with a weekly one.
 public enum TrendSeries: String, CaseIterable, Sendable {
-    case claudeFiveHour, claudeWeekly, codexWeekly
+    case claudeFiveHour, claudeWeekly, codexFiveHour, codexWeekly
 
-    public var tool: String { self == .codexWeekly ? "codex" : "claude" }
+    public var tool: String {
+        switch self {
+        case .claudeFiveHour, .claudeWeekly: "claude"
+        case .codexFiveHour, .codexWeekly: "codex"
+        }
+    }
+
+    public var isSession: Bool { self == .claudeFiveHour || self == .codexFiveHour }
+
+    /// The series to offer: a 5h series only for a tool with a session window (pass true too
+    /// when the logs hold 5h history for it, so a lost window never hides past data).
+    public static func available(claudeHasSession: Bool, codexHasSession: Bool) -> [TrendSeries] {
+        allCases.filter { s in
+            !s.isSession || (s.tool == "codex" ? codexHasSession : claudeHasSession)
+        }
+    }
 }
 
 // MARK: - Chart Data
@@ -245,6 +269,9 @@ public final class LogStore: ObservableObject {
     }
 
     @Published public private(set) var filteredUsage: [UsageRecord] = []
+    /// Tools whose loaded status rows carry 5h data — their 5h trend stays offered even after
+    /// the account lost the window, so past history is never hidden.
+    @Published public private(set) var sessionHistoryTools: Set<String> = []
 
     private let root: URL
     /// Signatures of the files behind the current records; nil until the first load.
@@ -274,6 +301,7 @@ public final class LogStore: ObservableObject {
     public func apply(_ snapshot: LogSnapshot) {
         usageRecords = snapshot.usage
         statusRecords = snapshot.status
+        sessionHistoryTools = Set(snapshot.status.filter { $0.fiveHour?.remainingPercent != nil }.map(\.tool))
         signatures = snapshot.signatures
         recomputeFiltered()
     }
@@ -330,7 +358,7 @@ public final class LogStore: ObservableObject {
             .filter { row in cutoff.map { row.1 >= $0 } ?? true }
             .sorted { $0.1 < $1.1 }
         for (record, date) in rows {
-            let pct: Double? = series == .claudeFiveHour
+            let pct: Double? = series.isSession
                 ? record.fiveHour?.remainingPercent
                 : record.weekly?.remainingPercent
             guard let pct else { continue }
@@ -344,7 +372,7 @@ public final class LogStore: ObservableObject {
     public var totalRuns: Int { filteredUsage.count }
     public var successCount: Int { filteredUsage.filter { $0.status == .success }.count }
     public var errorCount: Int { filteredUsage.filter { $0.status == .error }.count }
-    /// Skips the engine made on purpose (Codex's weekly window is already anchored) — neutral.
+    /// Skips the engine made on purpose (Codex's gating window is already anchored) — neutral.
     public var plannedSkipCount: Int {
         filteredUsage.filter { $0.skipped == true && $0.skipReason == "window_already_active" }.count
     }

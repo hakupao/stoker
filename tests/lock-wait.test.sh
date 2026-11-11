@@ -112,7 +112,7 @@ run_once LOCK_WAIT_SECONDS=0 || true
 rm -f "$LOCK_DIR/pid"
 
 # No pid file: fresh → respected; older than the longest possible run
-# (TIMEOUT*(1+fallback tries)+update timeout = 660s by default) → reclaimed.
+# (TIMEOUT*(1+fallback tries)+update timeout+reset wait max+5 = 965s by default) → reclaimed.
 run_once LOCK_WAIT_SECONDS=0 || true
 [[ ! -e "$SENTINEL" ]] || { echo "E: a fresh pid-less lock must not be reclaimed" >&2; exit 1; }
 touch -t "$(date -v-8M '+%Y%m%d%H%M.%S')" "$LOCK_DIR"
@@ -150,7 +150,7 @@ if grep -q "waiting up to\|already active" "$LOG"; then
 fi
 [[ -d "$LOCK_DIR" ]] || { echo "G: dry-run removed another run's lock" >&2; exit 1; }
 
-# H) default = TIMEOUT*(1+fallback tries) + update timeout + 120: with a held
+# H) default = TIMEOUT*(1+fallback tries) + update timeout + reset wait max + 5 + 120: with a held
 #    live lock and caffeinate off, the wait log line shows the computed bound.
 echo "$$" >"$LOCK_DIR/pid"
 : >"$LOG"
@@ -158,10 +158,10 @@ echo "$$" >"$LOCK_DIR/pid"
 releaser=$!
 env -u LOCK_WAIT_SECONDS CLAUDE_BIN="$TMP_DIR/bin/claude-ok" ACTIVATION_TOOL=claude ENABLE_QUOTA_PREFLIGHT=0 \
   ENABLE_STATUS_SNAPSHOTS=0 KEEP_AWAKE_MODE=off \
-  TIMEOUT_SECONDS=10 CODEX_MODEL_FALLBACK_MAX_TRIES=2 CODEX_UPDATE_TIMEOUT_SECONDS=30 \
+  TIMEOUT_SECONDS=10 CODEX_MODEL_FALLBACK_MAX_TRIES=2 CODEX_UPDATE_TIMEOUT_SECONDS=30 CODEX_RESET_WAIT_MAX_SECONDS=20 \
   "$ENGINE" --once --tool claude >/dev/null 2>&1 || true
 wait "$releaser"
-grep -q "waiting up to 180s" "$LOG" || { echo "H: expected default wait 10*3+30+120=180: $(cat "$LOG")" >&2; exit 1; }
+grep -q "waiting up to 205s" "$LOG" || { echo "H: expected default wait 10*3+30+20+5+120=205: $(cat "$LOG")" >&2; exit 1; }
 if TIMEOUT_SECONDS=abc "$ENGINE" --dry-run >/dev/null 2>&1; then
   echo "H: expected TIMEOUT_SECONDS=abc to be rejected" >&2
   exit 1

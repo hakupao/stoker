@@ -56,9 +56,14 @@ ENABLE_STATUS_SNAPSHOTS="${ENABLE_STATUS_SNAPSHOTS:-1}"
 ENABLE_QUOTA_PREFLIGHT="${ENABLE_QUOTA_PREFLIGHT:-1}"
 QUOTA_PREFLIGHT_ON_UNKNOWN="${QUOTA_PREFLIGHT_ON_UNKNOWN:-allow}"
 QUOTA_EXHAUSTED_THRESHOLD_PERCENT="${QUOTA_EXHAUSTED_THRESHOLD_PERCENT:-0}"
-# Codex is weekly-only (7-day window): skip the prompt while that window is
-# already anchored/running — another prompt can't start a new one.
+# Codex windows depend on the plan (5-hour + weekly, or weekly only): skip the
+# prompt while the shortest window the snapshot reports is already anchored —
+# another prompt can't start a new one.
 CODEX_ACTIVATE_ONLY_WHEN_IDLE="${CODEX_ACTIVATE_ONLY_WHEN_IDLE:-1}"
+# When that window is anchored but resets within this many seconds (a check-in
+# scheduled right at the previous one's reset), wait for the reset and then send
+# instead of skipping. 0 = always skip an anchored window.
+CODEX_RESET_WAIT_MAX_SECONDS="${CODEX_RESET_WAIT_MAX_SECONDS:-300}"
 # Keep the Codex CLI current: right before a real Codex prompt, run `codex update`
 # at most once per interval (attempt stamp under run/). Never fails the run.
 CODEX_AUTO_UPDATE="${CODEX_AUTO_UPDATE:-1}"
@@ -131,14 +136,16 @@ Environment overrides:
   CODEX_WORK_DIR=/path/to/probe-dir
   CODEX_ACTIVATION_PROMPT='Read only ./probe.py...'
   TIMEOUT_SECONDS=120
-  LOCK_WAIT_SECONDS=780            # wait this long for a concurrent run's lock; 0 = skip at once. Default
-                                   # TIMEOUT_SECONDS*(1+CODEX_MODEL_FALLBACK_MAX_TRIES)+CODEX_UPDATE_TIMEOUT_SECONDS+120
+  LOCK_WAIT_SECONDS=1085           # wait this long for a concurrent run's lock; 0 = skip at once. Default
+                                   # TIMEOUT_SECONDS*(1+CODEX_MODEL_FALLBACK_MAX_TRIES)+CODEX_UPDATE_TIMEOUT_SECONDS
+                                   # +CODEX_RESET_WAIT_MAX_SECONDS+5+120
   ACTIVATION_TOOL=all
   ENABLE_STATUS_SNAPSHOTS=1
   ENABLE_QUOTA_PREFLIGHT=1
   QUOTA_PREFLIGHT_ON_UNKNOWN=allow
   QUOTA_EXHAUSTED_THRESHOLD_PERCENT=0
-  CODEX_ACTIVATE_ONLY_WHEN_IDLE=1  # weekly-only Codex: skip while the 7-day window is already running
+  CODEX_ACTIVATE_ONLY_WHEN_IDLE=1  # Codex: skip while its shortest reported window is already running
+  CODEX_RESET_WAIT_MAX_SECONDS=300 # ...unless it resets within this many seconds: wait, then send; 0 = skip
   CODEX_AUTO_UPDATE=1              # run `codex update` before a real Codex prompt (throttled)
   CODEX_AUTO_UPDATE_INTERVAL_HOURS=24
   CODEX_UPDATE_TIMEOUT_SECONDS=180
@@ -148,7 +155,7 @@ Environment overrides:
   CLAUDE_STATUS_SOURCE=cache       # cache (plugin cache) | native (read-only Keychain+API) | omc (legacy live query)
   CLAUDE_USAGE_CACHE_FILE=/path/to/.usage-cache-anthropic.json
   KEEP_AWAKE_MODE=off
-  KEEP_AWAKE_SECONDS=900
+  KEEP_AWAKE_SECONDS=900          # caffeinate -t adds LOCK_WAIT_SECONDS + CODEX_RESET_WAIT_MAX_SECONDS + 5
   JQ_BIN=/path/to/jq
   NODE_BIN=/path/to/node
   OMC_BIN=/path/to/omc
@@ -222,6 +229,11 @@ for _flag in CODEX_AUTO_UPDATE CODEX_MODEL_FALLBACK; do
       ;;
   esac
 done
+if ! [[ "$CODEX_RESET_WAIT_MAX_SECONDS" =~ ^[0-9]+$ ]]; then
+  echo "CODEX_RESET_WAIT_MAX_SECONDS must be a non-negative integer" >&2
+  exit 2
+fi
+CODEX_RESET_WAIT_MAX_SECONDS=$((10#$CODEX_RESET_WAIT_MAX_SECONDS))
 for _num in CODEX_AUTO_UPDATE_INTERVAL_HOURS CODEX_UPDATE_TIMEOUT_SECONDS CODEX_MODEL_FALLBACK_MAX_TRIES; do
   if ! [[ "${!_num}" =~ ^[0-9]+$ ]] || (( 10#${!_num} <= 0 )); then
     echo "${_num} must be a positive integer" >&2
@@ -236,8 +248,9 @@ if ! [[ "$TIMEOUT_SECONDS" =~ ^[0-9]+$ ]]; then
 fi
 if [[ -z "$LOCK_WAIT_SECONDS" ]]; then
   # Long enough for the other agent's worst-case run: a Codex update, the first
-  # attempt plus every model fallback, and slack for preflight/snapshots.
-  LOCK_WAIT_SECONDS=$(( 10#$TIMEOUT_SECONDS * (1 + 10#$CODEX_MODEL_FALLBACK_MAX_TRIES) + 10#$CODEX_UPDATE_TIMEOUT_SECONDS + 120 ))
+  # attempt plus every model fallback, a wait for an imminent window reset, and
+  # slack for preflight/snapshots.
+  LOCK_WAIT_SECONDS=$(( 10#$TIMEOUT_SECONDS * (1 + 10#$CODEX_MODEL_FALLBACK_MAX_TRIES) + 10#$CODEX_UPDATE_TIMEOUT_SECONDS + CODEX_RESET_WAIT_MAX_SECONDS + 5 + 120 ))
 fi
 if ! [[ "$LOCK_WAIT_SECONDS" =~ ^[0-9]+$ ]]; then
   echo "LOCK_WAIT_SECONDS must be a non-negative integer" >&2
@@ -327,10 +340,11 @@ maybe_reexec_with_caffeinate() {
     return 0
   fi
 
-  # The run may first wait up to LOCK_WAIT_SECONDS for the other agent's lock, so
-  # keep the Mac awake for that wait on top of the configured run budget.
-  local awake_seconds=$(( 10#$KEEP_AWAKE_SECONDS + LOCK_WAIT_SECONDS ))
-  log "Keep-awake enabled mode=${KEEP_AWAKE_MODE} seconds=${awake_seconds} (KEEP_AWAKE_SECONDS=${KEEP_AWAKE_SECONDS} + LOCK_WAIT_SECONDS=${LOCK_WAIT_SECONDS})"
+  # The run may first wait up to LOCK_WAIT_SECONDS for the other agent's lock and
+  # then for an imminent Codex window reset (CODEX_RESET_WAIT_MAX_SECONDS + 5), so
+  # keep the Mac awake for both waits on top of the configured run budget.
+  local awake_seconds=$(( 10#$KEEP_AWAKE_SECONDS + LOCK_WAIT_SECONDS + CODEX_RESET_WAIT_MAX_SECONDS + 5 ))
+  log "Keep-awake enabled mode=${KEEP_AWAKE_MODE} seconds=${awake_seconds} (KEEP_AWAKE_SECONDS=${KEEP_AWAKE_SECONDS} + LOCK_WAIT_SECONDS=${LOCK_WAIT_SECONDS} + CODEX_RESET_WAIT_MAX_SECONDS=${CODEX_RESET_WAIT_MAX_SECONDS} + 5)"
   # ${arr[@]+...} keeps an empty argv safe under `set -u` on macOS bash 3.2.
   STOKER_CAFFEINATED=1 exec "$caffeinate_bin" -i -t "$awake_seconds" "$BASH" "$0" ${ORIGINAL_ARGS[@]+"${ORIGINAL_ARGS[@]}"}
 }
@@ -1071,6 +1085,7 @@ quota_preflight_decision() {
     --arg run_id "$RUN_ID" \
     --arg on_unknown "$QUOTA_PREFLIGHT_ON_UNKNOWN" \
     --arg only_when_idle "$CODEX_ACTIVATE_ONLY_WHEN_IDLE" \
+    --argjson reset_wait_max "$CODEX_RESET_WAIT_MAX_SECONDS" \
     --argjson threshold "$QUOTA_EXHAUSTED_THRESHOLD_PERCENT" '
       def unknown($reason):
         {
@@ -1111,22 +1126,36 @@ quota_preflight_decision() {
               empty
             end
         end;
-      # Codex has only a 7-day window (since Sept 2026), so it is treated as
-      # weekly-only: the window is "anchored" once its reset is fixed in the future. An idle (not yet
-      # started) window reports resets_at_epoch == query time + window length,
-      # drifting with each query, so anything more than 15 minutes short of a
-      # full window means a run already started it and another prompt only
-      # spends quota without moving the reset. Measured from the snapshot
-      # capture time (not the decision time, which follows the Claude run) so a
-      # slow run or clock skew cannot make an idle window look anchored.
-      def window_already_active($s):
-        ($s.weekly // null) as $w
-        | if $w == null then false
+      # Codex windows depend on the plan (5-hour + weekly on some, weekly only
+      # on others), so the idle gate looks at the shortest window the snapshot
+      # reports: five_hour when present, else weekly. A window is "anchored" once
+      # its reset is fixed in the future. An idle (not yet started) window
+      # reports resets_at_epoch == query time + window length, drifting with
+      # each query, so anything more than 15 minutes short of a full window
+      # means a run already started it and another prompt only spends quota
+      # without moving the reset. Measured from the snapshot capture time (not
+      # the decision time, which follows the Claude run) so a slow run or clock
+      # skew cannot make an idle window look anchored.
+      # Keep this rule in sync with gate_state in bin/activation-state.sh. That
+      # copy adds one fallback this one does not need: when a row lacks
+      # captured_at_epoch it measures from the row timestamp (parsed with the
+      # current UTC offset, so up to 1 h off for a legacy row across a DST
+      # change). Here the row was just written by this run, so now is close.
+      def gate_window($s):
+        if ($s.five_hour | type) == "object" then "five_hour"
+        elif ($s.weekly | type) == "object" then "weekly"
+        else null end;
+      # Seconds until the gate window resets, when it is anchored; else null.
+      def anchored_reset_in($s):
+        gate_window($s) as $g
+        | if $g == null then null
           else
-            (n($w.resets_at_epoch // null)) as $e
-            | ((n($w.window_minutes // null)) // 10080) as $mins
+            $s[$g] as $w
+            | (n($w.resets_at_epoch // null)) as $e
+            | ((n($w.window_minutes // null)) // (if $g == "five_hour" then 300 else 10080 end)) as $mins
             | ((n($s.captured_at_epoch // null)) // now) as $captured
-            | ($e != null and $e > now and ($e - $captured) < ($mins * 60 - 900))
+            | if ($e != null and $e > now and ($e - $captured) < ($mins * 60 - 900))
+              then ($e - now) else null end
           end;
 
       (map(select(.tool == $tool and .run_id == $run_id)) | last // null) as $s
@@ -1160,20 +1189,26 @@ quota_preflight_decision() {
                 end
               )
             ] as $reasons
-          | (($reasons | length) == 0
-              and $tool == "codex"
-              and $only_when_idle == "1"
-              and window_already_active($s)) as $active
+          | (if ($reasons | length) == 0 and $tool == "codex" and $only_when_idle == "1"
+             then anchored_reset_in($s) else null end) as $reset_in
+          | ($reset_in != null) as $active
+          # Anchored but about to reset (a check-in scheduled right at the
+          # previous reset): sending now would land in the old window, so the
+          # runner waits for the reset and then sends.
+          | ($active and $reset_wait_max > 0 and $reset_in <= $reset_wait_max) as $soon
           | {
               tool: $tool,
-              action: (if ($reasons | length) > 0 or $active then "skip" else "allow" end),
+              action: (if ($reasons | length) > 0 or ($active and ($soon | not)) then "skip" else "allow" end),
               reason: (
                 if ($reasons | length) > 0 then "quota_exhausted"
+                elif $soon then "window_resets_soon"
                 elif $active then "window_already_active"
                 else "quota_available" end
               ),
+              wait_seconds: (if $soon then (($reset_in | ceil) + 5) else null end),
               status_ok: true,
               exhausted: $reasons,
+              gate_window: (if $tool == "codex" then gate_window($s) else null end),
               status_timestamp: ($s.timestamp // null),
               rate_limit_reached_type: ($s.rate_limit_reached_type // null),
               five_hour_remaining_percent: ($five.remaining_percent // null),
@@ -1246,7 +1281,13 @@ maybe_skip_for_quota() {
     return 0
   fi
 
-  if [[ "$reason" != "quota_available" && "$reason" != "preflight_disabled" ]]; then
+  if [[ "$reason" == "window_resets_soon" ]]; then
+    local wait_seconds
+    wait_seconds="$(printf '%s' "$decision_json" | "$JQ_BIN" -r '.wait_seconds // 0' 2>/dev/null || printf '0')"
+    [[ "$wait_seconds" =~ ^[0-9]+$ ]] || wait_seconds=0
+    log "${tool} quota preflight: anchored window resets soon; waiting ${wait_seconds}s for the reset before sending"
+    sleep "$wait_seconds"
+  elif [[ "$reason" != "quota_available" && "$reason" != "preflight_disabled" ]]; then
     log "WARNING: ${tool} quota preflight was inconclusive reason=${reason}; proceeding because QUOTA_PREFLIGHT_ON_UNKNOWN=${QUOTA_PREFLIGHT_ON_UNKNOWN}"
   else
     log "${tool} quota preflight passed"
@@ -1581,7 +1622,7 @@ lock_is_stale() {
   fi
   mtime="$(stat -f %m "$LOCK_DIR" 2>/dev/null)" || return 1
   age=$(( $(date +%s) - mtime ))
-  threshold=$(( 10#$TIMEOUT_SECONDS * (1 + 10#$CODEX_MODEL_FALLBACK_MAX_TRIES) + 10#$CODEX_UPDATE_TIMEOUT_SECONDS ))
+  threshold=$(( 10#$TIMEOUT_SECONDS * (1 + 10#$CODEX_MODEL_FALLBACK_MAX_TRIES) + 10#$CODEX_UPDATE_TIMEOUT_SECONDS + CODEX_RESET_WAIT_MAX_SECONDS + 5 ))
   (( threshold < 60 )) && threshold=60
   if (( age > threshold )); then
     STALE_REASON="no owner pid and lock is ${age}s old"

@@ -340,19 +340,26 @@ precondition(decodeQuota(#"{"ok":true,"plan_type":"self_serve_business_prolite"}
 precondition(decodeQuota(#"{"ok":true,"plan_type":"unknown"}"#).displayPlanLabel == nil)
 precondition(claudeQ.displayPlanLabel == "Max")
 
-// Window selection: Codex is weekly-only by design (always its 7-day window);
-// Claude honours the 5h/weekly picker.
+// Window presence follows the snapshot, not the tool (plans differ). Fixtures are the four real
+// row shapes: Claude idle 5h (0/null), Claude without 5h (null/null), Codex 5h + weekly, Codex
+// weekly-only (five_hour: null).
+let claudeIdle5h = decodeQuota(#"{"ok":true,"five_hour":{"used_percent":0,"remaining_percent":100,"resets_at":null},"weekly":{"used_percent":14,"remaining_percent":86,"resets_at":"2026-11-16T07:59:59.776Z"}}"#)
+let claudeNo5h = decodeQuota(#"{"ok":true,"five_hour":{"used_percent":null,"remaining_percent":null,"resets_at":null},"weekly":{"used_percent":14,"remaining_percent":86,"resets_at":"2026-11-16T07:59:59.776Z"}}"#)
+let codexPlus = decodeQuota(#"{"ok":true,"plan_type":"plus","five_hour":{"used_percent":0,"remaining_percent":100,"window_minutes":300,"resets_at":"2026-11-11T05:00:00Z"},"weekly":{"used_percent":8,"remaining_percent":92,"window_minutes":10080,"resets_at":"2026-11-17T00:00:00Z"}}"#)
 let codexWeeklyQ = decodeQuota(#"{"ok":true,"five_hour":null,"weekly":{"used_percent":8,"remaining_percent":92}}"#)
-precondition(ActivationState.ToolQuota.isWeeklyOnly(tool: "codex"))
-precondition(!ActivationState.ToolQuota.isWeeklyOnly(tool: "claude"))
-precondition(codexWeeklyQ.window(tool: "codex", preferFiveHour: true)?.remainingPercent == 92)
-precondition(codexWeeklyQ.window(tool: "codex", preferFiveHour: false)?.remainingPercent == 92)
-let bothQ = decodeQuota(#"{"ok":true,"five_hour":{"remaining_percent":40},"weekly":{"remaining_percent":70}}"#)
-// Even a legacy Codex row that still carries a 5h window shows weekly.
-precondition(bothQ.window(tool: "codex", preferFiveHour: true)?.remainingPercent == 70)
-precondition(bothQ.window(tool: "claude", preferFiveHour: true)?.remainingPercent == 40)
-precondition(bothQ.window(tool: "claude", preferFiveHour: false)?.remainingPercent == 70)
-precondition(decodeQuota(#"{"ok":true}"#).window(tool: "codex", preferFiveHour: true) == nil)
+precondition(claudeIdle5h.windowProfile(tool: "claude") == .sessionWeekly)
+precondition(claudeNo5h.windowProfile(tool: "claude") == .weeklyOnly, "an all-null Claude five_hour object is no window")
+precondition(codexPlus.windowProfile(tool: "codex") == .sessionWeekly)
+precondition(codexWeeklyQ.windowProfile(tool: "codex") == .weeklyOnly)
+// A Claude window that only rolled over still counts as present.
+precondition(decodeQuota(#"{"ok":true,"five_hour":{"used_percent":null,"resets_at":null,"reset_passed":true},"weekly":{"used_percent":1}}"#)
+    .windowProfile(tool: "claude") == .sessionWeekly)
+precondition(decodeQuota(#"{"ok":false,"five_hour":{"used_percent":3}}"#).windowProfile(tool: "claude") == .unknown)
+precondition(decodeQuota(#"{"ok":true}"#).windowProfile(tool: "codex") == .none)
+// Not detected yet keeps the display defaults (Claude 5h, Codex weekly).
+precondition(WindowProfile.unknown.hasSession(tool: "claude") && !WindowProfile.unknown.hasSession(tool: "codex"))
+precondition(WindowProfile.sessionWeekly.hasSession(tool: "codex") && WindowProfile.sessionOnly.hasSession(tool: "codex"))
+precondition(!WindowProfile.weeklyOnly.hasSession(tool: "claude") && !WindowProfile.none.hasSession(tool: "claude"))
 
 // Claude per-scope weekly buckets: decoded with ids/labels/percent/active flag; a
 // reset-passed bucket keeps its blanked percentages; inactive stays distinguishable
@@ -586,8 +593,54 @@ MainActor.assumeIsolated {
     // The run-list tool filter must not empty the trend (the trend picks its own tool).
     store.toolFilter = .claude
     precondition(store.chartPoints(series: .codexWeekly).count == 2)
-    precondition(TrendSeries.allCases == [.claudeFiveHour, .claudeWeekly, .codexWeekly])
+    precondition(TrendSeries.allCases == [.claudeFiveHour, .claudeWeekly, .codexFiveHour, .codexWeekly])
     precondition(TrendSeries.codexWeekly.tool == "codex" && TrendSeries.claudeWeekly.tool == "claude")
+    precondition(TrendSeries.codexFiveHour.tool == "codex" && TrendSeries.codexFiveHour.isSession)
+    precondition(!TrendSeries.codexWeekly.isSession && TrendSeries.claudeFiveHour.isSession)
+    // Codex 5h series reads the Codex rows' five_hour (none in these weekly-only rows).
+    precondition(store.chartPoints(series: .codexFiveHour).isEmpty)
+    // Only the windows the accounts have are offered.
+    precondition(TrendSeries.available(claudeHasSession: true, codexHasSession: false)
+        == [.claudeFiveHour, .claudeWeekly, .codexWeekly])
+    precondition(TrendSeries.available(claudeHasSession: false, codexHasSession: true)
+        == [.claudeWeekly, .codexFiveHour, .codexWeekly])
+    precondition(TrendSeries.available(claudeHasSession: false, codexHasSession: false) == [.claudeWeekly, .codexWeekly])
+    // 5h history in the loaded rows keeps that series on offer even without a session window.
+    precondition(store.sessionHistoryTools == ["claude"], "Claude rows carry 5h data, Codex rows don't")
+}
+
+// A 5h-gated Codex row: the planned-skip label follows preflight.gate_window (via LogStore's decoder).
+MainActor.assumeIsolated {
+    let gateRoot = FileManager.default.temporaryDirectory.appendingPathComponent("stoker-gate-\(UUID().uuidString)")
+    try! FileManager.default.createDirectory(at: gateRoot.appendingPathComponent("logs"), withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: gateRoot) }
+    let lines = [
+        #"{"timestamp":"2026-11-11 07:00:06 UTC","run_id":"a","tool":"codex","skipped":true,"skip_reason":"window_already_active","preflight":{"action":"skip","gate_window":"five_hour"}}"#,
+        #"{"timestamp":"2026-11-11 12:00:06 UTC","run_id":"b","tool":"codex","skipped":true,"skip_reason":"window_already_active","preflight":{"action":"skip"}}"#,
+        #"{"timestamp":"2026-11-11 17:00:06 UTC","run_id":"c","tool":"codex","skipped":true,"skip_reason":"window_already_active","preflight":"bad"}"#,
+        #"{"timestamp":"2026-11-11 17:30:00 UTC","tool":"codex","ok":true,"five_hour":{"remaining_percent":80},"weekly":{"remaining_percent":90}}"#,
+    ]
+    try! lines.joined(separator: "\n").write(to: gateRoot.appendingPathComponent("logs/usage.jsonl"), atomically: true, encoding: .utf8)
+    try! lines[3].write(to: gateRoot.appendingPathComponent("logs/status.jsonl"), atomically: true, encoding: .utf8)
+    let gateStore = LogStore(root: gateRoot)
+    gateStore.dateRange = .all
+    gateStore.load()
+    let byRun = Dictionary(gateStore.usageRecords.compactMap { r in r.runId.map { ($0, r) } }, uniquingKeysWith: { a, _ in a })
+    precondition(byRun["a"]?.gateWindow == "five_hour")
+    precondition(byRun["b"]?.gateWindow == nil && byRun["c"]?.gateWindow == nil, "absent/malformed → weekly (nil)")
+    precondition(gateStore.chartPoints(series: .codexFiveHour).map(\.remainingPercent) == [80])
+    precondition(gateStore.sessionHistoryTools == ["codex"])
+}
+// No 5h data loaded → nothing kept on offer beyond what the accounts have.
+MainActor.assumeIsolated {
+    let emptyRoot = FileManager.default.temporaryDirectory.appendingPathComponent("stoker-nohist-\(UUID().uuidString)")
+    try! FileManager.default.createDirectory(at: emptyRoot.appendingPathComponent("logs"), withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: emptyRoot) }
+    try! #"{"timestamp":"2026-11-11 07:00:10 UTC","tool":"claude","ok":true,"five_hour":{"used_percent":null,"remaining_percent":null},"weekly":{"remaining_percent":86}}"#
+        .write(to: emptyRoot.appendingPathComponent("logs/status.jsonl"), atomically: true, encoding: .utf8)
+    let noHist = LogStore(root: emptyRoot)
+    noHist.load()
+    precondition(noHist.sessionHistoryTools.isEmpty, "an all-null 5h object is no history")
 }
 
 // ---- Task 4: shared health snapshot (one evaluation for Activity tab + header/menu) ----
@@ -758,7 +811,7 @@ precondition(zip(enStrings6, zhStrings6).allSatisfy { $0 != $1 }, "every new set
 precondition(L10n.codexModelHelp == "默认 \(AppSettings.defaultCodexModel)；设为 default 交给 Codex CLI")
 precondition(L10n.codexAutoUpdateHelp == "在真正运行 Codex 前自动 codex update，每 24 小时最多一次")
 precondition(L10n.codexFallbackHelp == "模型被下架时自动换可用模型重试")
-precondition(L10n.codexIdleOnlyHelp == "周窗口已在计时时跳过，约每周只激活一次")
+precondition(L10n.codexIdleOnlyHelp == "窗口已在计时时跳过（有 5 小时窗口时看 5 小时，否则看周窗口），每个窗口只激活一次")
 if let savedLanguage6 {
     UserDefaults.standard.set(savedLanguage6, forKey: "appLanguage")
 } else {
@@ -931,6 +984,207 @@ MainActor.assumeIsolated {
     precondition(rollStore.totalRuns == 1)
     rollStore.load(now: rollNow.addingTimeInterval(2 * 86400))   // files unchanged, two days later
     precondition(rollStore.totalRuns == 0, "the today cutoff must roll over without a file change")
+}
+
+// ---- Plan-aware windows: `limits` decoding + Codex health on a 5h-gated plan ----
+func decodeState(_ extra: String, quota: String = "{}") -> ActivationState {
+    let json = """
+    {"root":"/r","label":"l","installed":true,"running":false,"schedule":{"times":["07:00"]},
+     "config":{"activation_tool":"all","codex_model":"m","enable_status_snapshots":true,
+       "enable_quota_preflight":true,"quota_preflight_on_unknown":"allow"},
+     "keep_awake":{"mode":"off","seconds":0},"quota":\(quota)\(extra)}
+    """
+    return try! JSONDecoder().decode(ActivationState.self, from: Data(json.utf8))
+}
+let limitsState = decodeState(#","limits":{"claude":{"profile":"weekly_only","session_minutes":null,"weekly_reset":"fixed","plan":"max","recommended":{"times":[],"days":[],"reason":"not_needed"}},"codex":{"profile":"session_weekly","session_minutes":300,"weekly_reset":"on_first_use","plan":"plus","recommended":{"times":["07:00","12:00","17:00","22:00"],"days":[],"reason":"session_window"}}}"#)
+precondition(limitsState.limits?.claude?.profile == .weeklyOnly && limitsState.limits?.claude?.plan == "max")
+precondition(limitsState.limits?.claude?.sessionMinutes == nil && limitsState.limits?.claude?.weeklyReset == "fixed")
+precondition(limitsState.limits?.claude?.recommended == .init(times: [], days: [], reason: "not_needed"))
+precondition(limitsState.limits?.codex?.sessionMinutes == 300 && limitsState.limits?.codex?.recommended?.times.count == 4)
+precondition(limitsState.windowProfile("claude") == .weeklyOnly && limitsState.windowProfile("codex") == .sessionWeekly)
+precondition(!ActivationState.hasSessionWindow("claude", in: limitsState))
+precondition(ActivationState.hasSessionWindow("codex", in: limitsState))
+// Older engine: no `limits` (or null) → decoded, profile derived from the quota snapshot.
+let noLimits = decodeState("", quota: #"{"claude":{"ok":true,"five_hour":{"used_percent":null,"remaining_percent":null,"resets_at":null},"weekly":{"used_percent":14,"remaining_percent":86}},"codex":{"ok":true,"five_hour":{"used_percent":3,"remaining_percent":97,"resets_at":"2026-11-11T05:00:00Z"},"weekly":{"used_percent":8,"remaining_percent":92}}}"#)
+precondition(noLimits.limits == nil)
+precondition(noLimits.windowProfile("claude") == .weeklyOnly && noLimits.windowProfile("codex") == .sessionWeekly)
+precondition(ActivationState.headlineWindow("claude", in: noLimits)?.remainingPercent == 86, "no 5h → weekly headline")
+precondition(ActivationState.headlineWindow("codex", in: noLimits)?.remainingPercent == 97, "5h present → 5h headline")
+precondition(decodeState(#","limits":null"#).limits == nil)
+// Malformed shapes never fail the decode; an "unknown"/unrecognized profile falls back to the quota.
+precondition(decodeState(#","limits":"bad""#).limits == nil)
+let oddLimits = decodeState(#","limits":{"claude":{"profile":"mystery","recommended":{"times":"x"}},"codex":7}"#,
+                            quota: #"{"claude":{"ok":true,"five_hour":{"used_percent":0},"weekly":{"used_percent":1}}}"#)
+precondition(oddLimits.limits?.claude?.profile == nil && oddLimits.limits?.codex == nil)
+precondition(oddLimits.limits?.claude?.recommended?.times == [])
+precondition(oddLimits.windowProfile("claude") == .sessionWeekly && oddLimits.windowProfile("codex") == .unknown)
+precondition(decodeState(#","limits":{"codex":{"profile":"unknown"}}"#, quota: #"{"codex":{"ok":true,"five_hour":null,"weekly":{"used_percent":1}}}"#)
+    .windowProfile("codex") == .weeklyOnly)
+// No state at all: display defaults.
+precondition(ActivationState.hasSessionWindow("claude", in: nil) && !ActivationState.hasSessionWindow("codex", in: nil))
+
+// Recommendation → form: matches compares normalized; apply fills times + days, never an empty list.
+var recSettings = AppSettings(values: ["CODEX_SCHEDULE_TIMES": "12:00,7:00", "CODEX_SCHEDULE_DAYS": "mon"])
+let sessionRec = ActivationState.Recommendation(times: ["07:00", "12:00", "17:00", "22:00"], days: [], reason: "session_window")
+precondition(!recSettings.matches(sessionRec, tool: "codex"))
+recSettings.apply(sessionRec, tool: "codex")
+precondition(recSettings.codexScheduleTimes == ["07:00", "12:00", "17:00", "22:00"] && recSettings.codexScheduleDays == [])
+precondition(recSettings.matches(sessionRec, tool: "codex"))
+precondition(recSettings.matches(.init(times: ["22:00", "7:00", "12:00", "17:00"],
+                                       days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], reason: nil), tool: "codex"))
+let claudeBefore = recSettings.claudeScheduleTimes
+recSettings.apply(.init(times: [], days: [], reason: "not_needed"), tool: "claude")
+precondition(recSettings.claudeScheduleTimes == claudeBefore, "an empty recommendation never clears the schedule")
+
+// Codex health on a plan with a 5h window gates on the 5h window (engine: shortest window).
+// now = 00:00 UTC; slots 07/12/17/22.
+let five = { (used: Double, reset: String) in win(used, reset) }
+// Idle 5h (used 0, no run this 5h cycle) while the weekly is anchored → pending, next = next slot.
+let x5Idle = ToolHealthEvaluator.codex(records: [rec("2026-09-26 18:00:00 UTC", "codex", ok: true)],
+    weekly: win(8, "2026-10-03T22:49:45Z"), fiveHour: five(0, "2026-09-27T05:00:00Z"), hasSession: true,
+    scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc)
+precondition(x5Idle.state == .pending, "a run 6h ago doesn't anchor a 5h window")
+precondition(x5Idle.nextActivation == iso("2026-09-27T07:00:00Z") && x5Idle.stateWindowIsSession)
+// The same rows evaluated weekly-only stay anchored → unchanged weekly behaviour.
+let x5AsWeekly = ToolHealthEvaluator.codex(records: [rec("2026-09-26 18:00:00 UTC", "codex", ok: true)],
+    weekly: win(8, "2026-10-03T22:49:45Z"), fiveHour: five(0, "2026-09-27T05:00:00Z"), hasSession: false,
+    scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc)
+precondition(x5AsWeekly.state == .anchored && x5AsWeekly.nextActivation == iso("2026-10-04T07:00:00Z"))
+precondition(!x5AsWeekly.stateWindowIsSession)
+// Anchored 5h (used > 0, reset ahead) → anchored; idle-only → next slot after the 5h reset.
+let x5Anch = ToolHealthEvaluator.codex(records: [],
+    weekly: win(8, "2026-10-03T22:49:45Z"), fiveHour: five(12, "2026-09-27T09:30:00Z"), hasSession: true,
+    scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc)
+precondition(x5Anch.state == .anchored && x5Anch.stateWindowIsSession)
+precondition(x5Anch.nextActivation == iso("2026-09-27T12:00:00Z"))
+// Anchored by a run inside this 5h cycle even at used 0.
+precondition(ToolHealthEvaluator.codex(records: [rec("2026-09-26 23:00:00 UTC", "codex", ok: true)],
+    weekly: win(8, "2026-10-03T22:49:45Z"), fiveHour: five(0, "2026-09-27T04:00:00Z"), hasSession: true,
+    scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc).state == .anchored)
+// Idle-only off → anchored but runs at the next slot.
+precondition(ToolHealthEvaluator.codex(records: [],
+    weekly: win(8, "2026-10-03T22:49:45Z"), fiveHour: five(12, "2026-09-27T09:30:00Z"), hasSession: true,
+    scheduleOn: true, times: slots, idleOnly: false, now: toolHealthNow, calendar: utc).nextActivation == iso("2026-09-27T07:00:00Z"))
+// 5h exhausted → exhausted (session copy), postponed past the 5h reset.
+let x5Exh = ToolHealthEvaluator.codex(records: [],
+    weekly: win(8, "2026-10-03T22:49:45Z"), fiveHour: five(100, "2026-09-27T09:30:00Z"), hasSession: true,
+    scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc)
+precondition(x5Exh.state == .exhausted && x5Exh.stateWindowIsSession && x5Exh.nextActivation == iso("2026-09-27T12:00:00Z"))
+// Weekly exhausted while the 5h is idle → exhausted (weekly copy), postponed past the weekly reset.
+let x5WkExh = ToolHealthEvaluator.codex(records: [],
+    weekly: win(100, "2026-10-03T22:49:45Z"), fiveHour: five(0, "2026-09-27T05:00:00Z"), hasSession: true,
+    scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc)
+precondition(x5WkExh.state == .exhausted && !x5WkExh.stateWindowIsSession)
+precondition(x5WkExh.nextActivation == iso("2026-10-04T07:00:00Z"))
+// 5h reset passed → pending.
+precondition(ToolHealthEvaluator.codex(records: [],
+    weekly: win(8, "2026-10-03T22:49:45Z"), fiveHour: five(40, "2026-09-26T23:00:00Z"), hasSession: true,
+    scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc).state == .pending)
+// The engine's gate verdict overrides the used/ran heuristic: idle 5h windows often report used ≥ 1.
+let x5UsedIdle = ToolHealthEvaluator.codex(records: [],
+    weekly: win(8, "2026-10-03T22:49:45Z"), fiveHour: five(1, "2026-09-27T05:00:00Z"), hasSession: true,
+    engineGateActive: false, scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc)
+precondition(x5UsedIdle.state == .pending && x5UsedIdle.nextActivation == iso("2026-09-27T07:00:00Z"))
+// Without the verdict (older engine) the same row falls back to the heuristic → anchored.
+precondition(ToolHealthEvaluator.codex(records: [],
+    weekly: win(8, "2026-10-03T22:49:45Z"), fiveHour: five(1, "2026-09-27T05:00:00Z"), hasSession: true,
+    scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc).state == .anchored)
+// gate.active with used 0 and no run → anchored, postponed past the 5h reset.
+let x5GateOn = ToolHealthEvaluator.codex(records: [],
+    weekly: win(8, "2026-10-03T22:49:45Z"), fiveHour: five(0, "2026-09-27T09:30:00Z"), hasSession: true,
+    engineGateActive: true, scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc)
+precondition(x5GateOn.state == .anchored && x5GateOn.nextActivation == iso("2026-09-27T12:00:00Z"))
+// Weekly-only with gate.active=false and used 8 → pending (engine verdict), exhaustion still wins.
+precondition(ToolHealthEvaluator.codex(records: [], weekly: win(8, "2026-10-03T22:49:45Z"),
+    engineGateActive: false, scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc).state == .pending)
+precondition(ToolHealthEvaluator.codex(records: [], weekly: win(100, "2026-10-03T22:49:45Z"),
+    engineGateActive: false, scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc).state == .exhausted)
+// Decoding: gate present (codex), null (claude), malformed → nil; and the state snapshot uses it.
+let gateState = decodeState(#","limits":{"claude":{"profile":"weekly_only","gate":null},"codex":{"profile":"session_weekly","session_minutes":300,"gate":{"window":"five_hour","active":false}}}"#,
+    quota: #"{"codex":{"ok":true,"five_hour":{"used_percent":1,"remaining_percent":99,"resets_at":"2099-01-01T05:00:00Z"},"weekly":{"used_percent":8,"remaining_percent":92,"resets_at":"2099-10-03T22:49:45Z"}}}"#)
+precondition(gateState.limits?.codex?.gate == .init(window: "five_hour", active: false) && gateState.limits?.claude?.gate == nil)
+precondition(decodeState(#","limits":{"codex":{"gate":{"window":1}}}"#).limits?.codex?.gate == nil)
+let gateSnap = ToolHealthEvaluator.snapshot(records: [], state: gateState, now: toolHealthNow).codex
+precondition(gateSnap.state == .pending && gateSnap.nextActivation! < iso("2026-09-29T00:00:00Z"),
+             "engine says idle → next slot, not after the 5h reset")
+
+// Resets-soon wait: a slot within CODEX_RESET_WAIT_MAX_SECONDS before the anchored gate's reset
+// still sends (the engine waits it out). Slots 07/12/17/22 UTC, now 00:00.
+func x5Reset(_ reset: String, used: Double = 12, wait: TimeInterval = 300) -> ToolHealth {
+    ToolHealthEvaluator.codex(records: [], weekly: win(8, "2026-10-03T22:49:45Z"),
+        fiveHour: five(used, reset), hasSession: true, engineGateActive: used < 100 ? true : nil,
+        resetWaitMax: wait, scheduleOn: true, times: slots, now: toolHealthNow, calendar: utc)
+}
+let rSoon = x5Reset("2026-09-27T12:00:10Z")
+precondition(rSoon.state == .anchored && rSoon.nextActivation == iso("2026-09-27T12:00:00Z"), "reset 10s after the slot → that slot sends")
+precondition(x5Reset("2026-09-27T12:06:40Z").nextActivation == iso("2026-09-27T17:00:00Z"), "400s > wait → following slot")
+precondition(x5Reset("2026-09-27T12:00:10Z", wait: 0).nextActivation == iso("2026-09-27T17:00:00Z"), "wait 0 → skip as before")
+let rExh = x5Reset("2026-09-27T12:00:10Z", used: 100)
+precondition(rExh.state == .exhausted && rExh.nextActivation == iso("2026-09-27T17:00:00Z"), "exhaustion never waits")
+// Weekly-only, reset far away: unchanged.
+precondition(ToolHealthEvaluator.codex(records: [rec("2026-09-26 22:56:00 UTC", "codex", ok: true)],
+    weekly: win(8, "2026-10-03T22:49:45Z"), resetWaitMax: 300, scheduleOn: true, times: slots,
+    now: toolHealthNow, calendar: utc).nextActivation == iso("2026-10-04T07:00:00Z"))
+// Config: missing → 300, explicit 0 kept; the state snapshot passes it through.
+precondition(decodeConfig("{\(cfgBase)}").codexResetWaitMaxSeconds == 300)
+precondition(decodeConfig("{\(cfgBase),\"codex_reset_wait_max_seconds\":0}").codexResetWaitMaxSeconds == 0)
+// The state path runs on Calendar.current, so the reset sits 10 s after the next local 12:00 slot.
+let waitNow = iso("2099-01-01T00:00:00Z")
+let localSlot = ScheduleFormatter.nextFire(times: ["12:00"], now: waitNow)!
+let waitReset = ISO8601DateFormatter().string(from: localSlot.addingTimeInterval(10))
+func waitState(_ wait: String) -> ActivationState {
+    let json = """
+    {"root":"/r","label":"l","installed":true,"running":false,"schedule":{"times":["12:00"]},
+     "config":{"activation_tool":"codex","codex_model":"m","enable_status_snapshots":true,
+       "enable_quota_preflight":true,"quota_preflight_on_unknown":"allow"\(wait)},
+     "keep_awake":{"mode":"off","seconds":0},
+     "limits":{"codex":{"profile":"session_weekly","session_minutes":300,"gate":{"window":"five_hour","active":true}}},
+     "quota":{"codex":{"ok":true,"five_hour":{"used_percent":12,"remaining_percent":88,"resets_at":"\(waitReset)"},"weekly":{"used_percent":8,"remaining_percent":92,"resets_at":"2099-01-09T00:00:00Z"}}}}
+    """
+    return try! JSONDecoder().decode(ActivationState.self, from: Data(json.utf8))
+}
+precondition(ToolHealthEvaluator.snapshot(records: [], state: waitState(""), now: waitNow).codex.nextActivation == localSlot,
+             "default 300 s wait → the slot right before the reset sends")
+precondition(ToolHealthEvaluator.snapshot(records: [], state: waitState(#","codex_reset_wait_max_seconds":0"#), now: waitNow)
+    .codex.nextActivation == localSlot.addingTimeInterval(86400), "wait 0 → the following day's slot")
+
+// The snapshot wires the profile from quota (no limits) and from `limits`.
+let plusQuota: [String: ActivationState.ToolQuota] = ["codex": decodeQuota(#"{"ok":true,"five_hour":{"used_percent":12,"remaining_percent":88,"resets_at":"2026-09-27T09:30:00Z"},"weekly":{"used_percent":8,"remaining_percent":92,"resets_at":"2026-10-03T22:49:45Z"}}"#)]
+let plusSnap = ToolHealthEvaluator.snapshot(records: [], quota: plusQuota, installed: true,
+    claudeSchedule: ToolSchedule(times: slots, days: []), codexSchedule: ToolSchedule(times: slots, days: []),
+    activationTool: "all", now: toolHealthNow, calendar: utc)
+precondition(plusSnap.codex.state == .anchored && plusSnap.codex.nextActivation == iso("2026-09-27T12:00:00Z"))
+let plusAsWeekly = ToolHealthEvaluator.snapshot(records: [], quota: plusQuota, installed: true,
+    claudeSchedule: ToolSchedule(times: slots, days: []), codexSchedule: ToolSchedule(times: slots, days: []),
+    activationTool: "all", codexProfile: .weeklyOnly, now: toolHealthNow, calendar: utc)
+precondition(plusAsWeekly.codex.nextActivation == iso("2026-10-04T07:00:00Z"), "limits profile wins over the quota")
+// The app's state-driven snapshot passes the `limits` profile through: weekly_only limits on a
+// row that still carries a 5h window gates on weekly (reset 2099 → next fire after it).
+let limitsGated = decodeState(#","limits":{"codex":{"profile":"weekly_only"}}"#,
+    quota: #"{"codex":{"ok":true,"five_hour":{"used_percent":12,"remaining_percent":88,"resets_at":"2099-01-01T05:00:00Z"},"weekly":{"used_percent":8,"remaining_percent":92,"resets_at":"2099-10-03T22:49:45Z"}}}"#)
+precondition(ToolHealthEvaluator.snapshot(records: [], state: limitsGated).codex.nextActivation! > iso("2099-10-03T22:49:45Z"))
+let sessionGated = decodeState(#","limits":{"codex":{"profile":"session_weekly","session_minutes":300}}"#,
+    quota: #"{"codex":{"ok":true,"five_hour":{"used_percent":12,"remaining_percent":88,"resets_at":"2099-01-01T05:00:00Z"},"weekly":{"used_percent":8,"remaining_percent":92,"resets_at":"2099-10-03T22:49:45Z"}}}"#)
+let sessionNext = ToolHealthEvaluator.snapshot(records: [], state: sessionGated).codex.nextActivation!
+precondition(sessionNext > iso("2099-01-01T05:00:00Z") && sessionNext < iso("2099-01-03T00:00:00Z"))
+
+// L10n: new copy exists in both languages.
+let savedLanguagePlan = UserDefaults.standard.string(forKey: "appLanguage")
+AppLanguage.current = .en
+precondition(L10n.detectedWindows(.sessionWeekly, plan: "Plus") == "Detected: 5-hour + weekly · Plus")
+precondition(L10n.detectedWindows(.weeklyOnly, plan: nil) == "Detected: weekly only")
+precondition(L10n.detectedWindows(.unknown, plan: nil) == "Windows not detected yet")
+precondition(L10n.recommendation(times: ["07:00"], days: [], reason: "weekly_anchor").hasPrefix("Recommended: 07:00 — "))
+precondition(L10n.healthAnchoredSession != L10n.healthAnchored && L10n.trendCodex5h == "Codex 5h")
+AppLanguage.current = .zh
+precondition(L10n.detectedWindows(.sessionWeekly, plan: "Max") == "检测到：5 小时 + 周 · Max")
+precondition(L10n.detectedWindows(.sessionOnly, plan: nil) == "检测到：仅 5 小时窗口")
+precondition(L10n.recommendation(times: ["07:00", "12:00"], days: ["mon"], reason: nil) == "推荐：07:00、12:00（周一）")
+precondition(L10n.useRecommended == "套用推荐" && L10n.windowRunningSession.hasPrefix("5 小时"))
+if let savedLanguagePlan {
+    UserDefaults.standard.set(savedLanguagePlan, forKey: "appLanguage")
+} else {
+    UserDefaults.standard.removeObject(forKey: "appLanguage")
 }
 
 SWIFT

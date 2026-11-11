@@ -136,6 +136,51 @@ public enum L10n {
         }
     }
 
+    // MARK: - Detected windows & recommendation (Settings → Schedule)
+    /// "Detected: 5-hour + weekly · Max" — the windows the account's snapshot shows, plus the
+    /// plan when known. `plan` is an already-humanized label.
+    public static func detectedWindows(_ profile: WindowProfile, plan: String?) -> String {
+        let zh = AppLanguage.current == .zh
+        let base: String
+        switch profile {
+        case .sessionWeekly: base = zh ? "检测到：5 小时 + 周" : "Detected: 5-hour + weekly"
+        case .weeklyOnly: base = zh ? "检测到：仅周窗口" : "Detected: weekly only"
+        case .sessionOnly: base = zh ? "检测到：仅 5 小时窗口" : "Detected: 5-hour only"
+        case .none: base = zh ? "检测到：无用量窗口" : "Detected: no usage windows"
+        case .unknown: base = zh ? "尚未检测到窗口" : "Windows not detected yet"
+        }
+        guard let plan, !plan.isEmpty else { return base }
+        return "\(base) · \(plan)"
+    }
+    /// "Recommended: 07:00, 12:00 — every check-in opens a fresh 5-hour window."
+    public static func recommendation(times: [String], days: [String], reason: String?) -> String {
+        let zh = AppLanguage.current == .zh
+        let when = times.joined(separator: zh ? "、" : ", ") + scheduleDaysSuffix(days)
+        let why: String
+        switch reason {
+        case "session_window":
+            why = zh ? "每次签到开启新的 5 小时窗口" : "every check-in opens a fresh 5-hour window"
+        case "weekly_anchor":
+            why = zh ? "每天一次足以在周窗口重置后立刻锚定" : "once a day anchors the weekly window soon after it resets"
+        default:
+            why = ""
+        }
+        if zh { return why.isEmpty ? "推荐：\(when)" : "推荐：\(when)——\(why)" }
+        return why.isEmpty ? "Recommended: \(when)" : "Recommended: \(when) — \(why)"
+    }
+    /// Claude without a session window: the weekly limit resets at a fixed time.
+    public static var recommendationNotNeeded: String {
+        AppLanguage.current == .zh
+            ? "未检测到 5 小时窗口，周限额按固定时间重置，签到不会锚定任何窗口。如果你的套餐其实有 5 小时窗口，请保留定时；定时功能始终可用。"
+            : "No 5-hour window was detected and the weekly limit resets at a fixed time, so check-ins anchor nothing. If your plan does have a 5-hour window, keep the schedule; scheduling always stays available."
+    }
+    public static var useRecommended: String {
+        AppLanguage.current == .zh ? "套用推荐" : "Use recommended"
+    }
+    public static var useRecommendedHelp: String {
+        AppLanguage.current == .zh ? "只填入下方时间，点“保存”后生效" : "Fills the times below; takes effect when you save"
+    }
+
     // MARK: - Tool Settings Cards
     public static var claudeSettingsTitle: String {
         AppLanguage.current == .zh ? "Claude 设置" : "Claude Settings"
@@ -172,8 +217,8 @@ public enum L10n {
     }
     public static var codexIdleOnlyHelp: String {
         AppLanguage.current == .zh
-            ? "周窗口已在计时时跳过，约每周只激活一次"
-            : "Skips a run while the weekly window is already ticking, so it activates roughly once a week"
+            ? "窗口已在计时时跳过（有 5 小时窗口时看 5 小时，否则看周窗口），每个窗口只激活一次"
+            : "Skips a run while the window is already ticking (the 5-hour one if the plan has it, else weekly), so each window is activated once"
     }
 
     // MARK: - Advanced
@@ -605,6 +650,13 @@ public enum L10n {
     public static var healthExhausted: String {
         AppLanguage.current == .zh ? "本周额度用尽" : "Weekly quota used up"
     }
+    /// Session-window (5h) variants, for a Codex plan that gates on its 5-hour window.
+    public static var healthAnchoredSession: String {
+        AppLanguage.current == .zh ? "本 5 小时已锚定" : "Anchored this 5h window"
+    }
+    public static var healthExhaustedSession: String {
+        AppLanguage.current == .zh ? "5 小时额度用尽" : "5-hour quota used up"
+    }
     /// "上次 07:00 ✓" — the last real run and its outcome.
     public static func lastRun(_ date: Date, ok: Bool) -> String {
         let t = LogTimestamp.display(date)
@@ -681,6 +733,9 @@ public enum L10n {
     public static var windowRunning: String {
         AppLanguage.current == .zh ? "周窗口计时中" : "Weekly window running"
     }
+    public static var windowRunningSession: String {
+        AppLanguage.current == .zh ? "5 小时窗口计时中" : "5-hour window running"
+    }
     public static var supersededByFallback: String {
         AppLanguage.current == .zh ? "已被模型回退取代" : "Superseded by fallback"
     }
@@ -692,6 +747,9 @@ public enum L10n {
     }
     public static var trendCodexWeekly: String {
         AppLanguage.current == .zh ? "Codex 周" : "Codex weekly"
+    }
+    public static var trendCodex5h: String {
+        "Codex 5h"   // same in both languages
     }
     /// Whole calendar days until a reset (0 → today).
     public static func resetsInDays(_ n: Int) -> String {

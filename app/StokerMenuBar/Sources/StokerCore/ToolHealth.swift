@@ -9,6 +9,9 @@ public struct ToolHealth: Equatable, Sendable {
     public var lastRunOK: Bool?
     public var lastError: String?
     public var nextActivation: Date?
+    /// The anchored/pending/exhausted state describes the 5h/session window (Codex on a plan
+    /// that has one), not the weekly window — picks the health copy.
+    public var stateWindowIsSession: Bool = false
     public var isAlert: Bool { state == .alert }
 }
 
@@ -81,39 +84,67 @@ public enum ToolHealthEvaluator {
 
     /// `preflight` / `idleOnly` / `exhaustedThreshold` mirror the engine's ENABLE_QUOTA_PREFLIGHT,
     /// CODEX_ACTIVATE_ONLY_WHEN_IDLE and QUOTA_EXHAUSTED_THRESHOLD_PERCENT (engine defaults: on, on, 0).
+    /// Like the engine, anchored/pending follow the gating window — the shortest one the account
+    /// has (`fiveHour` when `hasSession`, else `weekly`) — while every present window counts
+    /// toward exhaustion. `engineGateActive` is the engine's `limits.codex.gate.active`.
     public static func codex(records: [UsageRecord], weekly: ActivationState.QuotaWindow?,
-                             windowMinutes: Int = 10080, scheduleOn: Bool, times: [String], days: [String] = [],
+                             windowMinutes: Int = 10080,
+                             fiveHour: ActivationState.QuotaWindow? = nil, hasSession: Bool = false,
+                             sessionMinutes: Int = 300, engineGateActive: Bool? = nil,
+                             resetWaitMax: TimeInterval = 300,
+                             scheduleOn: Bool, times: [String], days: [String] = [],
                              preflight: Bool = true, idleOnly: Bool = true, exhaustedThreshold: Double = 0,
                              now: Date = Date(), calendar: Calendar = .current) -> ToolHealth {
         let runs = realRuns(records, tool: "codex")
         let s = summary(runs)
-        let resetAt = ResetTime.parse(weekly?.resetsAt)
-        let active = resetAt.map { $0 > now } ?? false
-        let cycleStart = resetAt?.addingTimeInterval(-Double(windowMinutes) * 60)
+        func resetAt(_ w: ActivationState.QuotaWindow?) -> Date? { ResetTime.parse(w?.resetsAt) }
+        // Exhausted only while its reset is still ahead (a passed reset has rolled over).
+        func exhausted(_ w: ActivationState.QuotaWindow?) -> Bool {
+            guard let w, let r = resetAt(w), r > now else { return false }
+            return (w.remainingPercent ?? 100) <= exhaustedThreshold
+        }
+        let gate = hasSession ? fiveHour : weekly
+        let gateMinutes = hasSession ? sessionMinutes : windowMinutes
+        let gateReset = resetAt(gate)
+        let active = gateReset.map { $0 > now } ?? false
+        let cycleStart = gateReset?.addingTimeInterval(-Double(gateMinutes) * 60)
         let ranThisCycle = cycleStart.map { start in runs.contains { $0.ok == true && $0.date! >= start } } ?? false
-        let used = weekly?.usedPercent ?? 0
-        let exhaustedByPercent = (weekly?.remainingPercent ?? 100) <= exhaustedThreshold
+        let used = gate?.usedPercent ?? 0
+        let exhaustedWindows = (hasSession ? [fiveHour, weekly] : [weekly]).filter(exhausted)
+        let anyExhausted = !exhaustedWindows.isEmpty
         // The engine anchors on the *window*, independent of a later failure overriding the
         // displayed state to warning/alert. This drives both the state chain below and, when the
         // engine would actually skip, `from` for nextActivation.
-        let anchoredWindow = active && (exhaustedByPercent || used > 0 || ranThisCycle)
+        // The engine's verdict wins when it reports one: idle windows often show used ≥ 1, so
+        // the used/ran heuristic is only the fallback for an older engine.
+        let anchoredWindow = active && (exhausted(gate) || (engineGateActive ?? (used > 0 || ranThisCycle)))
 
         let state: ToolHealthState
         if s.failures >= 2 { state = .alert }
         else if s.failures == 1 { state = .warning }
-        else if anchoredWindow, exhaustedByPercent { state = .exhausted }
+        else if anyExhausted { state = .exhausted }
         else if anchoredWindow { state = .anchored }
         else { state = .pending }
 
-        // The engine only skips inside the quota preflight: an exhausted window always, an
-        // anchored one only under the idle-only policy. Otherwise the next slot runs.
-        let engineSkips = preflight && anchoredWindow && (exhaustedByPercent || idleOnly)
+        // The engine only skips inside the quota preflight: an exhausted window always (until
+        // the last exhausted one resets), the anchored gate only under the idle-only policy —
+        // and a slot within `resetWaitMax` before the gate's reset waits it out and sends.
+        var skipUntil: [Date] = []
+        if preflight {
+            skipUntil += exhaustedWindows.compactMap(resetAt)
+            if anchoredWindow, idleOnly, let gateReset {
+                skipUntil.append(gateReset.addingTimeInterval(-max(0, resetWaitMax)))
+            }
+        }
         var next: Date? = nil
         if scheduleOn {
-            let from = engineSkips ? max(now, resetAt ?? now) : now
+            let from = max(now, skipUntil.max() ?? now)
             next = ScheduleFormatter.nextFire(times: times, days: days, now: from, calendar: calendar)
         }
-        return build(state: state, summary: s, nextActivation: next)
+        var health = build(state: state, summary: s, nextActivation: next)
+        // An exhausted weekly window outranks the session one in the copy.
+        health.stateWindowIsSession = hasSession && !(anyExhausted && exhausted(weekly))
+        return health
     }
 }
 
@@ -144,6 +175,8 @@ extension ToolHealthEvaluator {
                                 installed: Bool, claudeSchedule: ToolSchedule, codexSchedule: ToolSchedule,
                                 activationTool: String,
                                 preflight: Bool = true, idleOnly: Bool = true, exhaustedThreshold: Double = 0,
+                                codexProfile: WindowProfile? = nil, codexSessionMinutes: Int? = nil,
+                                codexGateActive: Bool? = nil, codexResetWaitMax: TimeInterval = 300,
                                 now: Date = Date(), calendar: Calendar = .current) -> ToolHealthSnapshot {
         let enabled = ToolRequirements.requiredCLIs(activationTool: activationTool)
         func gated(_ h: ToolHealth, _ tool: String) -> ToolHealth {
@@ -156,7 +189,13 @@ extension ToolHealthEvaluator {
         let claudeHealth = Self.claude(records: records, scheduleOn: installed && enabled.contains("claude"),
                                        times: claudeSchedule.times, days: claudeSchedule.days,
                                        now: now, calendar: calendar)
+        // No profile from the caller → read it off the snapshot (an unknown one gates on weekly).
+        let profile = codexProfile ?? quota["codex"]?.windowProfile(tool: "codex") ?? .unknown
         let codexHealth = Self.codex(records: records, weekly: quota["codex"]?.weekly,
+                                     fiveHour: quota["codex"]?.fiveHour,
+                                     hasSession: profile.hasSession(tool: "codex"),
+                                     sessionMinutes: codexSessionMinutes ?? 300,
+                                     engineGateActive: codexGateActive, resetWaitMax: codexResetWaitMax,
                                      scheduleOn: installed && enabled.contains("codex"),
                                      times: codexSchedule.times, days: codexSchedule.days,
                                      preflight: preflight, idleOnly: idleOnly,
@@ -191,6 +230,10 @@ extension ToolHealthEvaluator {
                  preflight: state?.config.enableQuotaPreflight ?? true,
                  idleOnly: state?.config.codexActivateOnlyWhenIdle ?? true,
                  exhaustedThreshold: state?.config.quotaExhaustedThresholdPercent ?? 0,
+                 codexProfile: state?.windowProfile("codex"),
+                 codexSessionMinutes: state?.limits?.codex?.sessionMinutes,
+                 codexGateActive: state?.limits?.codex?.gate?.active,
+                 codexResetWaitMax: TimeInterval(state?.config.codexResetWaitMaxSeconds ?? 300),
                  now: now)
     }
 }

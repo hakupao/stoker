@@ -283,11 +283,129 @@ public struct ActivationState: Decodable {
     public var keepAwake: KeepAwake
     public var quota: [String: ToolQuota]
     public var lastUsage: LastUsage?
+    /// Per-tool window profile + recommended schedule; nil from an older engine.
+    public var limits: Limits?
 
     private enum CodingKeys: String, CodingKey {
-        case root, label, installed, running, launchctl, schedule, config, quota
+        case root, label, installed, running, launchctl, schedule, config, quota, limits
         case keepAwake = "keep_awake"
         case lastUsage = "last_usage"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        root = try c.decode(String.self, forKey: .root)
+        label = try c.decode(String.self, forKey: .label)
+        installed = try c.decode(Bool.self, forKey: .installed)
+        running = try c.decode(Bool.self, forKey: .running)
+        launchctl = try c.decodeIfPresent(Launchctl.self, forKey: .launchctl)
+        schedule = try c.decode(Schedule.self, forKey: .schedule)
+        config = try c.decode(Config.self, forKey: .config)
+        keepAwake = try c.decode(KeepAwake.self, forKey: .keepAwake)
+        quota = try c.decode([String: ToolQuota].self, forKey: .quota)
+        lastUsage = try c.decodeIfPresent(LastUsage.self, forKey: .lastUsage)
+        // Informational only: a surprise shape must not fail the whole decode.
+        limits = (try? c.decodeIfPresent(Limits.self, forKey: .limits)) ?? nil
+    }
+
+    /// The account's windows for `tool`: the engine's `limits` profile when it reports one,
+    /// else derived from the quota snapshot. `.unknown` until a snapshot says otherwise.
+    public func windowProfile(_ tool: String) -> WindowProfile {
+        if let p = limits?.forTool(tool)?.profile, p != .unknown { return p }
+        return quota[tool]?.windowProfile(tool: tool) ?? .unknown
+    }
+
+    /// Whether `tool` gets a 5h/session bar and gates on it; see `WindowProfile.hasSession`.
+    public static func hasSessionWindow(_ tool: String, in state: ActivationState?) -> Bool {
+        (state?.windowProfile(tool) ?? .unknown).hasSession(tool: tool)
+    }
+
+    /// The headline window: the session window when the account has one, else weekly.
+    public static func headlineWindow(_ tool: String, in state: ActivationState?) -> QuotaWindow? {
+        let q = state?.quota[tool]
+        return hasSessionWindow(tool, in: state) ? q?.fiveHour : q?.weekly
+    }
+
+    /// `limits` (activation-state.sh): what each tool's account actually has, plus the
+    /// schedule the engine recommends for it. Every field is optional.
+    public struct Limits: Decodable {
+        public var claude: ToolLimits?
+        public var codex: ToolLimits?
+
+        public func forTool(_ tool: String) -> ToolLimits? { tool == "codex" ? codex : claude }
+
+        private enum CodingKeys: String, CodingKey { case claude, codex }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            claude = (try? c.decodeIfPresent(ToolLimits.self, forKey: .claude)) ?? nil
+            codex = (try? c.decodeIfPresent(ToolLimits.self, forKey: .codex)) ?? nil
+        }
+    }
+
+    public struct ToolLimits: Decodable {
+        /// nil when absent or an unrecognized value.
+        public var profile: WindowProfile?
+        public var sessionMinutes: Int?
+        /// "fixed" (Claude) / "on_first_use" (Codex).
+        public var weeklyReset: String?
+        /// Raw plan string (subscription_type / plan_type), display only.
+        public var plan: String?
+        public var recommended: Recommendation?
+        /// The engine's own idle-only verdict for the gating window (Codex); nil for Claude or
+        /// an older engine, which leaves the app on its used/ran-this-cycle heuristic.
+        public var gate: Gate?
+
+        private enum CodingKeys: String, CodingKey {
+            case profile, plan, recommended, gate
+            case sessionMinutes = "session_minutes"
+            case weeklyReset = "weekly_reset"
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            profile = ((try? c.decodeIfPresent(String.self, forKey: .profile)) ?? nil).flatMap(WindowProfile.init)
+            sessionMinutes = (try? c.decodeIfPresent(Int.self, forKey: .sessionMinutes)) ?? nil
+            weeklyReset = (try? c.decodeIfPresent(String.self, forKey: .weeklyReset)) ?? nil
+            plan = (try? c.decodeIfPresent(String.self, forKey: .plan)) ?? nil
+            recommended = (try? c.decodeIfPresent(Recommendation.self, forKey: .recommended)) ?? nil
+            gate = (try? c.decodeIfPresent(Gate.self, forKey: .gate)) ?? nil
+        }
+    }
+
+    /// `limits.<tool>.gate`: which window gates idle-only runs and whether the engine sees it as
+    /// already running (reset ahead and >15 min short of a full window at capture time).
+    public struct Gate: Decodable, Equatable {
+        /// "five_hour" | "weekly" | nil
+        public var window: String?
+        public var active: Bool
+
+        public init(window: String?, active: Bool) {
+            self.window = window
+            self.active = active
+        }
+    }
+
+    public struct Recommendation: Decodable, Equatable {
+        public var times: [String]
+        public var days: [String]
+        /// session_window | weekly_anchor | not_needed | unknown
+        public var reason: String?
+
+        public init(times: [String], days: [String], reason: String?) {
+            self.times = times
+            self.days = days
+            self.reason = reason
+        }
+
+        private enum CodingKeys: String, CodingKey { case times, days, reason }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            times = ((try? c.decodeIfPresent([String].self, forKey: .times)) ?? nil) ?? []
+            days = ((try? c.decodeIfPresent([String].self, forKey: .days)) ?? nil) ?? []
+            reason = (try? c.decodeIfPresent(String.self, forKey: .reason)) ?? nil
+        }
     }
 
     public struct Launchctl: Decodable {
@@ -384,6 +502,9 @@ public struct ActivationState: Decodable {
         public var quotaExhaustedThresholdPercent: Double
         /// CODEX_ACTIVATE_ONLY_WHEN_IDLE; the engine default (on) when an older engine omits it.
         public var codexActivateOnlyWhenIdle: Bool
+        /// CODEX_RESET_WAIT_MAX_SECONDS: a slot this close before the gate window's reset still
+        /// sends (after a wait). 300 when an older engine omits it; 0 = no wait.
+        public var codexResetWaitMaxSeconds: Int
 
         private enum CodingKeys: String, CodingKey {
             case activationTool = "activation_tool"
@@ -393,6 +514,7 @@ public struct ActivationState: Decodable {
             case quotaPreflightOnUnknown = "quota_preflight_on_unknown"
             case quotaExhaustedThresholdPercent = "quota_exhausted_threshold_percent"
             case codexActivateOnlyWhenIdle = "codex_activate_only_when_idle"
+            case codexResetWaitMaxSeconds = "codex_reset_wait_max_seconds"
         }
 
         public init(from decoder: Decoder) throws {
@@ -404,6 +526,7 @@ public struct ActivationState: Decodable {
             quotaPreflightOnUnknown = try c.decode(String.self, forKey: .quotaPreflightOnUnknown)
             quotaExhaustedThresholdPercent = try c.decodeIfPresent(Double.self, forKey: .quotaExhaustedThresholdPercent) ?? 0
             codexActivateOnlyWhenIdle = try c.decodeIfPresent(Bool.self, forKey: .codexActivateOnlyWhenIdle) ?? true
+            codexResetWaitMaxSeconds = max(0, (try? c.decodeIfPresent(Int.self, forKey: .codexResetWaitMaxSeconds)) ?? nil ?? 300)
         }
     }
 
@@ -458,16 +581,23 @@ public struct ActivationState: Decodable {
             return tokens.map { known[$0] ?? $0.capitalized }.joined(separator: " ")
         }
 
-        /// Codex has had only a 7-day window since Sept 2026, so it is weekly-only by design;
-        /// Claude has both a 5-hour and a weekly window.
-        public static func isWeeklyOnly(tool: String) -> Bool {
-            tool == "codex"
-        }
-
-        /// The window to display: weekly-only tools always show weekly; others honour the
-        /// 5-hour/weekly picker.
-        public func window(tool: String, preferFiveHour: Bool) -> QuotaWindow? {
-            preferFiveHour && !ToolQuota.isWeeklyOnly(tool: tool) ? fiveHour : weekly
+        /// Which windows this snapshot shows the account has (plans differ: Claude Ultra has no
+        /// 5h window, Codex Plus has one). Claude always emits a `five_hour` object, so a window
+        /// counts only when it carries data (a percent, a reset, or a passed reset); Codex emits
+        /// `null` for a window it doesn't have. A not-ok snapshot says nothing → `.unknown`.
+        public func windowProfile(tool: String) -> WindowProfile {
+            guard ok == true else { return .unknown }
+            func present(_ w: QuotaWindow?) -> Bool {
+                guard let w else { return false }
+                if tool == "codex" { return true }
+                return w.usedPercent != nil || w.resetsAt != nil || w.resetPassed == true
+            }
+            switch (present(fiveHour), present(weekly)) {
+            case (true, true): return .sessionWeekly
+            case (false, true): return .weeklyOnly
+            case (true, false): return .sessionOnly
+            case (false, false): return .none
+            }
         }
 
         private enum CodingKeys: String, CodingKey {
@@ -623,6 +753,24 @@ public struct ActivationState: Decodable {
     }
 }
 
+/// Which usage windows an account has. Plan-agnostic: read from the snapshot, never a plan table.
+public enum WindowProfile: String, Sendable {
+    case sessionWeekly = "session_weekly"
+    case weeklyOnly = "weekly_only"
+    case sessionOnly = "session_only"
+    case none
+    case unknown
+
+    /// Not detected yet keeps the long-standing display defaults (Claude 5h, Codex weekly).
+    public func hasSession(tool: String) -> Bool {
+        switch self {
+        case .sessionWeekly, .sessionOnly: true
+        case .weeklyOnly, .none: false
+        case .unknown: tool == "claude"
+        }
+    }
+}
+
 /// One tool's schedule: "HH:MM" times plus weekdays (mon..sun; `[]` = every day).
 public struct ToolSchedule: Decodable, Equatable, Sendable {
     public var times: [String]
@@ -738,6 +886,22 @@ public struct AppSettings {
     public mutating func setScheduleDays(_ days: [String], for tool: String) {
         let normalized = ScheduleFormatter.normalizeDays(days)
         if tool == "codex" { codexScheduleDays = normalized } else { claudeScheduleDays = normalized }
+    }
+
+    /// The form already holds `rec` for `tool` (times compared normalized + sorted, days normalized).
+    public func matches(_ rec: ActivationState.Recommendation, tool: String) -> Bool {
+        let recTimes = rec.times.compactMap(ScheduleFormatter.normalize).sorted()
+        return scheduleTimes(tool).compactMap(ScheduleFormatter.normalize).sorted() == recTimes
+            && ScheduleFormatter.normalizeDays(scheduleDays(tool)) == ScheduleFormatter.normalizeDays(rec.days)
+    }
+
+    /// Fills `tool`'s schedule fields from `rec` (form only — the user still saves). A
+    /// recommendation without valid times is ignored: a schedule always keeps at least one time.
+    public mutating func apply(_ rec: ActivationState.Recommendation, tool: String) {
+        let times = Array(Set(rec.times.compactMap(ScheduleFormatter.normalize))).sorted()
+        guard !times.isEmpty else { return }
+        setScheduleTimes(times, for: tool)
+        setScheduleDays(rec.days, for: tool)
     }
 
     /// Writes the per-tool keys only; a legacy SCHEDULE_TIMES line in .env is left untouched

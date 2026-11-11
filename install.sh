@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
   cat <<'USAGE'
-Usage: ./install.sh [install|check|dry-run|quota|app-status|status|run-now|uninstall|print-plist]
+Usage: ./install.sh [install|check|dry-run|quota|app-status|recommend|status|run-now|uninstall|print-plist]
 
 Default command: install
 
@@ -14,6 +14,7 @@ check        Verify local dependencies.
 dry-run      Show activation commands without sending model prompts.
 quota        Query Claude/Codex quota status without sending model prompts.
 app-status   Print the menu bar app JSON status snapshot.
+recommend    Show detected limit windows and a recommended schedule (changes nothing).
 status       Show LaunchAgent status.
 run-now      Trigger the installed LaunchAgent once. This sends model prompts.
 uninstall    Unload and remove the LaunchAgent.
@@ -38,6 +39,9 @@ case "$cmd" in
     ;;
   app-status)
     "${ROOT_DIR}/bin/activation-state.sh" --json
+    ;;
+  recommend)
+    "${ROOT_DIR}/bin/activation-state.sh" --recommend
     ;;
   status)
     "${ROOT_DIR}/scripts/install-launchd.sh" status

@@ -11,6 +11,8 @@ struct ActivityTabContent: View {
     var body: some View {
         // One health evaluation per render, from the same logs + state every refresh publishes.
         let health = model.healthSnapshot
+        let claudeSession = ActivationState.hasSessionWindow("claude", in: model.state)
+        let codexSession = ActivationState.hasSessionWindow("codex", in: model.state)
 
         VStack(spacing: 10) {
             if health.anyAlert {
@@ -20,15 +22,20 @@ struct ActivityTabContent: View {
             }
 
             HStack(alignment: .top, spacing: 12) {
-                ClaudeCard(quota: model.state?.quota["claude"], health: health.claude)
+                ClaudeCard(quota: model.state?.quota["claude"], health: health.claude,
+                           hasSession: claudeSession)
                     .frame(maxWidth: .infinity)
-                CodexCard(quota: model.state?.quota["codex"], health: health.codex)
+                CodexCard(quota: model.state?.quota["codex"], health: health.codex,
+                          hasSession: codexSession)
                     .frame(maxWidth: .infinity)
             }
             // Equal-height cards: each fills the taller one's height, health lines aligned.
             .fixedSize(horizontal: false, vertical: true)
 
-            TrendCard(logStore: logStore)
+            TrendCard(logStore: logStore,
+                      available: TrendSeries.available(
+                          claudeHasSession: claudeSession || logStore.sessionHistoryTools.contains("claude"),
+                          codexHasSession: codexSession || logStore.sessionHistoryTools.contains("codex")))
 
             HStack(spacing: 0) {
                 StatsStrip(logStore: logStore)
@@ -171,7 +178,7 @@ private struct RunRow: View {
     @State private var isExpanded = false
     @State private var isHovered = false
 
-    /// Planned skips (Codex weekly window already anchored) and fallback-superseded attempts
+    /// Planned skips (Codex gating window already anchored) and fallback-superseded attempts
     /// are expected engine behaviour, so they read neutral rather than as warnings.
     private var isNeutral: Bool {
         record.supersededByFallback == true || record.skipReason == "window_already_active"
@@ -205,7 +212,9 @@ private struct RunRow: View {
             return L10n.success
         case .skipped:
             if record.supersededByFallback == true { return L10n.supersededByFallback }
-            if record.skipReason == "window_already_active" { return L10n.windowRunning }
+            if record.skipReason == "window_already_active" {
+                return record.gateWindow == "five_hour" ? L10n.windowRunningSession : L10n.windowRunning
+            }
             let reason = L10n.skipReasonText(record.skipReason)
             return reason.isEmpty ? L10n.skipped : "\(L10n.skipped) · \(reason)"
         case .error:

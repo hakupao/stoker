@@ -9,7 +9,7 @@
 **按你的作息，把 Claude Code 和 Codex 的用量窗口一直「续上火」。**
 
 一个很小的 macOS `launchd` 定时器：按固定时间轻量触发 Claude Code 和 Codex，并记录触发日志、
-单次 usage 和额度状态快照（Claude：5 小时 + 周窗口；Codex 自 2026 年 9 月起只有 7 天周窗口，Stoker 每周锚定一次）。
+单次 usage 和额度状态快照（5 小时窗口、周窗口，具体有哪些取决于你的套餐，Stoker 会自动探测并给出推荐调度）。
 
 [![CI](https://github.com/hakupao/stoker/actions/workflows/ci.yml/badge.svg)](https://github.com/hakupao/stoker/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -48,6 +48,31 @@ Claude 和 Codex 各有一套独立的运行时间（时间点，以及可选的
 `12:00`、`17:00`、`22:00`、每天触发；可以在 App 的设置里按工具分别修改，或在 `.env` 里用
 `CLAUDE_SCHEDULE_TIMES` / `CODEX_SCHEDULE_TIMES` 与 `CLAUDE_SCHEDULE_DAYS` / `CODEX_SCHEDULE_DAYS` 设置。
 
+## 套餐与用量窗口
+
+你有哪些窗口取决于订阅套餐，而套餐经常调整。Stoker 不维护套餐名对照表：它读取每次额度快照里
+账号实际返回的窗口，并以此为准。截至 2026 年 11 月：
+
+| 工具 | 套餐 | 5 小时窗口 | 周限额 |
+| --- | --- | --- | --- |
+| Claude | Free、Pro、Max、Team*、Enterprise（按席位） | 有，从第一条消息开始计时 | 有，每个账号固定时间重置 |
+| Claude | Ultra（已验证账号） | 无（验证通过前有临时窗口） | 有，固定时间重置 |
+| Codex | Plus、Business（标准席位） | 有，首次使用起算* | 有 |
+| Codex | Pro、Business（Premium 席位）* | 无 | 有*，首次使用起算* |
+
+带 * 的内容没有官方页面确认（来自第三方报道或 Stoker 自身日志）。此表仅供参考，Stoker 以账号实际上报的窗口为准。
+
+对调度的影响：
+
+- **有 5 小时窗口**：值得定时点亮，每 5 小时触发一次（默认 `07:00、12:00、17:00、22:00`）即可让窗口覆盖全天。
+- **Codex 只有周窗口**：首次使用才开始计时，每天触发一次就足以锚定。
+- **Claude 只有周限额**：无论是否使用都在固定时间重置，触发不会锚定任何东西。但只要你设了调度，
+  Stoker 仍会照常发送，不会替你关掉。
+
+`./install.sh recommend`（以及 App 的设置页）会显示 Stoker 为每个工具探测到的窗口和推荐调度。
+它不发送任何请求、不修改任何配置，是否采用由你决定。用 Claude 订阅登录的定时 `claude -p`
+与交互式 Claude Code 消耗同一份订阅额度。
+
 ## 功能
 
 | | 功能 |
@@ -56,7 +81,7 @@ Claude 和 Codex 各有一套独立的运行时间（时间点，以及可选的
 | 🪶 | **极短 prompt** —— 要求两个 CLI 不读文件、不运行工具、不修改内容。 |
 | 📜 | **可读运行历史** —— `logs/activation.log` 记录人类可读的运行历史。 |
 | 📊 | **结构化 usage** —— `logs/usage.jsonl` 记录每次真实触发返回的 token/usage 信息。 |
-| 🔋 | **额度快照** —— `logs/status.jsonl` 记录 Claude 5 小时 + 周额度、Codex 周（7 天）额度快照。 |
+| 🔋 | **额度快照** —— `logs/status.jsonl` 记录两个工具按套餐实际上报的 5 小时 / 周额度快照。 |
 | 🚦 | **额度预检** —— 真实触发前先检查额度；如果明确额度耗尽，会优雅跳过并记录日志。 |
 | 🧬 | **可克隆配置** —— 通过 `.env` 配置时间、label、prompt、timeout 和工具路径。 |
 | 🛟 | **安全手动命令** —— 支持 dry-run、依赖检查、只查额度、手动触发和卸载。 |
@@ -212,6 +237,7 @@ codex job skipped by quota preflight reason=quota_exhausted
 - `./install.sh status`：检查本地 `launchd` 是否已经加载定时器。
 - `./install.sh quota`：只查额度状态，不发送 prompt。
 - `./install.sh dry-run`：只打印计划执行的命令，不发送 prompt。
+- `./install.sh recommend`：显示每个工具探测到的用量窗口和推荐调度；不发送请求，不修改配置。
 - `./install.sh run-now`：立刻触发已安装的 LaunchAgent；如果额度可用，可能消耗 usage。
 
 ## 配置
@@ -235,7 +261,7 @@ codex job skipped by quota preflight reason=quota_exhausted
 | `CLAUDE_CODE_OAUTH_TOKEN` | 由 `claude setup-token` 生成的长效 token，供无人值守认证（见下） | 未设置（用钥匙串登录） |
 | `CODEX_MODEL` | Codex 激活模型；设为 `default` 则交给 Codex CLI 自行选择 | `gpt-5.6-luna` |
 | `TIMEOUT_SECONDS` | 每个工具的超时时间 | `120` |
-| `LOCK_WAIT_SECONDS` | 另一次运行持有锁时最多等待多久再跳过（`0` = 立即跳过）。开启防休眠时等待期间也保持唤醒（`caffeinate -t KEEP_AWAKE_SECONDS + LOCK_WAIT_SECONDS`） | `TIMEOUT_SECONDS × (1 + CODEX_MODEL_FALLBACK_MAX_TRIES) + CODEX_UPDATE_TIMEOUT_SECONDS + 120`（780） |
+| `LOCK_WAIT_SECONDS` | 另一次运行持有锁时最多等待多久再跳过（`0` = 立即跳过）。开启防休眠时等待期间也保持唤醒（`caffeinate -t KEEP_AWAKE_SECONDS + LOCK_WAIT_SECONDS + CODEX_RESET_WAIT_MAX_SECONDS + 5`） | `TIMEOUT_SECONDS × (1 + CODEX_MODEL_FALLBACK_MAX_TRIES) + CODEX_UPDATE_TIMEOUT_SECONDS + CODEX_RESET_WAIT_MAX_SECONDS + 5 + 120`（1085） |
 | `ENABLE_STATUS_SNAPSHOTS` | 真实触发后是否记录额度快照 | `1` |
 | `ENABLE_QUOTA_PREFLIGHT` | 发送 prompt 前是否先检查额度 | `1` |
 | `QUOTA_PREFLIGHT_ON_UNKNOWN` | 无法确认额度时 `allow` 继续或 `skip` 跳过 | `allow` |
@@ -246,7 +272,8 @@ codex job skipped by quota preflight reason=quota_exhausted
 | `CODEX_MODEL_FALLBACK` | 为 `1` 时，若模型被拒（"model is not supported"），按顺序从 Codex 模型缓存中选下一个候选重试；其它错误不重试，也绝不改写 `.env` | `1` |
 | `CODEX_MODEL_FALLBACK_MAX_TRIES` | 每次运行最多的备用模型重试次数（被拒模型逐个排除） | `3` |
 | `CODEX_MODELS_CACHE` | 选择备用模型所用的 Codex 模型缓存（识别 `$CODEX_HOME`） | `~/.codex/models_cache.json` |
-| `CODEX_ACTIVATE_ONLY_WHEN_IDLE` | `1` 或 `0`。Codex 自 2026 年 9 月起只有 7 天周窗口：为 `1` 时，周窗口已在计时则跳过 Codex 激活（原因 `window_already_active`），即 Stoker 每周锚定一次；`0` 则每次都发送。需 `ENABLE_QUOTA_PREFLIGHT=1` | `1` |
+| `CODEX_ACTIVATE_ONLY_WHEN_IDLE` | `1` 或 `0`。为 `1` 时，Codex 最短的那个窗口（套餐有 5 小时窗口就看它，否则看周窗口）已在计时则跳过 Codex 激活（原因 `window_already_active`），即每个窗口只锚定一次；若触发时该窗口将在 `CODEX_RESET_WAIT_MAX_SECONDS` 内重置，则等它重置后再发送而不是跳过；`0` 则每次都发送。需 `ENABLE_QUOTA_PREFLIGHT=1` | `1` |
+| `CODEX_RESET_WAIT_MAX_SECONDS` | Codex 门控窗口即将重置时（每 5 小时触发一次，会刚好落在上个窗口结束前几秒），且距离重置不超过这么多秒，就等到重置后约 5 秒再发送，而不是跳过。`0` 表示照旧跳过。额度已耗尽的窗口仍会跳过 | `300` |
 | `CLAUDE_STATUS_SOURCE` | `cache` 直接读 oh-my-claudecode 插件的本地用量缓存（不触碰任何凭证）；`native` 用钥匙串 token 只读查询用量接口——无需 omc，token 过期即跳过、绝不刷新；`omc` 强制 `omc wait status` 实时查询，无头运行时可能轮换钥匙串登录凭证 | `cache` |
 | `CLAUDE_USAGE_CACHE_FILE` | 用量缓存路径覆盖（可选） | `~/.claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json` |
 | `CLAUDE_USAGE_USER_AGENT` | `native` 用量请求的 User-Agent；claude-code 形态的 UA 可避开该接口激进的 429 限流桶 | `claude-code/0.3.6` |
@@ -319,7 +346,7 @@ tail -20 logs/status.jsonl | jq
 
 - `logs/activation.log`：人类可读的运行历史。
 - `logs/usage.jsonl`：每个工具每次真实触发的 usage 快照。
-- `logs/status.jsonl`：额度快照（Claude 5 小时 + 周；Codex 仅周窗口）。
+- `logs/status.jsonl`：额度快照（套餐实际上报的 5 小时 / 周窗口）。
 - `logs/raw/`：Claude、Codex 和 status 查询的原始输出。
 - `logs/launchd.out.log` / `logs/launchd.err.log`：launchd 的 stdout/stderr。
 
@@ -360,8 +387,8 @@ CLI/launchd 仍然是主引擎；菜单栏 App 是单独给初学者使用的 GU
 | Claude | `ok` | "激活正常" | 最近一次真实运行成功。 |
 | Codex | `alert` | "连续 N 次失败" / "激活异常" | 最近 ≥2 次真实运行全部失败（优先于窗口状态判定）。 |
 | Codex | `warning` | "最近一次失败" | 最近一次真实运行失败。 |
-| Codex | `exhausted` | "本周额度用尽" | 周窗口剩余额度 ≤ `QUOTA_EXHAUSTED_THRESHOLD_PERCENT`（默认 0），且重置时间仍在未来。 |
-| Codex | `anchored` | "本周已锚定" | 周窗口重置时间仍在未来，且已被使用（已用 > 0，或本周期内有成功运行）。 |
+| Codex | `exhausted` | "本周额度用尽" / "5 小时额度用尽" | 套餐上报的任一窗口（5 小时或周）剩余额度 ≤ `QUOTA_EXHAUSTED_THRESHOLD_PERCENT`（默认 0），且重置时间仍在未来。 |
+| Codex | `anchored` | "本周已锚定" / "本 5 小时已锚定" | 门控窗口重置时间仍在未来，且引擎判定它已锚定（`limits.codex.gate.active`）。 |
 | Codex | `pending` | "待锚定" | 窗口空闲、重置时间已过，或没有额度数据。 |
 | 两者 | `disabled` | "未启用" | 该工具被 `ACTIVATION_TOOL` 排除——没有下次激活，也不会告警。 |
 

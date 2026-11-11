@@ -706,8 +706,8 @@ struct MenuContentView: View {
                 let schedule = state.schedule.forTool(tool)
                 Text("\(L10n.schedule): \(L10n.toolScheduleLine(tool: tool == "codex" ? "Codex" : "Claude", times: schedule.times, days: schedule.days, compact: false))")
             }
-            Text(quotaLine(tool: "claude", quota: state.quota["claude"], health: health.claude))
-            Text(quotaLine(tool: "codex", quota: state.quota["codex"], health: health.codex))
+            Text(quotaLine(tool: "claude", state: state, health: health.claude))
+            Text(quotaLine(tool: "codex", state: state, health: health.codex))
         }
 
         Divider()
@@ -724,19 +724,20 @@ struct MenuContentView: View {
         Button(L10n.quit) { NSApplication.shared.terminate(nil) }
     }
 
-    /// "● Claude 5h 93% · resets 00:10" / "● Codex 周 1% · 10-03 重置". Claude reports its 5-hour
-    /// window (reset as a clock), Codex is weekly-only (reset as a month-day). A window whose reset
-    /// already passed says so instead of showing stale numbers; an alerting tool gets a ⚠︎ glyph.
-    private func quotaLine(tool: String, quota: ActivationState.ToolQuota?, health: ToolHealth) -> String {
-        let isCodex = tool == "codex"
-        let window = quota?.window(tool: tool, preferFiveHour: true)
+    /// "● Claude 5h 93% · resets 00:10" / "● Codex 周 1% · 10-03 重置". A tool reports its 5-hour
+    /// window (reset as a clock) when the account has one, else its weekly one (reset as a
+    /// month-day). A window whose reset already passed says so instead of showing stale numbers;
+    /// an alerting tool gets a ⚠︎ glyph.
+    private func quotaLine(tool: String, state: ActivationState?, health: ToolHealth) -> String {
+        let session = ActivationState.hasSessionWindow(tool, in: state)
+        let window = ActivationState.headlineWindow(tool, in: state)
         let resetPassed = window?.hasResetPassed() == true
         let reset = resetPassed ? nil : ResetTime.parse(window?.resetsAt).map {
-            isCodex ? L10n.monthDay($0) : ScheduleFormatter.clock($0)
+            session ? ScheduleFormatter.clock($0) : L10n.monthDay($0)
         }
         let line = L10n.menuQuotaLine(
-            tool: isCodex ? "Codex" : "Claude",
-            windowLabel: isCodex ? L10n.weeklyShort : L10n.fiveHourShort,
+            tool: tool == "codex" ? "Codex" : "Claude",
+            windowLabel: session ? L10n.fiveHourShort : L10n.weeklyShort,
             remaining: resetPassed ? L10n.resetAwaitingRefresh : DS.quotaLabel(window?.remainingPercent),
             reset: reset
         )
@@ -1208,6 +1209,8 @@ private struct ScheduleRow: View {
                 .font(.system(size: 13, weight: .bold, design: .rounded))
                 .foregroundStyle(color)
 
+            WindowRecommendation(model: model, tool: tool, color: color)
+
             FlowLayout(spacing: 6) {
                 DayChip(label: L10n.everyDay, selected: days.isEmpty, color: color) {
                     model.toggleDay(nil, tool: tool)
@@ -1238,6 +1241,63 @@ private struct ScheduleRow: View {
         }
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.5)
+    }
+}
+
+/// What the account's snapshot shows for this tool (windows + plan) and the engine's recommended
+/// schedule. "Use recommended" only fills the form; the user still saves. A `not_needed`
+/// recommendation (no session window, fixed weekly reset) explains itself instead — scheduling
+/// stays fully available either way.
+private struct WindowRecommendation: View {
+    @ObservedObject var model: StokerAppModel
+    var tool: String
+    var color: Color
+
+    @Environment(\.stokerTheme) private var theme
+
+    var body: some View {
+        let limits = model.state?.limits?.forTool(tool)
+        let profile = model.state?.windowProfile(tool) ?? .unknown
+        let rawPlan = limits?.plan ?? model.state?.quota[tool]?.displayPlan
+        let rec = limits?.recommended
+
+        VStack(alignment: .leading, spacing: 4) {
+            Text(L10n.detectedWindows(profile, plan: rawPlan.flatMap(ActivationState.ToolQuota.planLabel)))
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(theme.textSecondary)
+            if let rec {
+                switch rec.reason {
+                case "not_needed":
+                    note(L10n.recommendationNotNeeded)
+                case "session_window", "weekly_anchor":
+                    if !rec.times.isEmpty {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            note(L10n.recommendation(times: rec.times, days: rec.days, reason: rec.reason))
+                            Spacer(minLength: 4)
+                            if !model.settings.matches(rec, tool: tool) {
+                                Button(L10n.useRecommended) {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        model.settings.apply(rec, tool: tool)
+                                    }
+                                }
+                                .controlSize(.small)
+                                .tint(color)
+                                .help(L10n.useRecommendedHelp)
+                            }
+                        }
+                    }
+                default:
+                    EmptyView()  // unknown: nothing detected yet, so nothing to recommend
+                }
+            }
+        }
+    }
+
+    private func note(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundStyle(theme.textMuted)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

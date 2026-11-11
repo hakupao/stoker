@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 ### Added
+- **Plan-aware window detection and schedule recommendations.** Stoker now works from the usage
+  windows your account actually reports instead of assuming "Claude has a 5-hour window, Codex is
+  weekly-only". `app-status` JSON gains a top-level `limits` object (per tool: window `profile`,
+  `session_minutes`, `weekly_reset`, `plan`, and a `recommended` schedule with its reason), and the
+  new safe command `./install.sh recommend` prints the detected windows and the schedule that fits
+  them. The menu bar app shows a 5-hour bar, mini bar and trend series for whichever tool has that
+  window, and Settings shows the detected windows with a "Use recommended" button. Recommendations
+  never change anything by themselves, and no schedule is skipped because a window is absent.
 - **Per-tool schedules.** Claude and Codex are now scheduled independently:
   `CLAUDE_SCHEDULE_TIMES` / `CODEX_SCHEDULE_TIMES` (`HH:MM`, falling back to `SCHEDULE_TIMES`)
   and `CLAUDE_SCHEDULE_DAYS` / `CODEX_SCHEDULE_DAYS` (`mon..sun`; empty or `daily` = every day).
@@ -25,10 +33,25 @@ All notable changes to this project will be documented in this file.
   legacy agent — or a stray per-tool agent — from another root fills `launchctl.mismatch`.
   `activation-state.sh` honors `LAUNCHCTL_BIN` like the installer.
 
+### Fixed
+- **Codex plans with a 5-hour window were never re-lit.** The idle-only gate
+  (`CODEX_ACTIVATE_ONLY_WHEN_IDLE=1`) looked only at the weekly window, so on Plus / Business
+  standard seats every run was skipped once the week had started. It now gates on the shortest
+  window the snapshot reports (5-hour when present, otherwise weekly); a skip records which one
+  as `gate_window`. A five-hourly schedule fires seconds before the previous window ends, so a
+  run within `CODEX_RESET_WAIT_MAX_SECONDS` (default 300) of that reset now waits for it and then
+  sends (`window_resets_soon`) instead of skipping every other slot. Weekly-only plans behave as
+  before apart from that same wait on the reset-day slot.
+- The installed-root check compares files, not path spelling, so `~/Project/stoker` vs
+  `~/project/stoker` (or a symlink) no longer reads as "another root".
+- Docs no longer claim that Codex has only a weekly window since September 2026 — that was one
+  account's plan change, not a policy change. README gains a plans-and-windows table.
+
 ### Changed
 - **Concurrent runs wait instead of being dropped.** A run that finds the activation lock held
   now polls for up to `LOCK_WAIT_SECONDS` (default `TIMEOUT_SECONDS × (1 +
-  CODEX_MODEL_FALLBACK_MAX_TRIES) + CODEX_UPDATE_TIMEOUT_SECONDS + 120`, 780 s) before skipping, so
+  CODEX_MODEL_FALLBACK_MAX_TRIES) + CODEX_UPDATE_TIMEOUT_SECONDS +
+  CODEX_RESET_WAIT_MAX_SECONDS + 5 + 120`, 1085 s) before skipping, so
   two agents firing in the same second both run. `LOCK_WAIT_SECONDS=0` restores the immediate
   skip. The lock records its owner's PID and a crashed run's lock is reclaimed (once, under a
   reclaim mutex; a PID-less lock only after the longest possible run); keep-awake covers

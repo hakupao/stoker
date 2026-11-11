@@ -25,6 +25,10 @@ ENABLE_QUOTA_PREFLIGHT="${ENABLE_QUOTA_PREFLIGHT:-1}"
 QUOTA_PREFLIGHT_ON_UNKNOWN="${QUOTA_PREFLIGHT_ON_UNKNOWN:-allow}"
 QUOTA_EXHAUSTED_THRESHOLD_PERCENT="${QUOTA_EXHAUSTED_THRESHOLD_PERCENT:-0}"
 CODEX_ACTIVATE_ONLY_WHEN_IDLE="${CODEX_ACTIVATE_ONLY_WHEN_IDLE:-1}"
+# Same default as bin/activate-ai-window.sh; a non-integer reads as the default.
+CODEX_RESET_WAIT_MAX_SECONDS="${CODEX_RESET_WAIT_MAX_SECONDS:-300}"
+[[ "$CODEX_RESET_WAIT_MAX_SECONDS" =~ ^[0-9]+$ ]] || CODEX_RESET_WAIT_MAX_SECONDS=300
+CODEX_RESET_WAIT_MAX_SECONDS=$((10#$CODEX_RESET_WAIT_MAX_SECONDS))
 KEEP_AWAKE_MODE="${KEEP_AWAKE_MODE:-off}"
 KEEP_AWAKE_SECONDS="${KEEP_AWAKE_SECONDS:-900}"
 JQ_BIN="${JQ_BIN:-$(command -v jq 2>/dev/null || true)}"
@@ -48,16 +52,21 @@ same_path() { [[ -n "$1" && ( "$1" == "$2" || "$1" -ef "$2" ) ]]; }
 
 usage() {
   cat <<'USAGE'
-Usage: activation-state.sh --json
+Usage: activation-state.sh --json|--recommend
 
-Prints a JSON snapshot for the menu bar app and other integrations.
+--json       Prints a JSON snapshot for the menu bar app and other integrations.
+--recommend  Prints, per tool, the detected limit windows and a recommended
+             schedule with matching .env lines. Changes nothing.
 USAGE
 }
 
-if [[ "${1:-}" != "--json" ]]; then
-  usage >&2
-  exit 2
-fi
+case "${1:-}" in
+  --json|--recommend) OUTPUT_MODE="${1#--}" ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
 
 if [[ -z "$JQ_BIN" || ! -x "$JQ_BIN" ]]; then
   echo "jq is required to render activation state JSON" >&2
@@ -452,8 +461,89 @@ enable_status_snapshots="$(bool_from_1 "$ENABLE_STATUS_SNAPSHOTS")"
 enable_quota_preflight="$(bool_from_1 "$ENABLE_QUOTA_PREFLIGHT")"
 codex_activate_only_when_idle="$(bool_from_1 "$CODEX_ACTIVATE_ONLY_WHEN_IDLE")"
 
+# Per-tool limit profile and recommended schedule, judged from the windows the
+# latest snapshot actually reports (never from the plan name, which is display
+# only). A Claude window exists when it carries any data or has rolled over
+# (reset_passed); a Codex window exists when its key is a non-null object.
+# Claude's weekly limit resets at fixed times, Codex's on first use.
+# `gate` is the engine's Codex idle-gate verdict re-evaluated now, so a snapshot
+# whose reset has since passed reads inactive; Claude has no gate (null).
+utc_offset="$(date +%z)"
+utc_offset_seconds=$(( ${utc_offset:0:1}1 * (10#${utc_offset:1:2} * 3600 + 10#${utc_offset:3:2} * 60) ))
 # shellcheck disable=SC2016 # jq variables are intentionally evaluated by jq.
-"$JQ_BIN" -n -c \
+limits="$("$JQ_BIN" -n -c --argjson quota "$quota" --argjson utc_offset "$utc_offset_seconds" '
+  def default_times: ["07:00","12:00","17:00","22:00"];
+  def claude_has($w):
+    ($w | type) == "object"
+    and ($w.used_percent != null or $w.resets_at != null or $w.reset_passed == true);
+  def codex_has($w): ($w | type) == "object";
+  def num($x): if ($x | type) == "number" then $x
+               elif ($x | type) == "string" then ($x | tonumber? // null) else null end;
+  # Same rule as gate_window/anchored_reset_in in bin/activate-ai-window.sh
+  # (keep in sync): the gate is the shortest window present; it is active when
+  # its reset is in the future and more than 15 minutes short of a full window
+  # measured from the capture time. One extra fallback exists only here, since
+  # this reads rows long after they were written (the runner reads rows it just
+  # wrote, so now is close enough there): a row without captured_at_epoch is
+  # measured from its local "YYYY-MM-DD HH:MM:SS TZ" timestamp, parsed with the
+  # current UTC offset (so up to 1 h off for a legacy row across a DST change),
+  # then from now.
+  def gate_state($s):
+    (if ($s.five_hour | type) == "object" then "five_hour"
+     elif ($s.weekly | type) == "object" then "weekly" else null end) as $g
+    | if $g == null then {window: null, active: false}
+      else
+        $s[$g] as $w
+        | num($w.resets_at_epoch) as $e
+        | (num($w.window_minutes) // (if $g == "five_hour" then 300 else 10080 end)) as $mins
+        | (num($s.captured_at_epoch)
+           // (try (($s.timestamp | tostring | .[0:19] | strptime("%Y-%m-%d %H:%M:%S") | mktime) - $utc_offset)
+               catch null)
+           // now) as $captured
+        | {window: $g, active: ($e != null and $e > now and ($e - $captured) < ($mins * 60 - 900))}
+      end;
+  def profile($tool; $s):
+    if ($s | type) != "object" or $s.ok != true then
+      {profile: "unknown", session: false}
+    else
+      (if $tool == "claude" then claude_has($s.five_hour) else codex_has($s.five_hour) end) as $session
+      | (if $tool == "claude" then claude_has($s.weekly) else codex_has($s.weekly) end) as $weekly
+      | {profile: (if $session and $weekly then "session_weekly"
+                   elif $session then "session_only"
+                   elif $weekly then "weekly_only"
+                   else "none" end),
+         session: $session}
+    end;
+  def recommended($tool; $p):
+    if $p == "session_weekly" or $p == "session_only" then
+      {times: default_times, days: [], reason: "session_window"}
+    elif $p == "weekly_only" and $tool == "codex" then
+      {times: ["07:00"], days: [], reason: "weekly_anchor"}
+    elif $p == "weekly_only" then
+      {times: [], days: [], reason: "not_needed"}
+    else
+      {times: default_times, days: [], reason: "unknown"}
+    end;
+  def limits_for($tool):
+    ($quota[$tool] // null) as $s
+    | profile($tool; $s) as $p
+    | (if ($s | type) == "object" then ($s.subscription_type // $s.plan_type // null) else null end) as $plan
+    | {
+        profile: $p.profile,
+        session_minutes: (if $p.session then
+                            (if $tool == "codex" then ($s.five_hour.window_minutes // 300) else 300 end)
+                          else null end),
+        weekly_reset: (if $tool == "claude" then "fixed" else "on_first_use" end),
+        gate: (if $tool == "claude" or $p.profile == "unknown" then null else gate_state($s) end),
+        plan: (if $plan == null or ($plan | tostring) == "" or ($plan | tostring) == "unknown"
+               then null else ($plan | tostring) end),
+        recommended: recommended($tool; $p.profile)
+      };
+  {claude: limits_for("claude"), codex: limits_for("codex")}
+')"
+
+# shellcheck disable=SC2016 # jq variables are intentionally evaluated by jq.
+state="$("$JQ_BIN" -n -c \
   --arg root "$ROOT_DIR" \
   --arg label "$LABEL" \
   --arg activation_tool "$ACTIVATION_TOOL" \
@@ -461,6 +551,7 @@ codex_activate_only_when_idle="$(bool_from_1 "$CODEX_ACTIVATE_ONLY_WHEN_IDLE")"
   --arg quota_preflight_on_unknown "$QUOTA_PREFLIGHT_ON_UNKNOWN" \
   --argjson quota_exhausted_threshold_percent "$QUOTA_EXHAUSTED_THRESHOLD_PERCENT" \
   --argjson codex_activate_only_when_idle "$codex_activate_only_when_idle" \
+  --argjson codex_reset_wait_max_seconds "$CODEX_RESET_WAIT_MAX_SECONDS" \
   --arg keep_awake_mode "$KEEP_AWAKE_MODE" \
   --argjson keep_awake_seconds "$KEEP_AWAKE_SECONDS" \
   --arg launchctl_state "$launchctl_state" \
@@ -476,6 +567,7 @@ codex_activate_only_when_idle="$(bool_from_1 "$CODEX_ACTIVATE_ONLY_WHEN_IDLE")"
   --argjson legacy "$legacy" \
   --argjson needs_migration "$needs_migration" \
   --argjson quota "$quota" \
+  --argjson limits "$limits" \
   --argjson last_usage "$last_usage" \
   --argjson enable_status_snapshots "$enable_status_snapshots" \
   --argjson enable_quota_preflight "$enable_quota_preflight" '
@@ -503,13 +595,78 @@ codex_activate_only_when_idle="$(bool_from_1 "$CODEX_ACTIVATE_ONLY_WHEN_IDLE")"
         enable_quota_preflight: $enable_quota_preflight,
         quota_preflight_on_unknown: $quota_preflight_on_unknown,
         quota_exhausted_threshold_percent: $quota_exhausted_threshold_percent,
-        codex_activate_only_when_idle: $codex_activate_only_when_idle
+        codex_activate_only_when_idle: $codex_activate_only_when_idle,
+        codex_reset_wait_max_seconds: $codex_reset_wait_max_seconds
       },
       keep_awake: {
         mode: $keep_awake_mode,
         seconds: $keep_awake_seconds
       },
       quota: $quota,
+      limits: $limits,
       last_usage: $last_usage
     }
-  '
+  ')"
+
+if [[ "$OUTPUT_MODE" == "json" ]]; then
+  printf '%s\n' "$state"
+  exit 0
+fi
+
+# --recommend: human-readable view of the same state. Never edits .env.
+# shellcheck disable=SC2016 # jq variables are intentionally evaluated by jq.
+"$JQ_BIN" -r '
+  def times_text($t): if ($t | length) == 0 then "none" else ($t | join(", ")) end;
+  def days_text($d): if ($d | length) == 0 then "every day" else ($d | join(", ")) end;
+  def window_text($tool; $l):
+    if $l.profile == "unknown" then "unknown (no usable quota snapshot yet; run ./install.sh quota)"
+    elif $l.profile == "none" then "none reported"
+    else
+      [ (if $l.session_minutes != null then "\($l.session_minutes / 60 | tostring)-hour session" else empty end),
+        (if $l.profile == "session_weekly" or $l.profile == "weekly_only" then
+           "weekly (resets " + (if $l.weekly_reset == "fixed" then "at a fixed time" else "one week after first use" end) + ")"
+         else empty end)
+      ] | join(" + ")
+    end;
+  def reason_text($tool; $r):
+    if $r == "session_window" then
+      "A session window starts on first use, so check-ins spread across the day keep it lit."
+    elif $r == "weekly_anchor" then
+      "Only a weekly window, which starts on first use: one daily check-in is enough to anchor it."
+    elif $r == "not_needed" then
+      "No 5-hour window was reported, and the weekly limit resets at a fixed time, so check-ins anchor nothing. If your plan does have a 5-hour window (check Settings > Usage), keep the schedule; otherwise you may disable this tool. Nothing was changed."
+    else
+      "Windows could not be detected, so the default schedule stays recommended."
+    end;
+  . as $st
+  | ($st.config.activation_tool) as $at
+  | ["claude", "codex"][] as $tool
+  | $st.limits[$tool] as $l
+  | $st.schedule[$tool] as $cur
+  | ($tool | ascii_upcase) as $up
+  | ($at != "claude" and $at != "codex" or $at == $tool) as $enabled
+  | (($tool | .[0:1] | ascii_upcase) + ($tool | .[1:])) as $name
+  | [
+      "\($name)" + (if $enabled then "" else " (disabled by ACTIVATION_TOOL=\($at))" end),
+      "  Windows:     " + window_text($tool; $l),
+      "  Plan:        " + ($l.plan // "unknown"),
+      "  Current:     " + times_text($cur.times) + " (" + days_text($cur.days) + ")",
+      (if $l.recommended.reason == "not_needed" then
+         "  Recommended: no scheduled check-ins",
+         (if $at == $tool then
+            "  .env:        \($name) is the only enabled tool; ./install.sh uninstall stops its check-ins"
+          elif $enabled then
+            "  .env:        to stop \($name) check-ins set ACTIVATION_TOOL=" + (if $tool == "claude" then "codex" else "claude" end)
+          else
+            "  .env:        already disabled; no change needed"
+          end)
+       else
+         "  Recommended: " + times_text($l.recommended.times) + " (" + days_text($l.recommended.days) + ")"
+         + (if $cur.times == $l.recommended.times and $cur.days == $l.recommended.days then " (matches current)" else "" end),
+         "  .env:        \($up)_SCHEDULE_TIMES=" + ($l.recommended.times | join(",")),
+         "               \($up)_SCHEDULE_DAYS=" + (if ($l.recommended.days | length) == 0 then "daily" else ($l.recommended.days | join(",")) end)
+       end),
+      "  Reason:      " + reason_text($tool; $l.recommended.reason),
+      ""
+    ][]
+' <<<"$state"

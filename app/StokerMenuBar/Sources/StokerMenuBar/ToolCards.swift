@@ -59,46 +59,31 @@ private func toolName(_ tool: String) -> String {
 
 // MARK: - Claude Card
 
-/// Claude: the 5-hour window is the headline; weekly and any per-scope weekly buckets follow.
+/// Claude: the 5-hour window is the headline when the plan has one (weekly follows as a sub-row),
+/// otherwise weekly is the headline; any per-scope weekly buckets follow.
 struct ClaudeCard: View {
     let quota: ActivationState.ToolQuota?
     let health: ToolHealth
+    let hasSession: Bool
     @Environment(\.stokerTheme) private var theme
 
     var body: some View {
         let now = Date()
-        let fiveHour = quota?.fiveHour
-        let weekly = quota?.weekly
-        let fiveReset = ResetTime.parse(fiveHour?.resetsAt)
-        let weeklyReset = ResetTime.parse(weekly?.resetsAt)
 
         ToolCardFrame(name: "Claude", color: theme.seriesClaude, quota: quota, health: health) {
-            PrimaryQuota(
-                label: L10n.fiveHour,
-                window: fiveHour,
-                asOf: asOf(quota),
-                resetText: fiveReset.flatMap { d in
-                    L10n.resetsInShort(d, now: now).map { "\(L10n.resetAtClock(d)) · \($0)" }
-                },
-                color: theme.seriesClaude,
-                weekly: false,
-                now: now
-            )
+            if hasSession {
+                SessionPrimary(quota: quota, color: theme.seriesClaude, now: now)
+            } else {
+                WeeklyPrimary(quota: quota, color: theme.seriesClaude, now: now)
+            }
             if quota == nil {
                 Text(L10n.quotaSetupHint)
                     .font(.system(size: 9))
                     .foregroundStyle(theme.textMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if quota != nil {
-                SecondaryQuotaRow(
-                    label: L10n.weekly,
-                    remaining: weekly?.remainingPercent,
-                    used: weekly?.usedPercent,
-                    resetText: weeklyReset.flatMap { L10n.resetsIn($0, now: now) },
-                    color: theme.seriesClaude,
-                    resetPassed: weekly?.hasResetPassed(now: now) == true
-                )
+            if quota != nil, hasSession {
+                WeeklySecondary(quota: quota, color: theme.seriesClaude, now: now)
             }
             // Index ids: bucket ids aren't guaranteed unique.
             ForEach(Array((quota?.scopedWeekly ?? []).enumerated()), id: \.offset) { _, bucket in
@@ -110,33 +95,26 @@ struct ClaudeCard: View {
 
 // MARK: - Codex Card
 
-/// Codex has only a 7-day window, so "this week" is the headline; plus free reset credits.
+/// Codex: the 5-hour window is the headline when the plan has one (weekly follows as a sub-row),
+/// otherwise "this week" is the headline; plus free reset credits.
 struct CodexCard: View {
     let quota: ActivationState.ToolQuota?
     let health: ToolHealth
+    let hasSession: Bool
     @Environment(\.stokerTheme) private var theme
 
     var body: some View {
         let now = Date()
-        let weekly = quota?.weekly
-        let reset = ResetTime.parse(weekly?.resetsAt)
 
         ToolCardFrame(name: "Codex", color: theme.seriesCodex, quota: quota, health: health) {
-            PrimaryQuota(
-                label: L10n.thisWeek,
-                window: weekly,
-                asOf: asOf(quota),
-                resetText: reset.flatMap { d in
-                    guard d > now else { return nil }
-                    let cal = Calendar.current
-                    let days = cal.dateComponents([.day], from: cal.startOfDay(for: now),
-                                                  to: cal.startOfDay(for: d)).day ?? 0
-                    return "\(L10n.resetsLabel) \(L10n.weekdayStamp(d)) · \(L10n.resetsInDays(days))"
-                },
-                color: theme.seriesCodex,
-                weekly: true,
-                now: now
-            )
+            if hasSession {
+                SessionPrimary(quota: quota, color: theme.seriesCodex, now: now)
+                if quota != nil {
+                    WeeklySecondary(quota: quota, color: theme.seriesCodex, now: now)
+                }
+            } else {
+                WeeklyPrimary(quota: quota, color: theme.seriesCodex, now: now)
+            }
             if let rc = quota?.resetCredits, rc.availableCount > 0 {
                 HStack(spacing: 4) {
                     Image(systemName: "ticket")
@@ -149,6 +127,73 @@ struct CodexCard: View {
                 .foregroundStyle(theme.textSecondary)
             }
         }
+    }
+}
+
+/// 5-hour headline: reset as a clock plus a short countdown.
+private struct SessionPrimary: View {
+    let quota: ActivationState.ToolQuota?
+    let color: Color
+    let now: Date
+
+    var body: some View {
+        let window = quota?.fiveHour
+        PrimaryQuota(
+            label: L10n.fiveHour,
+            window: window,
+            asOf: asOf(quota),
+            resetText: ResetTime.parse(window?.resetsAt).flatMap { d in
+                L10n.resetsInShort(d, now: now).map { "\(L10n.resetAtClock(d)) · \($0)" }
+            },
+            color: color,
+            weekly: false,
+            now: now
+        )
+    }
+}
+
+/// Weekly headline: reset as a weekday stamp plus whole days to go.
+private struct WeeklyPrimary: View {
+    let quota: ActivationState.ToolQuota?
+    let color: Color
+    let now: Date
+
+    var body: some View {
+        let window = quota?.weekly
+        PrimaryQuota(
+            label: L10n.thisWeek,
+            window: window,
+            asOf: asOf(quota),
+            resetText: ResetTime.parse(window?.resetsAt).flatMap { d in
+                guard d > now else { return nil }
+                let cal = Calendar.current
+                let days = cal.dateComponents([.day], from: cal.startOfDay(for: now),
+                                              to: cal.startOfDay(for: d)).day ?? 0
+                return "\(L10n.resetsLabel) \(L10n.weekdayStamp(d)) · \(L10n.resetsInDays(days))"
+            },
+            color: color,
+            weekly: true,
+            now: now
+        )
+    }
+}
+
+/// Weekly sub-row under a 5-hour headline.
+private struct WeeklySecondary: View {
+    let quota: ActivationState.ToolQuota?
+    let color: Color
+    let now: Date
+
+    var body: some View {
+        let weekly = quota?.weekly
+        SecondaryQuotaRow(
+            label: L10n.weekly,
+            remaining: weekly?.remainingPercent,
+            used: weekly?.usedPercent,
+            resetText: ResetTime.parse(weekly?.resetsAt).flatMap { L10n.resetsIn($0, now: now) },
+            color: color,
+            resetPassed: weekly?.hasResetPassed(now: now) == true
+        )
     }
 }
 
@@ -283,8 +328,8 @@ private struct PrimaryQuota: View {
     }
 }
 
-/// Compact sub-row: label, remaining %, a thin bar, and the reset countdown. Used for
-/// Claude's weekly window and per-scope weekly buckets.
+/// Compact sub-row: label, remaining %, a thin bar, and the reset countdown. Used for the
+/// weekly window under a 5-hour headline and for per-scope weekly buckets.
 private struct SecondaryQuotaRow: View {
     let label: String
     let remaining: Double?
@@ -397,9 +442,9 @@ struct HealthLine: View {
         case .warning: L10n.healthWarning
         case .alert: health.consecutiveFailures >= 2 ? L10n.healthAlert(health.consecutiveFailures) : L10n.healthAlertGeneric
         case .unknown: L10n.healthUnknown
-        case .anchored: L10n.healthAnchored
+        case .anchored: health.stateWindowIsSession ? L10n.healthAnchoredSession : L10n.healthAnchored
         case .pending: L10n.healthPending
-        case .exhausted: L10n.healthExhausted
+        case .exhausted: health.stateWindowIsSession ? L10n.healthExhaustedSession : L10n.healthExhausted
         case .disabled: L10n.healthDisabled
         }
     }

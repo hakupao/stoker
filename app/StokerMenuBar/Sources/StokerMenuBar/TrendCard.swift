@@ -4,28 +4,37 @@ import SwiftUI
 
 // MARK: - Trend Card
 
-/// Quota history, one series at a time (Claude 5h | Claude weekly | Codex weekly) so the two
-/// tools' different windows never share an axis. Drawn in the series tool's identity colour.
+/// Quota history, one series at a time (Claude 5h | Claude weekly | Codex 5h | Codex weekly) so
+/// different windows never share an axis. Only the windows the accounts have are offered.
+/// Drawn in the series tool's identity colour.
 struct TrendCard: View {
     @ObservedObject var logStore: LogStore
-    @State private var series: TrendSeries = .claudeFiveHour
+    /// Series the accounts actually have (see `TrendSeries.available`).
+    let available: [TrendSeries]
+    @State private var selected: TrendSeries = .claudeFiveHour
     @Environment(\.stokerTheme) private var theme
 
+    /// The selection when the account still has it, else the first series it does have.
+    private var series: TrendSeries {
+        available.contains(selected) ? selected : (available.first ?? .claudeWeekly)
+    }
+
     var body: some View {
+        let series = series
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Text(L10n.quotaTrend)
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(theme.textSecondary)
                 Spacer()
-                Picker("", selection: $series) {
-                    ForEach(TrendSeries.allCases, id: \.self) { s in
+                Picker("", selection: Binding(get: { self.series }, set: { selected = $0 })) {
+                    ForEach(available, id: \.self) { s in
                         Text(Self.label(s)).tag(s)
                     }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 280)
+                .frame(width: available.count > 3 ? 360 : 280)
             }
 
             TrendChart(
@@ -51,6 +60,7 @@ struct TrendCard: View {
         switch series {
         case .claudeFiveHour: L10n.trendClaude5h
         case .claudeWeekly: L10n.trendClaudeWeekly
+        case .codexFiveHour: L10n.trendCodex5h
         case .codexWeekly: L10n.trendCodexWeekly
         }
     }

@@ -7,8 +7,9 @@ apply the same change to the other.
 ## What this is
 
 **Stoker** is a macOS `launchd` scheduler that sends tiny low-cost check-in prompts to the
-Claude Code and Codex CLIs at fixed times to keep usage windows "lit" (Claude: 5-hour + weekly;
-Codex: only a 7-day window since Sept 2026, anchored once per week), then records activation
+Claude Code and Codex CLIs at fixed times to keep usage windows "lit" (which windows exist — 5-hour,
+weekly, or both — depends on the account's plan and is detected from quota snapshots, never from a
+plan-name table), then records activation
 logs, per-run token usage, and quota snapshots. There are two entry points over **one shared
 Bash engine**: the CLI/`launchd` path (`install.sh`) and an optional SwiftUI menu bar app that
 shells out to the same scripts. The app contains no scheduler or activation logic of its own.
@@ -22,7 +23,7 @@ shells out to the same scripts. The app contains no scheduler or activation logi
 # Validate / test — THE canonical gate. CONTRIBUTING.md mandates it pre-PR; CI runs it verbatim.
 ./scripts/validate.sh
 
-# Run a single test (all 17 are standalone executables; self-locate ROOT_DIR, run from anywhere; examples:)
+# Run a single test (all 18 are standalone executables; self-locate ROOT_DIR, run from anywhere; examples:)
 tests/swift-core.test.sh          # swiftc-compiles StokerCore (+L10n/LogStore) + a driver, asserts via precondition()
 tests/activation-state.test.sh    # bin/activation-state.sh --json output (needs jq)
 tests/keep-awake-config.test.sh   # rejects invalid KEEP_AWAKE_MODE / KEEP_AWAKE_SECONDS
@@ -38,6 +39,7 @@ swift build --package-path app/StokerMenuBar     # compile-check the SwiftUI app
 ./install.sh dry-run      # print the exact claude/codex command arrays, send nothing
 ./install.sh quota        # snapshot quota into logs/status.jsonl, send nothing
 ./install.sh app-status   # the JSON state the menu bar app consumes (bin/activation-state.sh --json)
+./install.sh recommend    # detected usage windows per tool + the schedule recommended for them
 ./install.sh print-plist  # regenerate + cat the per-tool launchd plists without installing (print-plist claude|codex: one)
 
 # Shell engine (consumes real quota — sends model prompts)
@@ -48,7 +50,7 @@ bin/activate-ai-window.sh --once --tool claude   # single real run, one tool (--
 
 There is **no Makefile / npm / `swift test`**. `scripts/validate.sh` *is* the test runner: it
 runs `bash -n` + `shellcheck` on 7 scripts, `plutil -lint`s both per-tool plists, runs `dry-run` + `app-status`
-smoke checks, runs the 17 `tests/*.test.sh` in order, then `swift build`s the app. `shellcheck`,
+smoke checks, runs the 18 `tests/*.test.sh` in order, then `swift build`s the app. `shellcheck`,
 `plutil`, and `swift` are skipped if absent; `jq`, `swiftc`, and `file` are **not** guarded and will
 hard-fail their test if missing.
 
@@ -65,9 +67,14 @@ is split across:
   (`<TOOL>_SCHEDULE_TIMES` → `SCHEDULE_TIMES` → default) and days (`<TOOL>_SCHEDULE_DAYS`; daily
   omits the plist `Weekday` key). Its schedule parsing is duplicated in `activation-state.sh` —
   keep the two `load_tool_schedule` copies in sync. Legacy agents (`${LABEL}` + `LEGACY_LABELS`)
-  are removed at install only when their plist points at this root (`STOKER_FORCE_MIGRATE=1`
+  are removed at install only when their plist points at this root, and `uninstall` likewise skips
+  per-tool agents owned by another root (`STOKER_FORCE_MIGRATE=1`
   overrides); `LAUNCHCTL_BIN` lets tests substitute a fake launchctl.
-- `bin/activation-state.sh` — owns the JSON state contract consumed by the app. Claude quota
+- `bin/activation-state.sh` — owns the JSON state contract consumed by the app. Its top-level
+  `limits` holds, per tool, the detected window profile (`session_weekly` / `weekly_only` /
+  `session_only` / `none` / `unknown`) and the recommended schedule; `--recommend` (`install.sh
+  recommend`) prints the same as text. It only recommends — nothing is skipped or rewritten because
+  a window is absent. Claude quota
   prefers the live omc usage cache when it is newer than the last snapshot row, restamps
   `timestamp` with the data-capture time (not the snapshot-write time), and blanks any window
   whose `resets_at` already passed (`reset_passed: true`) so stale numbers are never shown as
@@ -103,10 +110,16 @@ SIGTERM to the group → 2s → SIGKILL, exit 124 on timeout, default `TIMEOUT_S
 `QUOTA_PREFLIGHT_ON_UNKNOWN` (default `allow`; only the literal `skip` skips). An exhausted
 window whose `resets_at` is already in the past does **not** count as exhausted (snapshots can be
 last-known data). Claude `scoped_weekly` buckets count toward exhaustion only when
-`is_active == true`. Codex (weekly-only by design; its `five_hour` is always null) is also skipped with
-reason `window_already_active` while the 7-day window is anchored (reset in the future and >15 min
+`is_active == true`. Codex is also skipped with reason `window_already_active` while its gate window —
+the shortest window the snapshot reports: `five_hour` when non-null (Plus / Business standard), else
+`weekly` (Pro / Business premium) — is anchored (reset in the future and >15 min
 short of a full window, measured from the row's `captured_at_epoch`) unless
-`CODEX_ACTIVATE_ONLY_WHEN_IDLE=0`. Note the quota *sources* (`CLAUDE_STATUS_SOURCE`): `cache` (default) reads the
+`CODEX_ACTIVATE_ONLY_WHEN_IDLE=0`; when that reset is at most `CODEX_RESET_WAIT_MAX_SECONDS` (default
+300) away the run waits for it and then sends (`window_resets_soon`) instead of skipping, because a
+five-hourly schedule fires seconds before the previous window ends. `limits.codex.gate` in the state
+JSON tells the app which window gates Codex and whether it is anchored (`active`; the rule is
+duplicated in both scripts — keep in sync), and `config.codex_reset_wait_max_seconds` lets it predict
+the resets-soon send. Note the quota *sources* (`CLAUDE_STATUS_SOURCE`): `cache` (default) reads the
 **oh-my-claudecode plugin's local usage cache** directly — zero credential access; `native` reads
 the Keychain OAuth token **read-only** and queries the usage API, skipping whenever the token is
 expired (it never refreshes — that refresh-and-drop is what logs interactive sessions out);
@@ -139,7 +152,7 @@ bundled engine (shipped in `Contents/Resources/stoker`) into
 ## Conventions & gotchas
 
 - **`run-now` and `install` consume real quota** (they send model prompts). `dry-run`, `quota`,
-  `check`, `app-status`, and `print-plist` are safe and send nothing.
+  `check`, `app-status`, `recommend`, and `print-plist` are safe and send nothing.
 - **Adding a test** = create `tests/<name>.test.sh` (executable, `set -euo pipefail`, hermetic via
   `mktemp -d`) **and** add an explicit line to `scripts/validate.sh`. There is no glob
   auto-discovery — an unlisted test silently never runs.
@@ -158,7 +171,8 @@ bundled engine (shipped in `Contents/Resources/stoker`) into
   2. `app/StokerMenuBar/build-app.sh` (~:123) — `CFBundleShortVersionString` in the inline Info.plist
      (the `CFBundleVersion` build number just below, ~:125, is a *separate* integer — bump it too).
   3. `app/StokerMenuBar/Sources/StokerMenuBar/MainView.swift` (~:302) — the `?? "…"` UI version fallback.
-  4. `bin/activate-ai-window.sh` (~:484) — the MCP `clientInfo` `version:` sent to the model.
+  4. `bin/activate-ai-window.sh` — **two** occurrences: the MCP `clientInfo` `version:` sent to the
+     model (~:624), and the `CLAUDE_USAGE_USER_AGENT` default `claude-code/<ver>` (~:59). Bump both.
   5. `README.md:17` — the `version-…` shields.io badge.
   6. `README_CN.md:17` — the same version badge.
   7. `CHANGELOG.md` — add the new release header.

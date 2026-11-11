@@ -30,6 +30,7 @@ fi
 ./install.sh dry-run >/tmp/stoker-dry-run.log
 ./install.sh app-status >/tmp/stoker-app-status.json
 tests/activation-state.test.sh
+tests/limits-profile.test.sh
 tests/keep-awake-config.test.sh
 tests/caffeinate-reexec.test.sh
 tests/claude-oauth-token.test.sh

@@ -209,20 +209,23 @@ private struct UnifiedHeader: View {
                 Text(L10n.quotaRemaining)
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(theme.textMuted)
-                // Claude shows its 5-hour window; Codex is weekly-only (7-day window).
+                // Each tool shows its 5-hour window when the account has one, else its weekly one.
                 let health = model.healthSnapshot
+                let claudeSession = ActivationState.hasSessionWindow("claude", in: model.state)
+                let codexSession = ActivationState.hasSessionWindow("codex", in: model.state)
                 QuotaMiniBar(
-                    label: "Claude \(L10n.fiveHourShort)",
-                    window: model.state?.quota["claude"]?.window(tool: "claude", preferFiveHour: true),
+                    label: "Claude \(claudeSession ? L10n.fiveHourShort : L10n.weeklyShort)",
+                    window: ActivationState.headlineWindow("claude", in: model.state),
                     color: theme.seriesClaude,
-                    health: health.claude.state
+                    health: health.claude.state,
+                    isWeekly: !claudeSession
                 )
                 QuotaMiniBar(
-                    label: "Codex \(L10n.weeklyShort)",
-                    window: model.state?.quota["codex"]?.window(tool: "codex", preferFiveHour: true),
+                    label: "Codex \(codexSession ? L10n.fiveHourShort : L10n.weeklyShort)",
+                    window: ActivationState.headlineWindow("codex", in: model.state),
                     color: theme.seriesCodex,
                     health: health.codex.state,
-                    isWeeklyOnly: true
+                    isWeekly: !codexSession
                 )
                 Spacer()
                 TabPicker(selected: $selectedTab)
@@ -343,8 +346,8 @@ private struct QuotaMiniBar: View {
     var color: Color
     /// Activation health (same snapshot as the Activity cards) for the leading dot.
     var health: ToolHealthState
-    /// Weekly-only tool (Codex): the label carries the window tag; this picks the tooltip wording.
-    var isWeeklyOnly: Bool = false
+    /// The bar shows a weekly window (no session window on this plan): picks the tooltip wording.
+    var isWeekly: Bool = false
     @Environment(\.stokerTheme) private var theme
 
     private var percent: Double? { window?.remainingPercent }
@@ -380,7 +383,7 @@ private struct QuotaMiniBar: View {
         }
         // Spell out remaining vs used so the bar's meaning is unambiguous on hover.
         .help(L10n.quotaMiniHelp(remaining: window?.remainingPercent, used: window?.usedPercent,
-                                 weekly: isWeeklyOnly))
+                                 weekly: isWeekly))
     }
 }
 
